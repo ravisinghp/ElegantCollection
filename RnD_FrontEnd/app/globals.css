@@ -1,0 +1,355 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  /* Enhanced vibrant backgrounds */
+  --background: oklch(0.99 0.01 120);
+  --foreground: oklch(0.1 0.02 280);
+  --card: oklch(0.98 0.02 120);
+  --card-foreground: oklch(0.12 0.02 280);
+  --popover: oklch(0.98 0.02 120);
+  --popover-foreground: oklch(0.12 0.02 280);
+
+  /* More vibrant primary - electric orange */
+  --primary: oklch(0.68 0.25 50);
+  --primary-foreground: oklch(1 0 0);
+
+  /* Vibrant secondary - bright purple */
+  --secondary: oklch(0.85 0.08 300);
+  --secondary-foreground: oklch(0.2 0.05 280);
+
+  --muted: oklch(0.94 0.03 120);
+  --muted-foreground: oklch(0.45 0.05 280);
+
+  /* Electric green accent */
+  --accent: oklch(0.75 0.22 145);
+  --accent-foreground: oklch(0.05 0.02 280);
+
+  /* Vibrant red for destructive */
+  --destructive: oklch(0.6 0.28 25);
+  --destructive-foreground: oklch(1 0 0);
+
+  --border: oklch(0.88 0.05 120);
+  --input: oklch(0.95 0.03 120);
+  --ring: oklch(0.68 0.25 50);
+
+  /* Enhanced chart colors - more vibrant spectrum */
+  --chart-1: oklch(0.68 0.25 50);
+  /* Electric orange */
+  --chart-2: oklch(0.75 0.22 145);
+  /* Electric green */
+  --chart-3: oklch(0.82 0.18 85);
+  /* Bright yellow */
+  --chart-4: oklch(0.65 0.25 320);
+  /* Vibrant magenta */
+  --chart-5: oklch(0.7 0.2 200);
+  /* Bright cyan */
+
+  --radius: 0.75rem;
+  --sidebar: oklch(0.97 0.02 120);
+  --sidebar-foreground: oklch(0.15 0.02 280);
+  --sidebar-primary: oklch(0.68 0.25 50);
+  --sidebar-primary-foreground: oklch(1 0 0);
+  --sidebar-accent: oklch(0.92 0.05 120);
+  --sidebar-accent-foreground: oklch(0.25 0.05 280);
+  --sidebar-border: oklch(0.88 0.05 120);
+  --sidebar-ring: oklch(0.68 0.25 50);
+}
+
+.dark {
+  /* Rich dark backgrounds with subtle color tints */
+  --background: oklch(0.08 0.02 280);
+  --foreground: oklch(0.98 0.01 120);
+  --card: oklch(0.12 0.03 280);
+  --card-foreground: oklch(0.96 0.01 120);
+  --popover: oklch(0.12 0.03 280);
+  --popover-foreground: oklch(0.96 0.01 120);
+
+  /* Brighter primary for dark mode - neon orange */
+  --primary: oklch(0.75 0.28 50);
+  --primary-foreground: oklch(0.05 0.02 280);
+
+  /* Vibrant secondary - bright purple */
+  --secondary: oklch(0.22 0.08 300);
+  --secondary-foreground: oklch(0.95 0.01 120);
+
+  --muted: oklch(0.18 0.03 280);
+  --muted-foreground: oklch(0.65 0.05 120);
+
+  /* Neon green accent for dark mode */
+  --accent: oklch(0.8 0.25 145);
+  --accent-foreground: oklch(0.05 0.02 280);
+
+  /* Bright red for dark mode */
+  --destructive: oklch(0.65 0.3 25);
+  --destructive-foreground: oklch(0.98 0.01 120);
+
+  --input: oklch(0.26 0 0);   /* slightly lighter than card */
+  --border: oklch(0.40 0 0); 
+  --ring: oklch(0.75 0.28 50);
+
+  /* Enhanced dark mode chart colors - neon spectrum */
+  --chart-1: oklch(0.75 0.28 50);
+  /* Neon orange */
+  --chart-2: oklch(0.8 0.25 145);
+  /* Neon green */
+  --chart-3: oklch(0.88 0.22 85);
+  /* Neon yellow */
+  --chart-4: oklch(0.72 0.28 320);
+  /* Neon magenta */
+  --chart-5: oklch(0.78 0.25 200);
+  /* Neon cyan */
+
+  --sidebar: oklch(0.12 0.03 280);
+  --sidebar-foreground: oklch(0.96 0.01 120);
+  --sidebar-primary: oklch(0.75 0.28 50);
+  --sidebar-primary-foreground: oklch(0.05 0.02 280);
+  --sidebar-accent: oklch(0.22 0.05 280);
+  --sidebar-accent-foreground: oklch(0.95 0.01 120);
+  --sidebar-border: oklch(0.25 0.05 280);
+  --sidebar-ring: oklch(0.75 0.28 50);
+
+}
+
+/* Enhanced custom utility classes for vibrant theme colors */
+.bg-theme-orange {
+  background-color: oklch(0.68 0.25 50);
+}
+
+.bg-theme-green {
+  background-color: oklch(0.75 0.22 145);
+}
+
+.bg-theme-yellow {
+  background-color: oklch(0.82 0.18 85);
+}
+
+.bg-theme-purple {
+  background-color: oklch(0.65 0.25 320);
+}
+
+.bg-theme-cyan {
+  background-color: oklch(0.7 0.2 200);
+}
+
+.text-theme-orange {
+  color: oklch(0.68 0.25 50);
+}
+
+.text-theme-green {
+  color: oklch(0.75 0.22 145);
+}
+
+.text-theme-yellow {
+  color: oklch(0.82 0.18 85);
+}
+
+.text-theme-purple {
+  color: oklch(0.65 0.25 320);
+}
+
+.text-theme-cyan {
+  color: oklch(0.7 0.2 200);
+}
+
+.dark .bg-theme-orange {
+  background-color: oklch(0.75 0.28 50);
+}
+
+.dark .bg-theme-green {
+  background-color: oklch(0.8 0.25 145);
+}
+
+.dark .bg-theme-yellow {
+  background-color: oklch(0.88 0.22 85);
+}
+
+.dark .bg-theme-purple {
+  background-color: oklch(0.72 0.28 320);
+}
+
+.dark .bg-theme-cyan {
+  background-color: oklch(0.78 0.25 200);
+}
+
+.dark .text-theme-orange {
+  color: oklch(0.75 0.28 50);
+}
+
+.dark .text-theme-green {
+  color: oklch(0.8 0.25 145);
+}
+
+.dark .text-theme-yellow {
+  color: oklch(0.88 0.22 85);
+}
+
+.dark .text-theme-purple {
+  color: oklch(0.72 0.28 320);
+}
+
+.dark .text-theme-cyan {
+  color: oklch(0.78 0.25 200);
+}
+
+.disable-styles {
+  all: unset;
+  display: block; /* optionally reset display */
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+
+  /* Font family configuration */
+  --font-sans: var(--font-dm-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-serif: var(--font-space-grotesk), ui-serif, Georgia, serif;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    /* Enhanced vibrant gradient with more color stops */
+    /* background: linear-gradient(
+      135deg,
+      #ff6b35 0% ,
+      #f7931e 15% ,
+      #ffd700 30% ,
+      #32cd32 45% ,
+      #00ff7f 60% ,
+      #00ced1 75% ,
+      #1e90ff 90% ,
+      #8a2be2 100% 
+    ); */
+
+    background: linear-gradient(135deg, #d9a7c7 0%, #fffcdc 100%);
+
+    background-size: 400% 400%;
+    animation: vibrantFlow 15s ease infinite;
+    position: relative;
+    overflow-x: hidden;
+  }
+
+  /* Enhanced overlay with colorful highlights */
+  body::before {
+    content: "";
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: radial-gradient(circle at 20% 30%, rgba(255, 107, 53, 0.15) 0%, transparent 40%),
+      radial-gradient(circle at 80% 20%, rgba(50, 205, 50, 0.12) 0%, transparent 40%),
+      radial-gradient(circle at 60% 80%, rgba(255, 215, 0, 0.1) 0%, transparent 40%),
+      radial-gradient(circle at 30% 70%, rgba(138, 43, 226, 0.08) 0%, transparent 40%);
+    pointer-events: none;
+    z-index: -1;
+  }
+
+  .dark input[type="date"]::-webkit-calendar-picker-indicator {
+    filter: invert(1);
+  }
+
+  
+  .dark input[type="checkbox"] {
+    filter: invert(1);
+  }
+
+  .dark body {
+    /* Enhanced dark mode gradient with neon colors */
+    /* background: linear-gradient(135deg,
+        #ff4500 0%
+        ,
+        #ff6347 15%
+        ,
+        #ffa500 30%
+        ,
+        #32cd32 45%
+        ,
+        #00ff00 60%
+        ,
+        #00ffff 75%
+        ,
+        #4169e1 90%
+        ,
+        #9932cc 100%
+      ); */
+    background-size: 400% 400%;
+    animation: vibrantFlow 15s ease infinite;
+
+    background: linear-gradient(135deg, #d9a7c7 0%, #fffcdc 100%);
+
+  }
+
+  .dark body::before {
+    /* Enhanced dark mode highlights with neon colors */
+    background: radial-gradient(circle at 20% 30%, rgba(255, 69, 0, 0.2) 0%, transparent 40%),
+      radial-gradient(circle at 80% 20%, rgba(0, 255, 0, 0.15) 0%, transparent 40%),
+      radial-gradient(circle at 60% 80%, rgba(255, 165, 0, 0.12) 0%, transparent 40%),
+      radial-gradient(circle at 30% 70%, rgba(153, 50, 204, 0.1) 0%, transparent 40%);
+  }
+}
+
+
+/* Updated animation name and enhanced flow */
+@keyframes vibrantFlow {
+  0% {
+    background-position: 0% 50%;
+  }
+
+  25% {
+    background-position: 100% 25%;
+  }
+
+  50% {
+    background-position: 100% 75%;
+  }
+
+  75% {
+    background-position: 0% 75%;
+  }
+
+  100% {
+    background-position: 0% 50%;
+  }
+}

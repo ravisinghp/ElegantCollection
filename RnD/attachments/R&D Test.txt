@@ -1,4 +1,0 @@
-This File for testing the R&D project
-
-this is related to R&D project fundamental. R&D stands for Reasearch and developement we targeting to research the various type of things
-and track the user activity Then according to there Efforts on that R&D than we calculate the time which they was spend on That particular R&D

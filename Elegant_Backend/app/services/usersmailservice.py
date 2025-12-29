@@ -72,7 +72,7 @@ def get_auth_url(provider: str):
             f"https://login.microsoftonline.com/{TENANT_ID}/oauth2/v2.0/authorize?"
             f"client_id={CLIENT_ID}&response_type=code&redirect_uri={REDIRECT_URI}"
             f"&response_mode=query&scope=offline_access%20Mail.Read%20Mail.ReadWrite%20Calendars.Read"
-            f"&prompt=login"   # ðŸ”‘ This forces login screen every time
+            # f"&prompt=login"   # ðŸ”‘ This forces login screen every time
         )
     elif provider == "google":
         params = {

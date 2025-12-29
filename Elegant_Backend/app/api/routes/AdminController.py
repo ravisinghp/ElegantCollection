@@ -4,14 +4,9 @@ from fastapi.responses import JSONResponse
 
 from app.models.schemas.AdminSchema import UserCreate, UserUpdate
 from app.services.AdminServices import register_user, update_user
-from app.models.domain.AdminDomain import UserInDB, KeywordMaster
+from app.models.domain.AdminDomain import UserInDB
 from app.models.schemas.AdminSchema import (
-    KeywordCreate,
-    KeywordResponse,
-    UserListResponse,
-    KeywordListResponse,
     RoleResponse,
-    KeywordUpdate,
     PaginatedUsersResponse,
     PaginatedKeywordsResponse,
     CategoryResponse,
@@ -52,31 +47,18 @@ async def update_user_endpoint(user_id: int, user_data: UserUpdate, request: Req
 
 
 
-# Keyword Creation
-@router.post("/createKeyword", response_model=KeywordMaster)
-async def create_keyword(request: Request, keyword: KeywordCreate):
-    try:
-        keyword_obj = await admin_service.create_keyword(request, keyword)
-        if not keyword_obj:
-            raise HTTPException(status_code=400, detail="Keyword creation failed")
-        return keyword_obj
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-
-# Update the Keyword
-@router.put("/updateKeyword", response_model=KeywordMaster)
-async def update_keyword(request: Request, keyword: KeywordUpdate):
-    try:
-        updated_keyword = await admin_service.update_keyword(request, keyword)
-        return updated_keyword
-    except HTTPException:
-        raise
-    except Exception as e:
-        # Log full exception for debugging
-        print("Error updating keyword:", e)
-        raise HTTPException(status_code=500, detail=str(e))
+# #------------Update the Keyword----------------
+# @router.put("/updateKeyword", response_model=KeywordMaster)
+# async def update_keyword(request: Request, keyword: KeywordUpdate):
+#     try:
+#         updated_keyword = await admin_service.update_keyword(request, keyword)
+#         return updated_keyword
+#     except HTTPException:
+#         raise
+#     except Exception as e:
+#         # Log full exception for debugging
+#         print("Error updating keyword:", e)
+#         raise HTTPException(status_code=500, detail=str(e))
 
 
 
@@ -96,7 +78,7 @@ async def get_users_by_org_id(
 
 
 
-    # Listing the Keywords on admin dashboard
+# Listing the Keywords on admin dashboard
 @router.get("/keywords", response_model=PaginatedKeywordsResponse)
 async def get_all_keywords_by_org_id(
     request: Request, org_id: int, userId: int, page: int = 1, limit: int = 5
@@ -112,7 +94,7 @@ async def get_all_keywords_by_org_id(
 
 
 
-    # listing the roles in dropdown at the time of creation of user On UI
+# listing the roles in dropdown at the time of creation of user On UI
 @router.get("/roles", response_model=list[RoleResponse])
 async def get_all_roles(request: Request):
     try:
@@ -219,35 +201,7 @@ async def update_user_status(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-
-
-    # Update each Keyword Status
-@router.post("/updateKeywordStatus")
-async def update_keyword_status(
-    request: Request,
-    keyword_id: int,
-    is_active: int,
-):
-    try:
-        if is_active not in (0, 1):
-            raise HTTPException(status_code=400, detail="Invalid status value")
-        result = await admin_service.update_keyword_status(
-            request, keyword_id, is_active
-        )
-        if not result:
-            raise HTTPException(
-                status_code=404, detail="Keyword not found or org_id mismatch"
-            )
-        return JSONResponse(
-            content={"success": True, "message": "Keyword status updated successfully"}
-        )
-    except HTTPException as e:
-        raise e
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-    
-    
-    #find Last sync of each user
+#find Last sync of each user
 @router.get("/lastSyncEachUser")
 async def get_last_sync(org_id: int,request: Request):
     try: 

@@ -20,16 +20,6 @@ class UserInDB(BaseModel):
     )
 
 
-class KeywordMaster(BaseModel):
-    keyword_id: int
-    keyword_name: str
-    ref_word_id: Optional[int]
-    created_on: datetime
-    updated_on: Optional[datetime] = None
-    is_active: bool
-    cat_id: Optional[int] = None
-
-
 class RoleMaster(BaseModel):
     role_id: int
     role_name: str

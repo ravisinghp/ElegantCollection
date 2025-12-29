@@ -74,7 +74,7 @@ async def login(
 
 
 @router.post(
-    "",
+    "/register",
     status_code=HTTP_201_CREATED,
     response_model=UserInResponse,
     name="auth:register",

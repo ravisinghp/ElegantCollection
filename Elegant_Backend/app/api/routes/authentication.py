@@ -23,7 +23,7 @@ from app.services.AdminServices import login_user,check_email_exists, reset_pass
 from app.services.EmailService import EmailService
 
 from jose import jwt, JWTError, ExpiredSignatureError
-from datetime import datetime, timedelta
+# from datetime import datetime, timedeltaF
 from starlette.requests import Request
 from app.services import UserService 
 from app.models.schemas.AdminSchema import LoginResponse
@@ -61,13 +61,9 @@ async def login(
                 userid=user_data["user_id"],
                 username=user_data["user_name"],
                 email=user_data["mail_id"],
-                orgid=user_data["org_id"],
-                orgname=user_data["org_name"],
                 roleid=user_data["role_id"],
-                rolename=user_data["role_name"],
-                provider=user_data.get("provider"),   
+                  
                 token=token,
-                term_condition_flag=user_data.get("term_condition_flag", 0)  # ✅ include flag
             )
         
         else:
@@ -78,7 +74,7 @@ async def login(
 
 
 @router.post(
-    "",
+    "/register",
     status_code=HTTP_201_CREATED,
     response_model=UserInResponse,
     name="auth:register",

@@ -24,14 +24,26 @@ async def create_category_keyword(
 
 # ------------------- fetch category keyword list -------------------
 @router.get("/category_keyword_list")
-async def category_keyword_list(
-    request: UserRequest,
+# async def category_keyword_list(
+#     request: UserRequest,
+#     repo: CategoryRepo = Depends(get_repository(CategoryRepo))
+# ):
+#     service = CategoryService(repo)
+#     result = await service.get_category_keyword_list(request.user_id)
+#     return {"success": True, "data": result}
+
+async def category_keyword_list(    
+    #  Accept user_id directly from the URL query string
+    user_id: int, 
+    
     repo: CategoryRepo = Depends(get_repository(CategoryRepo))
 ):
     service = CategoryService(repo)
-    result = await service.get_category_keyword_list(request.user_id)
+    
+    # Use user_id directly (no need for request.user_id)
+    result = await service.get_category_keyword_list(user_id)
+    
     return {"success": True, "data": result}
-
 
 # ------------------- delete category/keyword -------------------
 @router.post("/delete_category_keyword")

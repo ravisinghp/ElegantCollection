@@ -131,7 +131,7 @@ async def login_user(request: Request, email: str, password: str) -> dict:
     Authenticate user and return user data with organization and role information
     """
     # Get user data with organization and role names
-    user_data = await admin_repo.get_user_with_org_role_by_email(request, email)
+    user_data = await admin_repo.get_user_by_email(request, email)
 
     if not user_data:
         raise HTTPException(status_code=400, detail="User not found")

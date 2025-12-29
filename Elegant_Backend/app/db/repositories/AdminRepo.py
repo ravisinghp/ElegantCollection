@@ -98,10 +98,10 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
 
 #Getting the User by email Id
 async def get_user_by_email(request: Request, email: str,org_id:int) -> Optional[UserInDB]:
-    query = "SELECT * FROM users_master WHERE mail_id = %s AND org_id=%s"
+    query = "SELECT * FROM users_master WHERE mail_id = %s "
     async with request.app.state.pool.acquire() as conn:
         async with conn.cursor() as cursor:
-            await cursor.execute(query, (email,org_id))
+            await cursor.execute(query, (email))
             row = await cursor.fetchone()
             if row:
                 columns = [col[0] for col in cursor.description]
@@ -148,6 +148,35 @@ async def get_user_with_org_role_by_email(request: Request, email: str) -> Optio
                     result_dict["term_condition_flag"] = int.from_bytes(result_dict["term_condition_flag"], "big")
                 
                 return result_dict
+            return None
+
+
+async def get_user_by_email(request: Request, email: str) -> Optional[dict]:
+    """
+    Get user data from users_master table only, no joins.
+    """
+    query = """
+        SELECT *
+        FROM users_master
+        WHERE mail_id = %s AND is_active = 1
+    """
+    
+    async with request.app.state.pool.acquire() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(query, (email,))
+            row = await cursor.fetchone()
+            
+            if row:
+                # Get column names
+                columns = [col[0] for col in cursor.description]
+                result_dict = dict(zip(columns, row))
+
+                # Convert BIT/TINYINT bytes to int if needed
+                if isinstance(result_dict.get("term_condition_flag"), (bytes, bytearray)):
+                    result_dict["term_condition_flag"] = int.from_bytes(result_dict["term_condition_flag"], "big")
+                
+                return result_dict
+            
             return None
 
 

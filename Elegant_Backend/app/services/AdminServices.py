@@ -3,14 +3,12 @@ from fastapi import HTTPException
 from app.models.schemas.AdminSchema import (
     UserCreate,
     UserUpdate,
-    KeywordCreate,
     RoleResponse,
     CategoryResponse,
     EmailSettings,
-    KeywordUpdate,
 )
 from starlette.status import HTTP_400_BAD_REQUEST
-from app.models.domain.AdminDomain import UserInDB, KeywordMaster
+from app.models.domain.AdminDomain import UserInDB
 from app.db.repositories import AdminRepo as admin_repo
 from app.db.repositories import AdminRepo
 from typing import List, Dict, Any
@@ -125,46 +123,6 @@ async def update_user(request: Request, user_id: int, user: UserUpdate):
     )
     role_id = user.role_id if user.role_id else None
     await admin_repo.update_user_in_db(request, user_id, user, org_id, role_id)
-
-
-
-#Keyword Creation
-async def create_keyword(request: Request, keyword: KeywordCreate) -> KeywordMaster:
-    try:
-        existing_keyword = await admin_repo.get_keyword_by_keyword_name(
-            request, keyword.keyword_name,keyword.org_id,keyword.cat_id
-        )
-    except Exception as e:
-        raise HTTPException(
-            status_code=500, detail="Internal error while checking keyword"
-        )
-
-    if existing_keyword:
-        raise HTTPException(
-            status_code=400, detail="keyword already exists with this name"
-        )
-
-    try:
-        keyword_id = await admin_repo.create_keyword(
-            request,
-            keyword.keyword_name,
-            keyword.org_id,
-            keyword.created_by,
-            keyword.cat_id,
-        )
-    except Exception as e:
-
-        raise HTTPException(
-            status_code=500, detail="Internal error while creating keyword"
-        )
-    return keyword_id
-
-
-
-# update keyword
-async def update_keyword(request: Request, keyword: KeywordUpdate) -> KeywordMaster:
-    return await admin_repo.update_keyword(request, keyword)
-
 
 
 #Login User

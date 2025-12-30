@@ -25,12 +25,31 @@ from app.core.events import create_start_app_handler, create_stop_app_handler
 def get_application() -> FastAPI:
     application = FastAPI(title=PROJECT_NAME, debug=DEBUG, version=VERSION)
 
+    # --- CORS CONFIGURATION (FIXED) ---
+    # We explicitly define the frontend ports here to ensure they are never blocked.
+    # Even if ALLOWED_HOSTS in config is missing 'localhost:5173', this list ensures it works.
+    origins = [
+        "http://localhost:5173",  # Vite / React (Your current app)
+        "http://localhost:3000",  # Create React App (Standard backup)
+        "http://localhost:8080",  # The Backend itself
+        "http://127.0.0.1:5173",  # Localhost via IP
+    ]
+
+    # If your config has extra hosts (like production domains), add them to the list
+    if ALLOWED_HOSTS:
+        # Ensure ALLOWED_HOSTS is a list before extending
+        if isinstance(ALLOWED_HOSTS, list):
+            origins.extend(ALLOWED_HOSTS)
+        else:
+            # If it's a single string, just append it
+             origins.append(str(ALLOWED_HOSTS))
+
     application.add_middleware(
         CORSMiddleware,
-        allow_origins=ALLOWED_HOSTS or ["http://localhost:5173"],
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
+        allow_origins=origins,       # Use the robust list we built above
+        allow_credentials=True,      # Essential for your Token/Auth to work
+        allow_methods=["*"],         # Allow all methods (GET, POST, PUT, DELETE, etc.)
+        allow_headers=["*"],         # Allow all headers (Authorization, Content-Type, etc.)
     )
 
     application.add_event_handler("startup", create_start_app_handler(application))
@@ -51,6 +70,7 @@ def get_application() -> FastAPI:
     application.include_router(api_router)
 
     application.include_router(user_router)
+    
     return application
 
 

@@ -56,7 +56,7 @@ import aiohttp, json
 from datetime import datetime, timezone
 from typing import List, Dict, Any
 from pptx import Presentation  # for PPTX support
-
+from fastapi.responses import RedirectResponse
 try:
     # Optional import to avoid circular issues in other contexts
     from app.db.repositories.mails import MailsRepository
@@ -130,7 +130,13 @@ async def exchange_code_for_token(code: str):
     access_token = token_json.get("access_token")
     if access_token:
         # Redirect to frontend with token in query (or better, store in cookie or session)
-        return f"{success_url}?mail_token={access_token}"
+        # 1. Build the destination URL (your React route)
+        # This points to: http://localhost:5173//dashboard/user?mail_token=...
+        destination_url = f"{success_url}?mail_token={access_token}"
+        
+        # 2. Force the browser to go there
+        # This loads your React app, and React Router will take over from there.
+        return RedirectResponse(url=destination_url, status_code=303)
         # return f"http://localhost:3000//dashboard/user?mail_token={access_token}" # use in local system
         #return f"http://139.144.4.191:3000//dashboard/user?mail_token={access_token}" # use in server
     return {"error": "Token exchange failed"}

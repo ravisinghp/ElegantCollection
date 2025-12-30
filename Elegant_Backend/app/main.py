@@ -13,6 +13,8 @@ from app.api.routes.AdminController import router as admin_router
 # 3. Import other API routes
 from app.api.routes.api import router as api_router
 
+from app.api.routes.UserController import router as user_router
+
 # --- CONFIG ---
 from app.core.config import ALLOWED_HOSTS, PROJECT_NAME, VERSION, DEBUG
 from app.api.errors.http_error import http_error_handler
@@ -48,6 +50,7 @@ def get_application() -> FastAPI:
     # 3. Other API routes
     application.include_router(api_router)
 
+    application.include_router(user_router)
     return application
 
 

@@ -65,7 +65,7 @@ class CategoryRepo(BaseRepository):
             LEFT JOIN keyword_master k
                 ON c.cat_id = k.cat_id AND k.is_active = 1
             WHERE c.user_id = %s AND c.is_active = 1
-            ORDER BY c.cat_id DESC, k.keyword_id DESC
+            ORDER BY k.keyword_id DESC
         """
         await self._cur.execute(query, (user_id,))
         rows = await self._cur.fetchall()

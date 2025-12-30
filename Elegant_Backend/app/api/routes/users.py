@@ -14,6 +14,8 @@ from app.models.schemas.users import (
 )
 from app.resources import strings
 from app.services import jwt
+from fastapi.responses import JSONResponse
+from fastapi.encoders import jsonable_encoder
 
 # from app.services.authentication import check_email_is_taken, check_username_is_taken
 from app.services.usersmailservice import (
@@ -25,6 +27,7 @@ from app.services.usersmailservice import (
     get_user_email,
     fetch_all_labels,
     fetch_and_save_mails_by_labels,
+    generate_missing_po_report_service
 )
 from typing import List
 
@@ -236,3 +239,15 @@ async def get_emails_folders(
 @router.get("/health")
 def health_check():
     return {"status": "ok"}
+
+
+# ---------------------------------------------------------------------
+# CONTROLLER ENDPOINT (IN SAME FILE)
+# ---------------------------------------------------------------------
+@router.post("/generate-missing-po-report")
+async def generate_missing_po_report(
+    repo: MailsRepository = Depends(get_repository(MailsRepository))
+):
+    result = await generate_missing_po_report_service(repo)
+    return JSONResponse(content=jsonable_encoder(result))
+

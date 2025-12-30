@@ -28,12 +28,6 @@ class UserUpdate(BaseModel):
     role_id: Optional[int] = None
 
 
-class KeywordCreate(BaseModel):
-    keyword_name: str
-    org_id: int
-    created_by: int
-    cat_id: int
-
 
 class KeywordResponse(BaseModel):
     keyword_id: int
@@ -135,8 +129,3 @@ class EmailSettings(BaseModel):
     MAIL_SSL: bool = bool(config("MAIL_SSL", default=False))
     USE_CREDENTIALS: bool = bool(config("USE_CREDENTIALS", default=True))
 
-
-class KeywordUpdate(BaseModel):
-    keyword_id: int
-    keyword_name: str
-    updated_by: int

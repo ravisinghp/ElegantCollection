@@ -1,9 +1,8 @@
 from starlette.requests import Request
 from sqlalchemy import text
 from typing import Optional, List, Dict, Any, Tuple,List,Dict
-from app.models.schemas.AdminSchema import UserCreate, UserUpdate,KeywordUpdate
+from app.models.schemas.AdminSchema import UserCreate, UserUpdate
 from app.models.domain.AdminDomain import UserInDB
-from app.models.domain.AdminDomain import KeywordMaster
 import bcrypt
 from fastapi import Query,HTTPException
 import aiomysql
@@ -99,29 +98,15 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
 
 #Getting the User by email Id
 async def get_user_by_email(request: Request, email: str,org_id:int) -> Optional[UserInDB]:
-    query = "SELECT * FROM users_master WHERE mail_id = %s AND org_id=%s"
+    query = "SELECT * FROM users_master WHERE mail_id = %s "
     async with request.app.state.pool.acquire() as conn:
         async with conn.cursor() as cursor:
-            await cursor.execute(query, (email,org_id))
+            await cursor.execute(query, (email))
             row = await cursor.fetchone()
             if row:
                 columns = [col[0] for col in cursor.description]
                 result_dict = dict(zip(columns, row))
                 return result_dict
-            return None
-        
-        
-#Checking for exsting keyword         
-async def get_keyword_by_keyword_name(request: Request, keyword_name: str,org_id:int,cat_id:int) -> Optional[KeywordMaster]:
-    query = "SELECT * FROM keyword_master k WHERE k.keyword_name = %s AND k.org_id = %s AND k.cat_id = %s"
-    async with request.app.state.pool.acquire() as conn:
-        async with conn.cursor() as cursor:
-            await cursor.execute(query, (keyword_name,org_id,cat_id))
-            row = await cursor.fetchone()
-            if row:
-                columns = [col[0] for col in cursor.description]
-                result_dict = dict(zip(columns, row))
-                return KeywordMaster(**result_dict)
             return None
 
 
@@ -166,65 +151,33 @@ async def get_user_with_org_role_by_email(request: Request, email: str) -> Optio
             return None
 
 
-
-#creating keyword
-async def create_keyword(request: Request, keyword_name: str,org_id:int,created_by:int,cat_id:int) -> KeywordMaster:
-    insert_query = """
-        INSERT INTO keyword_master (keyword_name, is_active, created_on,org_id, created_by,cat_id)
-        VALUES (%s, TRUE, NOW(),%s,%s,%s)
+async def get_user_by_email(request: Request, email: str) -> Optional[dict]:
     """
-    select_query = """
-        SELECT keyword_id, keyword_name, ref_word_id, created_on, updated_on, is_active,cat_id
-        FROM keyword_master
-        WHERE keyword_id = LAST_INSERT_ID()
+    Get user data from users_master table only, no joins.
     """
-
+    query = """
+        SELECT *
+        FROM users_master
+        WHERE mail_id = %s AND is_active = 1
+    """
+    
     async with request.app.state.pool.acquire() as conn:
         async with conn.cursor() as cursor:
-            await cursor.execute(insert_query, (keyword_name,org_id,created_by,cat_id))
-            # Commit might be needed if autocommit is off
-            await conn.commit()
-
-            await cursor.execute(select_query)
+            await cursor.execute(query, (email,))
             row = await cursor.fetchone()
+            
             if row:
+                # Get column names
                 columns = [col[0] for col in cursor.description]
                 result_dict = dict(zip(columns, row))
-                return KeywordMaster(**result_dict)
+
+                # Convert BIT/TINYINT bytes to int if needed
+                if isinstance(result_dict.get("term_condition_flag"), (bytes, bytearray)):
+                    result_dict["term_condition_flag"] = int.from_bytes(result_dict["term_condition_flag"], "big")
+                
+                return result_dict
+            
             return None
-        
-
-
-#update the keyword 
-async def update_keyword(request: Request, keyword: KeywordUpdate) -> KeywordMaster:
-    update_query = """
-        UPDATE keyword_master 
-        SET keyword_name = %s, updated_on = NOW(), updated_by = %s
-        WHERE keyword_id = %s
-    """
-    select_query = """
-        SELECT keyword_id, keyword_name, ref_word_id, created_on, updated_on, is_active,cat_id
-        FROM keyword_master
-        WHERE keyword_id = %s
-    """
-
-    async with request.app.state.pool.acquire() as conn:
-        async with conn.cursor() as cursor:
-            await cursor.execute(update_query, (
-                keyword.keyword_name,
-                keyword.updated_by,
-                keyword.keyword_id
-            ))
-            await conn.commit()
-
-            await cursor.execute(select_query, (keyword.keyword_id,))
-            row = await cursor.fetchone()
-            if row:
-                columns = [col[0] for col in cursor.description]
-                return KeywordMaster(**dict(zip(columns, row)))
-
-    raise HTTPException(status_code=404, detail="Keyword not found")
-
 
 
         #Listing all users on admin dashboard

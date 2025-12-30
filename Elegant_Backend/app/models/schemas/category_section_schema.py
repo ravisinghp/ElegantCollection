@@ -1,24 +1,17 @@
 from pydantic import BaseModel
-from typing import List,Optional
+from typing import Optional
 
-class Category(BaseModel):
-    category_id: int
+class CategoryKeywordRequest(BaseModel):
     category_name: str
-    is_active: int
-    keywords: Optional[str] = None 
-
-
-class CategoryRequest(BaseModel):
-    category_name: str
+    keyword_name: str
     user_id: int
-    org_id: int
 
 
-class UpdateCategoryRequest(BaseModel):
-    category_id: int
+class UserRequest(BaseModel):
     user_id: int
-    category_name: str
     
-class PaginatedCategoriesResponse(BaseModel):
-    categories: List[Category]
-    totalCount: int
+
+class DeleteCategoryKeywordRequest(BaseModel):
+    cat_id: int
+    keyword_id: int
+    user_id: int

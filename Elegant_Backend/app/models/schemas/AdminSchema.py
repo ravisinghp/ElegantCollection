@@ -13,7 +13,7 @@ class UserCreate(BaseModel):
     password: str
     # org_name: str
     # user_id: int
-    org_id: int
+    # org_id: int
     role_id: int
     folder_name: str
     provider:str
@@ -27,12 +27,6 @@ class UserUpdate(BaseModel):
     org_name: Optional[str] = None
     role_id: Optional[int] = None
 
-
-class KeywordCreate(BaseModel):
-    keyword_name: str
-    org_id: int
-    created_by: int
-    cat_id: int
 
 
 class KeywordResponse(BaseModel):
@@ -134,8 +128,3 @@ class EmailSettings(BaseModel):
     MAIL_SSL: bool = bool(config("MAIL_SSL", default=False))
     USE_CREDENTIALS: bool = bool(config("USE_CREDENTIALS", default=True))
 
-
-class KeywordUpdate(BaseModel):
-    keyword_id: int
-    keyword_name: str
-    updated_by: int

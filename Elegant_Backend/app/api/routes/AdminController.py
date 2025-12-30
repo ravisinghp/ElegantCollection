@@ -4,27 +4,17 @@ from fastapi.responses import JSONResponse
 
 from app.models.schemas.AdminSchema import UserCreate, UserUpdate
 from app.services.AdminServices import register_user, update_user
-from app.models.domain.AdminDomain import UserInDB, KeywordMaster
 from app.models.schemas.AdminSchema import (
-    KeywordCreate,
-    KeywordResponse,
-    UserListResponse,
-    KeywordListResponse,
     RoleResponse,
-    KeywordUpdate,
-    PaginatedUsersResponse,
-    PaginatedKeywordsResponse,
-    CategoryResponse,
+    PaginatedUsersResponse
 )
 from app.services import AdminServices as admin_service
 from typing import List, Dict, Any
-from pydantic import BaseModel
 
 router = APIRouter()
 
 
-
-# User Creation
+#---------------User Creation---------------
 @router.post("/createUser")
 async def create_user(user: UserCreate, request: Request):
     try:
@@ -40,6 +30,29 @@ async def create_user(user: UserCreate, request: Request):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+#------------listing all users on System dashboard----------------
+@router.get("/get_all_users", response_model=PaginatedUsersResponse)
+async def get_all_users(
+    request: Request
+):
+    try:
+        result = await admin_service.get_all_users(
+            request
+        )
+
+        return JSONResponse(content=result)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+#--------------Fetch all roles----------------
+@router.get("/fetch_roles", response_model=list[RoleResponse])
+async def get_all_roles(request: Request):
+    try:
+        return await admin_service.get_all_roles(request)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 # User Updation
 @router.put("/updateUser/{user_id}")
@@ -51,88 +64,7 @@ async def update_user_endpoint(user_id: int, user_data: UserUpdate, request: Req
         raise HTTPException(status_code=500, detail=str(e))
 
 
-
-# Keyword Creation
-@router.post("/createKeyword", response_model=KeywordMaster)
-async def create_keyword(request: Request, keyword: KeywordCreate):
-    try:
-        keyword_obj = await admin_service.create_keyword(request, keyword)
-        if not keyword_obj:
-            raise HTTPException(status_code=400, detail="Keyword creation failed")
-        return keyword_obj
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-
-# Update the Keyword
-@router.put("/updateKeyword", response_model=KeywordMaster)
-async def update_keyword(request: Request, keyword: KeywordUpdate):
-    try:
-        updated_keyword = await admin_service.update_keyword(request, keyword)
-        return updated_keyword
-    except HTTPException:
-        raise
-    except Exception as e:
-        # Log full exception for debugging
-        print("Error updating keyword:", e)
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-
-#listing all users on Admin dashboard
-@router.get("/users", response_model=PaginatedUsersResponse)
-async def get_users_by_org_id(
-    request: Request, org_id: int, userId: int, role_id:int, page: int = 1, limit: int = 5
-):
-    try:
-        result = await admin_service.get_all_users_by_org_id(
-            request, org_id, userId, page, limit, role_id
-        )
-
-        return JSONResponse(content=result)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-
-    # Listing the Keywords on admin dashboard
-@router.get("/keywords", response_model=PaginatedKeywordsResponse)
-async def get_all_keywords_by_org_id(
-    request: Request, org_id: int, userId: int, page: int = 1, limit: int = 5
-):
-    try:
-        keywords = await admin_service.get_all_keywords_by_org_id(
-            request, org_id, userId, page, limit
-        )
-
-        return JSONResponse(content=keywords)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-
-    # listing the roles in dropdown at the time of creation of user On UI
-@router.get("/roles", response_model=list[RoleResponse])
-async def get_all_roles(request: Request):
-    try:
-        return await admin_service.get_all_roles(request)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-
-#Fetching the categories On UI of Create Keyword
-@router.get("/categories", response_model=list[CategoryResponse])
-async def get_all_categories(request: Request, userId: int, org_id: int):
-    try:
-        return await admin_service.get_all_categories(request, userId, org_id)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-
-    # listing the dashboard card data on admin dashboard
+# listing the dashboard card data on admin dashboard
 @router.get("/dashboardCardData")
 async def get_dashboard_stats(
     request: Request, from_date: str, to_date: str, userId: int, org_id: int, role_id:int
@@ -219,35 +151,7 @@ async def update_user_status(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-
-
-    # Update each Keyword Status
-@router.post("/updateKeywordStatus")
-async def update_keyword_status(
-    request: Request,
-    keyword_id: int,
-    is_active: int,
-):
-    try:
-        if is_active not in (0, 1):
-            raise HTTPException(status_code=400, detail="Invalid status value")
-        result = await admin_service.update_keyword_status(
-            request, keyword_id, is_active
-        )
-        if not result:
-            raise HTTPException(
-                status_code=404, detail="Keyword not found or org_id mismatch"
-            )
-        return JSONResponse(
-            content={"success": True, "message": "Keyword status updated successfully"}
-        )
-    except HTTPException as e:
-        raise e
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-    
-    
-    #find Last sync of each user
+#find Last sync of each user
 @router.get("/lastSyncEachUser")
 async def get_last_sync(org_id: int,request: Request):
     try: 

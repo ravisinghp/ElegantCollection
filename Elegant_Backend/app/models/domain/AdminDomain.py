@@ -13,21 +13,10 @@ class UserInDB(BaseModel):
     folder_name: str = Field(alias="folderName")
     created_by: Optional[int] = None
     provider :str
-
     model_config = ConfigDict(
         populate_by_name=True,  # allow both snake_case and camelCase
         from_attributes=True,  # replaces orm_mode
     )
-
-
-class KeywordMaster(BaseModel):
-    keyword_id: int
-    keyword_name: str
-    ref_word_id: Optional[int]
-    created_on: datetime
-    updated_on: Optional[datetime] = None
-    is_active: bool
-    cat_id: Optional[int] = None
 
 
 class RoleMaster(BaseModel):
@@ -40,4 +29,11 @@ class RoleMaster(BaseModel):
 #     total: int
 #     page: int
 #     limit: int
-#     total_pages: int
+#     total_pages: 
+
+
+#Update the PO Comment On UI 
+class UpdatePoCommentRequest(BaseModel):
+    po_missing_id: Optional[int] = None
+    po_mismatch_id: Optional[int] = None
+    comment: str

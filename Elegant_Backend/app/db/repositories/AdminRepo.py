@@ -1,9 +1,8 @@
 from starlette.requests import Request
 from sqlalchemy import text
 from typing import Optional, List, Dict, Any, Tuple,List,Dict
-from app.models.schemas.AdminSchema import UserCreate, UserUpdate,KeywordUpdate
+from app.models.schemas.AdminSchema import UserCreate, UserUpdate
 from app.models.domain.AdminDomain import UserInDB
-from app.models.domain.AdminDomain import KeywordMaster
 import bcrypt
 from fastapi import Query,HTTPException
 import aiomysql
@@ -25,11 +24,11 @@ async def get_org_id_by_name(request: Request, org_name: str) -> Optional[int]:
     
         
         
-#Creating new user
-async def create_user(request: Request, user: UserInDB, org_id: int, role_id: int,created_by:int) -> int:
+#--------------------Creating new user---------------------
+async def create_user(request: Request, user: UserInDB) -> int:
     query = """
-        INSERT INTO users_master (user_name, mail_id, password, org_id, role_id,folder_name,created_by,provider)
-        VALUES (%s, %s, %s, %s, %s,%s,%s,%s)
+        INSERT INTO users_master (user_name, mail_id, password, role_id, folder_name, created_by, provider)
+        VALUES (%s, %s, %s, %s, %s,%s,%s)
     """
     async with request.app.state.pool.acquire() as conn:
         async with conn.cursor() as cursor:
@@ -37,16 +36,13 @@ async def create_user(request: Request, user: UserInDB, org_id: int, role_id: in
                 user.user_name,
                 user.mail_id,
                 user.password,
-                org_id,
-                role_id,
+                user.role_id,
                 user.folder_name,
                 user.created_by,
                 user.provider
             ))
             await conn.commit()
-            return cursor.lastrowid
-        
-        
+            return cursor.lastrowid        
 
         
 #Update the user
@@ -85,7 +81,7 @@ async def update_user_in_db(request: Request, user_id: int, user_data: UserUpdat
             await conn.commit()
 
 
-#Encrypt the password
+#---------------Encrypt the password------------------
 def hash_password(password: str) -> str:
     hashed = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt())
     return hashed.decode('utf-8')
@@ -97,31 +93,17 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
 
 
 
-#Getting the User by email Id
-async def get_user_by_email(request: Request, email: str,org_id:int) -> Optional[UserInDB]:
-    query = "SELECT * FROM users_master WHERE mail_id = %s "
+#--------------Getting the User by email Id--------------
+async def get_user_by_emailId(request: Request, email: str, role_id:int) -> Optional[UserInDB]:
+    query = "SELECT * FROM users_master WHERE mail_id = %s AND role_id=%s AND is_active = 1"
     async with request.app.state.pool.acquire() as conn:
         async with conn.cursor() as cursor:
-            await cursor.execute(query, (email))
+            await cursor.execute(query, (email, role_id))
             row = await cursor.fetchone()
             if row:
                 columns = [col[0] for col in cursor.description]
                 result_dict = dict(zip(columns, row))
                 return result_dict
-            return None
-        
-        
-#Checking for exsting keyword         
-async def get_keyword_by_keyword_name(request: Request, keyword_name: str,org_id:int,cat_id:int) -> Optional[KeywordMaster]:
-    query = "SELECT * FROM keyword_master k WHERE k.keyword_name = %s AND k.org_id = %s AND k.cat_id = %s"
-    async with request.app.state.pool.acquire() as conn:
-        async with conn.cursor() as cursor:
-            await cursor.execute(query, (keyword_name,org_id,cat_id))
-            row = await cursor.fetchone()
-            if row:
-                columns = [col[0] for col in cursor.description]
-                result_dict = dict(zip(columns, row))
-                return KeywordMaster(**result_dict)
             return None
 
 
@@ -195,181 +177,38 @@ async def get_user_by_email(request: Request, email: str) -> Optional[dict]:
             return None
 
 
-
-#creating keyword
-async def create_keyword(request: Request, keyword_name: str,org_id:int,created_by:int,cat_id:int) -> KeywordMaster:
-    insert_query = """
-        INSERT INTO keyword_master (keyword_name, is_active, created_on,org_id, created_by,cat_id)
-        VALUES (%s, TRUE, NOW(),%s,%s,%s)
-    """
-    select_query = """
-        SELECT keyword_id, keyword_name, ref_word_id, created_on, updated_on, is_active,cat_id
-        FROM keyword_master
-        WHERE keyword_id = LAST_INSERT_ID()
-    """
-
-    async with request.app.state.pool.acquire() as conn:
-        async with conn.cursor() as cursor:
-            await cursor.execute(insert_query, (keyword_name,org_id,created_by,cat_id))
-            # Commit might be needed if autocommit is off
-            await conn.commit()
-
-            await cursor.execute(select_query)
-            row = await cursor.fetchone()
-            if row:
-                columns = [col[0] for col in cursor.description]
-                result_dict = dict(zip(columns, row))
-                return KeywordMaster(**result_dict)
-            return None
-        
-
-
-#update the keyword 
-async def update_keyword(request: Request, keyword: KeywordUpdate) -> KeywordMaster:
-    update_query = """
-        UPDATE keyword_master 
-        SET keyword_name = %s, updated_on = NOW(), updated_by = %s
-        WHERE keyword_id = %s
-    """
-    select_query = """
-        SELECT keyword_id, keyword_name, ref_word_id, created_on, updated_on, is_active,cat_id
-        FROM keyword_master
-        WHERE keyword_id = %s
-    """
-
-    async with request.app.state.pool.acquire() as conn:
-        async with conn.cursor() as cursor:
-            await cursor.execute(update_query, (
-                keyword.keyword_name,
-                keyword.updated_by,
-                keyword.keyword_id
-            ))
-            await conn.commit()
-
-            await cursor.execute(select_query, (keyword.keyword_id,))
-            row = await cursor.fetchone()
-            if row:
-                columns = [col[0] for col in cursor.description]
-                return KeywordMaster(**dict(zip(columns, row)))
-
-    raise HTTPException(status_code=404, detail="Keyword not found")
-
-
-
-        #Listing all users on admin dashboard
-# async def get_all_users_by_org_id(request: Request,org_id:int,userId:int) -> list[dict]:
-#     query = """
-#         SELECT 
-#     u.user_id,
-#     u.org_id,
-#     u.user_name, 
-#     o.org_name, 
-#     COUNT(m.mail_dtl_id) AS email_count
-# FROM users_master u
-# JOIN org_master o 
-#     ON u.org_id = o.org_id
-# LEFT JOIN mail_details m 
-#     ON u.user_id = m.user_id 
-#     AND m.is_active = 1
-# WHERE u.is_active = 1 
-#   AND o.is_active = 1
-#   AND (u.org_id = %s AND u.created_by = %s)
-# GROUP BY u.user_id, u.org_id, u.user_name, o.org_name
-# ORDER BY u.user_id DESC;
-        
-#     """
-#     async with request.app.state.pool.acquire() as conn:
-#         async with conn.cursor() as cursor:
-#             await cursor.execute(query,(org_id, userId))
-#             rows = await cursor.fetchall()
-#             columns = [col[0] for col in cursor.description]
-#             return [dict(zip(columns, row)) for row in rows]
-
-
-#Listing All Users On admin Dashboard
-async def get_all_users_by_org_id(request, org_id: int, userId: int, page: int, limit: int, role_id:int):
-    offset = (page - 1) * limit
-    print(f"Query Params => org_id={org_id}, userId={userId}, page={page}, limit={limit}, offset={offset}")
-
+#------------Listing All Users On System Dashboard-----------------
+async def get_all_users(request):
     query_users = """
         SELECT 
-        u.user_id, 
-        u.user_name, 
-        o.org_name,
-         CAST(u.is_active AS UNSIGNED) AS is_active,  
-        COALESCE(email_counts.email_count, 0) as email_count
-    FROM users_master u
-    JOIN org_master o ON u.org_id = o.org_id
-    LEFT JOIN (
-        SELECT user_id, COUNT(*) as email_count
-        FROM mail_details
-        WHERE is_active = 1
-        GROUP BY user_id
-    ) email_counts ON email_counts.user_id = u.user_id
-    WHERE u.org_id = %s
-    AND u.role_id = 2
-    ORDER BY u.user_id DESC
-    LIMIT %s OFFSET %s
+            um.user_id,
+            um.role_id,
+            um.user_name,
+            um.mail_id,
+            rm.role_name
+        FROM users_master um
+        LEFT JOIN role_master rm ON rm.role_id = um.role_id
+        ORDER BY um.user_id DESC
     """
 
-    query_count = """
-        SELECT COUNT(*) as total_count
-        FROM users_master u
-         WHERE u.org_id = %s
-	 AND u.role_id = 2
-    """
+    query_count = "SELECT COUNT(*) AS total_count FROM users_master"
 
     async with request.app.state.pool.acquire() as conn:
         async with conn.cursor(aiomysql.DictCursor) as cur:
-            # Fetch users
-            await cur.execute(query_users, (org_id, limit, offset))
+
+            await cur.execute(query_users)
             users = await cur.fetchall()
 
-            # Fetch total count
-            await cur.execute(query_count, (org_id))
-            total_count_row = await cur.fetchone()
-            total_count = total_count_row["total_count"] if total_count_row else 0
-
-    
+            await cur.execute(query_count)
+            total_count = (await cur.fetchone())["total_count"]
 
     return {
         "users": users,
         "totalCount": total_count
     }
-    
-    
-    
- #Listing all keywords on admin dashboard
-async def get_all_keywords_by_org_id(request: Request, org_id: int, userId: int, page: int, limit: int):
-    offset = (page - 1) * limit
 
-    query = """
-       SELECT k.keyword_id, k.keyword_name, k.org_id,k.is_active,c.cat_name AS category_name
-        FROM keyword_master k
-        Join category_master c ON k.cat_id = c.cat_id 
-        WHERE k.org_id = %s 
-        ORDER BY k.keyword_id DESC
-        LIMIT %s OFFSET %s;
-    """
-    count_query = """
-        SELECT COUNT(*) as total_count
-        FROM keyword_master k
-        WHERE k.org_id = %s
-    """
 
-    async with request.app.state.pool.acquire() as conn:
-        async with conn.cursor(aiomysql.DictCursor) as cursor:
-            await cursor.execute(query, (org_id, limit, offset))
-            keywords = await cursor.fetchall()
-
-            await cursor.execute(count_query, (org_id))
-            total_count = (await cursor.fetchone())["total_count"]
-
-    return {"keywords": keywords, "totalCount": total_count}
-   
-   
-   
-   #listing the roles in dropdown at the time of creation of user On UI     
+#--------------Fetch all roles----------------   
 async def get_all_roles(request: Request) -> list[dict]:
     query = """
         SELECT r.role_id, r.role_name
@@ -379,22 +218,6 @@ async def get_all_roles(request: Request) -> list[dict]:
     async with request.app.state.pool.acquire() as conn:
         async with conn.cursor() as cursor:
             await cursor.execute(query)
-            rows = await cursor.fetchall()
-            columns = [col[0] for col in cursor.description]
-            return [dict(zip(columns, row)) for row in rows]
-       
-        
-    #listing the categories in dropdown at the time of creation of user On UI     
-async def get_all_categories(request: Request,userId:int,org_id:int) -> list[dict]:
-    query = """
-        SELECT c.cat_id, c.cat_name
-        FROM category_master c
-        where c.is_active = 1
-        AND c.user_id=%s AND c.org_id=%s
-    """
-    async with request.app.state.pool.acquire() as conn:
-        async with conn.cursor() as cursor:
-            await cursor.execute(query,(userId,org_id))
             rows = await cursor.fetchall()
             columns = [col[0] for col in cursor.description]
             return [dict(zip(columns, row)) for row in rows]

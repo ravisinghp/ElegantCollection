@@ -3,14 +3,12 @@ from fastapi import HTTPException
 from app.models.schemas.AdminSchema import (
     UserCreate,
     UserUpdate,
-    KeywordCreate,
     RoleResponse,
     CategoryResponse,
     EmailSettings,
-    KeywordUpdate,
 )
 from starlette.status import HTTP_400_BAD_REQUEST
-from app.models.domain.AdminDomain import UserInDB, KeywordMaster
+from app.models.domain.AdminDomain import UserInDB
 from app.db.repositories import AdminRepo as admin_repo
 from app.db.repositories import AdminRepo
 from typing import List, Dict, Any
@@ -40,17 +38,16 @@ conf = ConnectionConfig(
 
 
 
-# register User
+#----------------register User----------------------
 async def register_user(request: Request, user: UserCreate) -> int:
     # Check if user exists by email
-    existing_user = await admin_repo.get_user_by_email(request, user.mail_id,user.org_id)
+    existing_user = await admin_repo.get_user_by_emailId(request, user.mail_id,user.role_id)
     if existing_user:
         raise HTTPException(
             status_code=400, detail="User already exists with this email"
         )
 
     role_id = user.role_id
-    org_id = user.org_id
 
     # Hash password
     hashed_password = admin_repo.hash_password(user.password)
@@ -65,7 +62,6 @@ async def register_user(request: Request, user: UserCreate) -> int:
         user_name=user.user_name,
         mail_id=user.mail_id,
         password=hashed_password,
-        org_id=org_id,
         role_id=role_id,
         folder_name=user.folder_name,
         created_by=user.created_by,
@@ -74,7 +70,7 @@ async def register_user(request: Request, user: UserCreate) -> int:
 
     # Save user
     user_id = await admin_repo.create_user(
-        request, user_in_db, org_id, role_id, user.created_by
+        request, user_in_db
     )
 
     #   send mail to the created user
@@ -97,23 +93,20 @@ async def register_user(request: Request, user: UserCreate) -> int:
     # )
 
 
-
     # Use shared email service
-    email_service = EmailService()
-    try:
-        login_link = "https://icaptureapp.com/"
-        await email_service.send_welcome_email(
-            user_name=user.user_name,
-            email=user.mail_id,
-            password=user.password,
-            login_link=login_link ,
-        )
-    except Exception as e:
-        print(f"Failed to send email: {e}")
-        pass
-
+    # email_service = EmailService()
+    # try:
+    #     login_link = "https://icaptureapp.com/"
+    #     await email_service.send_welcome_email(
+    #         user_name=user.user_name,
+    #         email=user.mail_id,
+    #         password=user.password,
+    #         login_link=login_link ,
+    #     )
+    # except Exception as e:
+    #     print(f"Failed to send email: {e}")
+    #     pass
     return user_id
-
 
 
 #update user
@@ -125,46 +118,6 @@ async def update_user(request: Request, user_id: int, user: UserUpdate):
     )
     role_id = user.role_id if user.role_id else None
     await admin_repo.update_user_in_db(request, user_id, user, org_id, role_id)
-
-
-
-#Keyword Creation
-async def create_keyword(request: Request, keyword: KeywordCreate) -> KeywordMaster:
-    try:
-        existing_keyword = await admin_repo.get_keyword_by_keyword_name(
-            request, keyword.keyword_name,keyword.org_id,keyword.cat_id
-        )
-    except Exception as e:
-        raise HTTPException(
-            status_code=500, detail="Internal error while checking keyword"
-        )
-
-    if existing_keyword:
-        raise HTTPException(
-            status_code=400, detail="keyword already exists with this name"
-        )
-
-    try:
-        keyword_id = await admin_repo.create_keyword(
-            request,
-            keyword.keyword_name,
-            keyword.org_id,
-            keyword.created_by,
-            keyword.cat_id,
-        )
-    except Exception as e:
-
-        raise HTTPException(
-            status_code=500, detail="Internal error while creating keyword"
-        )
-    return keyword_id
-
-
-
-# update keyword
-async def update_keyword(request: Request, keyword: KeywordUpdate) -> KeywordMaster:
-    return await admin_repo.update_keyword(request, keyword)
-
 
 
 #Login User
@@ -185,22 +138,13 @@ async def login_user(request: Request, email: str, password: str) -> dict:
     return user_data
 
 
-# Fetching the all users on admin dashboard
-# async def get_all_users_by_org_id(request: Request,org_id:int,userId:int):
-#     try:
-#         return await admin_repo.get_all_users_by_org_id(request,org_id,userId)
-#     except Exception as e:
-#         return None
-
-
-
-#listing all users on admin dashboard
-async def get_all_users_by_org_id(
-    request: Request, org_id: int, userId: int, page: int, limit: int, role_id:int
+#-------------listing all users on System dashboard-----------------
+async def get_all_users(
+    request: Request
 ) -> Dict[str, Any]:
     try:
-        result = await admin_repo.get_all_users_by_org_id(
-            request, org_id, userId, page, limit, role_id
+        result = await admin_repo.get_all_users(
+            request
         )
         return result
     except Exception as e:
@@ -208,40 +152,14 @@ async def get_all_users_by_org_id(
         return {"users": [], "totalCount": 0}
 
 
-# Fetching the all Keywords on admin dashboard
-async def get_all_keywords_by_org_id(
-    request: Request, org_id: int, userId: int, page: int, limit: int
-) -> Dict[str, Any]:
-    try:
-        result = await admin_repo.get_all_keywords_by_org_id(
-            request, org_id, userId, page, limit
-        )
-        return result
-    except Exception as e:
-        print("Error in service:", e)
-        return {"keywords": [], "totalCount": 0}
-
-
-
-
-# Fetching the all roles in dropdown on create user model
+#--------------Fetch all roles----------------
 async def get_all_roles(request: Request) -> list[RoleResponse]:
     try:
         roles = await admin_repo.get_all_roles(request)
         return [RoleResponse(**role) for role in roles]
     except Exception as e:
         return None
-
-#listing Category on UI creation of keyword
-async def get_all_categories(
-    request: Request, userId: int, org_id: int
-) -> list[CategoryResponse]:
-    try:
-        categories = await admin_repo.get_all_categories(request, userId, org_id)
-        return [CategoryResponse(**category) for category in categories]
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
+    
 
 
 # total effort time on admin dashboard

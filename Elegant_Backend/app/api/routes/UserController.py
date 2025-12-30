@@ -52,6 +52,7 @@ async def download_missing_po_report(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+#Donwload Missing Report and Missmatch Report 
 @router.get("/downloadMismatchPOReport")
 async def download_mismatch_po_report(
     request: Request,
@@ -75,44 +76,190 @@ async def download_mismatch_po_report(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-#Update the PO Comment On UI 
-@router.put("/updatePoComment")
-async def update_po_comment(
+#Adding and Update comment for po missing and po mismatch from UI
+@router.put("/savePoComment")
+async def save_po_comment(
     request: Request,
     payload: UpdatePoCommentRequest,
     report_type: str = Query(..., regex="^(missing|mismatch)$")
 ):
-
     if report_type == "missing":
         if not payload.po_missing_id:
-            raise HTTPException(
-                status_code=400,
-                detail="po_missing_id is required for missing report"
-            )
+            raise HTTPException(400, "po_missing_id is required")
         record_id = payload.po_missing_id
 
     elif report_type == "mismatch":
         if not payload.po_mismatch_id:
-            raise HTTPException(
-                status_code=400,
-                detail="po_mismatch_id is required for mismatch report"
-            )
+            raise HTTPException(400, "po_mismatch_id is required")
         record_id = payload.po_mismatch_id
 
-    updated = await UserService.update_po_comment(
+    saved = await UserService.save_po_comment(
         report_type=report_type,
         record_id=record_id,
         comment=payload.comment,
         request=request
     )
 
-    if not updated:
-        raise HTTPException(status_code=404, detail="Record not found or inactive")
+    if not saved:
+        raise HTTPException(404, "Record not found or inactive")
 
     return {
         "status": "success",
-        "message": "Comment updated successfully"
+        "message": "Comment saved successfully"
     }
+
+
+#For Fetching the PO comment ON UI 
+@router.get("/fetchPoComment")
+async def fetch_po_comment(
+    request: Request,
+    report_type: str = Query(..., regex="^(missing|mismatch)$"),
+    po_missing_id: int | None = None,
+    po_mismatch_id: int | None = None,
+):
+    if report_type == "missing":
+        if not po_missing_id:
+            raise HTTPException(400, "po_missing_id is required")
+        record_id = po_missing_id
+
+    elif report_type == "mismatch":
+        if not po_mismatch_id:
+            raise HTTPException(400, "po_mismatch_id is required")
+        record_id = po_mismatch_id
+
+    comment = await UserService.fetch_po_comment(
+        report_type=report_type,
+        record_id=record_id,
+        request=request
+    )
+
+    if comment is None:
+        raise HTTPException(404, "Comment not found")
+
+    return {
+        "status": "success",
+        "comment": comment
+    }
+
+
+#For Ignoring the PO in Next Sync On UI
+@router.put("/ignore-po")
+async def ignore_po(
+    request: Request,
+    report_type: str = Query(..., regex="^(missing|mismatch)$"),
+    po_missing_id: int | None = None,
+    po_mismatch_id: int | None = None,
+):
+    if report_type == "missing":
+        if not po_missing_id:
+            raise HTTPException(400, "po_missing_id is required")
+        record_id = po_missing_id
+
+    elif report_type == "mismatch":
+        if not po_mismatch_id:
+            raise HTTPException(400, "po_mismatch_id is required")
+        record_id = po_mismatch_id
+
+    ignored = await UserService.ignore_po(
+        report_type=report_type,
+        record_id=record_id,
+        request=request
+    )
+
+    if not ignored:
+        raise HTTPException(404, "Record not found or already ignored")
+
+    return {
+        "status": "success",
+        "message": "PO ignored successfully"
+    }
+
+
+# @router.post("/createPoComment")
+# async def create_po_comment(
+#     request: Request,
+#     payload: UpdatePoCommentRequest,
+#     report_type: str = Query(..., regex="^(missing|mismatch)$")
+# ):
+#     if report_type == "missing":
+#         if not payload.po_missing_id:
+#             raise HTTPException(400, "po_missing_id is required")
+#         record_id = payload.po_missing_id
+
+#     elif report_type == "mismatch":
+#         if not payload.po_mismatch_id:
+#             raise HTTPException(400, "po_mismatch_id is required")
+#         record_id = payload.po_mismatch_id
+
+#     created = await UserService.create_po_comment(
+#         report_type=report_type,
+#         record_id=record_id,
+#         comment=payload.comment,
+#         request=request
+#     )
+
+#     if not created:
+#         raise HTTPException(404, "Record not found or inactive")
+
+#     return {
+#         "status": "success",
+#         "message": "Comment added successfully"
+#     }
+
+# #Update the PO Comment On UI 
+# @router.put("/updatePoComment")
+# async def update_po_comment(
+#     request: Request,
+#     payload: UpdatePoCommentRequest,
+#     report_type: str = Query(..., regex="^(missing|mismatch)$")
+# ):
+
+#     if report_type == "missing":
+#         if not payload.po_missing_id:
+#             raise HTTPException(
+#                 status_code=400,
+#                 detail="po_missing_id is required for missing report"
+#             )
+#         record_id = payload.po_missing_id
+
+#     elif report_type == "mismatch":
+#         if not payload.po_mismatch_id:
+#             raise HTTPException(
+#                 status_code=400,
+#                 detail="po_mismatch_id is required for mismatch report"
+#             )
+#         record_id = payload.po_mismatch_id
+
+#     updated = await UserService.update_po_comment(
+#         report_type=report_type,
+#         record_id=record_id,
+#         comment=payload.comment,
+#         request=request
+#     )
+
+#     if not updated:
+#         raise HTTPException(status_code=404, detail="Record not found or inactive")
+
+#     return {
+#         "status": "success",
+#         "message": "Comment updated successfully"
+#     }
+
+
+
+@router.get("/missing-po")
+async def missing_po_data_fetch(request: Request):
+    return await UserService.missing_po_data_fetch(request)
+
+
+@router.get("/mismatch-po")
+async def mismatch_po_data_fetch(request: Request):
+    return await UserService.mismatch_po_data_fetch(request)
+
+@router.get("/matched-po")
+async def matched_po_data_fetch(request: Request):
+    return await UserService.matched_po_data_fetch(request)
+
 
 
 ### This code is used to fetch calculateing one month to current date data week wise

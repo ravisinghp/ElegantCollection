@@ -40,7 +40,7 @@ async def fetch_emails_processed_by_user_id(user_id: int,  request: Request) -> 
 async def fetch_documents_analyzed_by_user_id(user_id: int, request: Request) -> int:
     query = """
        SELECT COUNT(m.mail_dtl_id) 
-        FROM email_attachments em,POlyticsAI.mail_details m
+        FROM email_attachments em,mail_details m
         WHERE em.mail_dtl_id=m.mail_dtl_id and m.user_id = %s 
           AND m.is_active = TRUE
     """
@@ -111,10 +111,9 @@ async def fetch_po_mismatch_report(request: Request):
 
             return [dict(zip(columns, row)) for row in rows]
         
-        
-        
-    #Update the Comment For PO Missing 
-async def update_po_missing_comment(
+
+#Adding and Update comment for po missing  from UI
+async def save_po_missing_comment(
     po_missing_id: int,
     comment: str,
     request: Request
@@ -131,12 +130,11 @@ async def update_po_missing_comment(
         async with conn.cursor() as cursor:
             await cursor.execute(query, (comment, po_missing_id))
             await conn.commit()
-            return cursor.rowcount > 0 
-        
+            return cursor.rowcount > 0
 
 
-#Update the Comment For PO Mismatch
-async def update_po_mismatch_comment(
+#Adding and Update comment for po mismatch from UI
+async def save_po_mismatch_comment(
     po_mismatch_id: int,
     comment: str,
     request: Request
@@ -153,7 +151,279 @@ async def update_po_mismatch_comment(
         async with conn.cursor() as cursor:
             await cursor.execute(query, (comment, po_mismatch_id))
             await conn.commit()
-            return cursor.rowcount > 0      
+            return cursor.rowcount > 0
+
+
+
+#For Fetching the missing PO comment ON UI 
+async def fetch_missing_po_comment(
+        po_missing_id: int,
+        request: Request
+    ) -> str | None:
+
+        query = """
+            SELECT comment
+            FROM po_missing_report
+            WHERE po_missing_id = %s
+              AND active = 1
+        """
+
+        async with request.app.state.pool.acquire() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute(query, (po_missing_id,))
+                row = await cursor.fetchone()
+                return row[0] if row else None  
+            
+
+
+#For Fetching the Mismatch PO comment ON UI 
+async def fetch_mismatch_po_comment(
+        po_mismatch_id: int,
+        request: Request
+    ) -> str | None:
+
+        query = """
+            SELECT comment
+            FROM po_mismatch_report
+            WHERE po_mismatch_id = %s
+              AND active = 1
+        """
+
+        async with request.app.state.pool.acquire() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute(query, (po_mismatch_id,))
+                row = await cursor.fetchone()
+                return row[0] if row else None
+
+
+#For Ignoring the Missing PO in Next Sync On UI
+async def ignore_missing_po(
+        po_missing_id: int,
+        request: Request
+    ) -> bool:
+
+        query = """
+            UPDATE po_missing_report
+            SET active = 0
+            WHERE po_missing_id = %s
+              AND active = 1
+        """
+
+        async with request.app.state.pool.acquire() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute(query, (po_missing_id,))
+                await conn.commit()
+                return cursor.rowcount > 0
+            
+   
+#For Ignoring the Mismatch PO in Next Sync On UI         
+async def ignore_mismatch_po(
+        po_mismatch_id: int,
+        request: Request
+    ) -> bool:
+
+        query = """
+            UPDATE po_mismatch_report
+            SET active = 0
+            WHERE po_mismatch_id = %s
+              AND active = 1
+        """
+
+        async with request.app.state.pool.acquire() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute(query, (po_mismatch_id,))
+                await conn.commit()
+                return cursor.rowcount > 0
+# async def create_po_missing_comment(
+#     po_missing_id: int,
+#     comment: str,
+#     request: Request
+# ) -> bool:
+
+#     query = """
+#         UPDATE po_missing_report
+#         SET comment = %s
+#         WHERE po_missing_id = %s
+#           AND active = 1
+#           AND (comment IS NULL OR comment = '')
+#     """
+
+#     async with request.app.state.pool.acquire() as conn:
+#         async with conn.cursor() as cursor:
+#             await cursor.execute(query, (comment, po_missing_id))
+#             await conn.commit()
+#             return cursor.rowcount > 0
+        
+        
+# async def create_po_mismatch_comment(
+#     po_mismatch_id: int,
+#     comment: str,
+#     request: Request
+# ) -> bool:
+
+#     query = """
+#         UPDATE po_mismatch_report
+#         SET comment = %s
+#         WHERE po_mismatch_id = %s
+#           AND active = 1
+#           AND (comment IS NULL OR comment = '')
+#     """
+
+#     async with request.app.state.pool.acquire() as conn:
+#         async with conn.cursor() as cursor:
+#             await cursor.execute(query, (comment, po_mismatch_id))
+#             await conn.commit()
+#             return cursor.rowcount > 0
+
+        
+   
+#     #Update the Comment For PO Missing 
+# async def update_po_missing_comment(
+#     po_missing_id: int,
+#     comment: str,
+#     request: Request
+# ) -> bool:
+
+#     query = """
+#         UPDATE po_missing_report
+#         SET comment = %s
+#         WHERE po_missing_id = %s
+#           AND active = 1
+#     """
+
+#     async with request.app.state.pool.acquire() as conn:
+#         async with conn.cursor() as cursor:
+#             await cursor.execute(query, (comment, po_missing_id))
+#             await conn.commit()
+#             return cursor.rowcount > 0 
+        
+
+
+# #Update the Comment For PO Mismatch
+# async def update_po_mismatch_comment(
+#     po_mismatch_id: int,
+#     comment: str,
+#     request: Request
+# ) -> bool:
+
+#     query = """
+#         UPDATE po_mismatch_report
+#         SET comment = %s
+#         WHERE po_mismatch_id = %s
+#           AND active = 1
+#     """
+
+#     async with request.app.state.pool.acquire() as conn:
+#         async with conn.cursor() as cursor:
+#             await cursor.execute(query, (comment, po_mismatch_id))
+#             await conn.commit()
+#             return cursor.rowcount > 0    
+        
+async def fetch_missing_po_data(request: Request):
+    query = """
+                    SELECT
+                pm.po_missing_id,
+                pm.po_det_id,
+                pm.system_po_id,
+
+                COALESCE(pd.po_number, sp.po_number) AS po_number,
+                COALESCE(pd.po_date, sp.po_date) AS po_date,
+                COALESCE(pd.vendor_number, sp.vendor_code) AS vendor_code,
+                COALESCE(pd.customer_name, sp.customer_name) AS customer_name,
+
+                pm.comment,
+                'MISSING' AS po_status,
+
+                CASE
+                    WHEN pm.po_det_id IS NOT NULL THEN 'SCANNED'
+                    ELSE 'SYSTEM'
+                END AS source
+            FROM po_missing_report pm
+            LEFT JOIN po_details pd ON pm.po_det_id = pd.po_det_id
+            LEFT JOIN system_po_details sp ON pm.system_po_id = sp.system_po_id
+            WHERE pm.active = 1
+            ORDER BY pm.created_on DESC;
+    """
+
+    async with request.app.state.pool.acquire() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(query)
+            cols = [c[0] for c in cursor.description]
+            rows = await cursor.fetchall()
+            return [dict(zip(cols, r)) for r in rows]
+        
+        
+async def fetch_mismatch_po_data(request: Request):
+    query = """
+                    SELECT
+                mm.po_mismatch_id,
+                mm.po_det_id,
+                mm.system_po_id,
+
+                pd.po_number,
+                pd.po_date,
+                pd.vendor_number AS vendor_code,
+                pd.customer_name,
+
+                mm.mismatch_attribute,
+                mm.scanned_value,
+                mm.system_value,
+                mm.comment,
+
+                'MISMATCH' AS po_status
+            FROM po_mismatch_report mm
+            JOIN po_details pd 
+                ON mm.po_det_id = pd.po_det_id
+            LEFT JOIN system_po_details sp
+                ON mm.system_po_id = sp.system_po_id
+            WHERE mm.active = 1
+            ORDER BY mm.created_on DESC;
+    """
+
+    async with request.app.state.pool.acquire() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(query)
+            cols = [c[0] for c in cursor.description]
+            rows = await cursor.fetchall()
+            return [dict(zip(cols, r)) for r in rows]
+        
+
+async def fetch_matched_po_data(request: Request):
+    query = """
+                SELECT
+            pd.po_det_id,
+            sp.system_po_id,
+
+            pd.po_number,
+            pd.po_date,
+            pd.vendor_number AS vendor_code,
+            pd.customer_name,
+
+            'MATCHED' AS po_status
+        FROM po_details pd
+        JOIN system_po_details sp
+            ON pd.po_number = sp.po_number
+        AND pd.vendor_number = sp.vendor_code
+        AND pd.po_date = sp.po_date
+
+        LEFT JOIN po_missing_report pm
+        ON pm.po_det_id = pd.po_det_id AND pm.active = 1
+
+        LEFT JOIN po_mismatch_report mm
+        ON mm.po_det_id = pd.po_det_id AND mm.active = 1
+
+        WHERE pm.po_det_id IS NULL
+        AND mm.po_det_id IS NULL
+
+        ORDER BY pd.po_date DESC;
+    """
+
+    async with request.app.state.pool.acquire() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(query)
+            cols = [c[0] for c in cursor.description]
+            rows = await cursor.fetchall()
+            return [dict(zip(cols, r)) for r in rows]
 #Fetching Total Numbers of Meeting on User Dashboard
 # async def fetch_meetings_processed_by_user_id(user_id: int, from_date: str, to_date: str, request: Request) -> int:
 #     query = """

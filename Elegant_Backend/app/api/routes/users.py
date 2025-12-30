@@ -68,20 +68,20 @@ def login(provider: str = Query(..., regex="^(google|outlook)$")):
 
 @router.get("/callback")
 async def callback(
-    code: str,
+    code: str,  
     mails_repo: MailsRepository = Depends(get_repository(MailsRepository)),
 ):
     # url = await exchange_code_for_token(code)
     # Attempt to fetch-and-save mails immediately server-side, then redirect
     try:
         url = await exchange_code_for_token(code)
-        parsed_url = urlparse(url)
+        parsed_url = urlparse(url['url'])
         query_params = parse_qs(parsed_url.query)
         token = query_params.get("mail_token", [None])[0]
         if token:
             # await fetch_and_save_mails(token, mails_repo)
             # await fetch_and_save_mails_by_folders(token, mails_repo)
-            return RedirectResponse(url)
+            return RedirectResponse(url['url'])
     except Exception:
         # If anything goes wrong, still continue with redirect
         pass
@@ -89,6 +89,51 @@ async def callback(
         return RedirectResponse(f"{failed_url}")
         # return RedirectResponse("http://localhost:3000/login?error=callback_failed")
         # return RedirectResponse("http://139.144.4.191:3000/login?error=callback_failed")
+
+
+# from fastapi import APIRouter, Depends, HTTPException
+# from fastapi.responses import RedirectResponse
+# from app.services.outlook_oauth import exchange_code_for_token
+# from app.db.repositories.mails import MailsRepository
+
+# router = APIRouter(prefix="/auth/outlook")
+
+# SUCCESS_REDIRECT = "http://localhost:5173/dashboard/user"
+# FAIL_REDIRECT = "http://localhost:5173/login?error=outlook_failed"
+
+# @router.get("/callback")
+# async def callback(
+#     code: str,
+#     mails_repo: MailsRepository = Depends(get_repository(MailsRepository)),
+# ):
+#     try:
+#         token_data = await exchange_code_for_token(code)
+
+#         access_token = token_data.get("access_token")
+#         refresh_token = token_data.get("refresh_token")
+
+#         if not refresh_token:
+#             raise HTTPException(status_code=400, detail="No refresh token")
+
+#         # # ✅ SAVE REFRESH TOKEN
+#         # await mails_repo.save_refresh_token(
+#         #     refresh_token=refresh_token
+#         # )
+
+#         # (optional) use access token now
+#         # await fetch_and_save_mails(access_token, mails_repo)
+
+#         # ✅ REDIRECT TO REACT DASHBOARD
+#         return RedirectResponse(
+#             url="http://localhost:3000/dashboard?outlook=connected",
+#             status_code=302
+#         )
+
+#     except Exception as e:
+#         return RedirectResponse(
+#             url="http://localhost:3000/dashboard?outlook=failed",
+#             status_code=302
+#         )
 
 
 # This code is used for generaing token for gmail(Google OAuth)

@@ -13,7 +13,7 @@ class UserCreate(BaseModel):
     password: str
     # org_name: str
     # user_id: int
-    org_id: int
+    # org_id: int
     role_id: int
     folder_name: str
     provider:str
@@ -63,13 +63,12 @@ class LoginResponse(BaseModel):
     userid: int
     username: str
     email: str
-    orgid: Optional[int] = None
-    orgname: Optional[str] = None
     roleid: Optional[int] = None
     rolename: Optional[str] = None
     token: str
     provider: Optional[str] = None 
     term_condition_flag: Optional[int] = 0
+    is_first_login: bool = True
 
 
 # replaces allow_population_by_field_name

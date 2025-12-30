@@ -30,11 +30,4 @@ class RoleMaster(BaseModel):
 #     total: int
 #     page: int
 #     limit: int
-#     total_pages: 
-
-
-#Update the PO Comment On UI 
-class UpdatePoCommentRequest(BaseModel):
-    po_missing_id: Optional[int] = None
-    po_mismatch_id: Optional[int] = None
-    comment: str
+#     total_pages: int

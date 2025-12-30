@@ -46,6 +46,8 @@ async def get_weekly_hours_previous_month(
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+<<<<<<< HEAD
+=======
 
 
 
@@ -219,10 +221,33 @@ async def update_po_comment(
 #         )
 #     except Exception as e:
 #         raise HTTPException(status_code=500, detail=str(e))
+>>>>>>> c91285d3e10beced0bc4f53193cdf2f4f500bcd7
 
 
 
 
+<<<<<<< HEAD
+#Fetching Top Keywords On User Dashboard 
+@router.get("/top-keywords")
+async def get_top_keywords(request: Request,org_id: int, user_id: int,from_date: str = Query(...),to_date: str = Query(...),):
+    try:
+        top_5 = await UserService.get_top_keywords(request, org_id, user_id,from_date,to_date)
+        return {"org_id": org_id, "top_keywords": top_5}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+        # print(e)
+        # return []
+        
+        
+#Last Sync On User Dashboard        
+@router.get("/lastSync")
+async def get_last_sync_by_user_id(user_id: int,request: Request):
+    try: 
+        result = await UserService.get_last_sync_by_user_id(user_id,request)
+        return {"data": result}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+=======
 # #Fetching Top Keywords On User Dashboard 
 # @router.get("/top-keywords")
 # async def get_top_keywords(request: Request,org_id: int, user_id: int,from_date: str = Query(...),to_date: str = Query(...),):
@@ -243,11 +268,23 @@ async def update_po_comment(
 #         return {"data": result}
 #     except Exception as e:
 #         raise HTTPException(status_code=500, detail=str(e))
+>>>>>>> c91285d3e10beced0bc4f53193cdf2f4f500bcd7
     
  
  
      
 #Update Term Condition Fleg When User login once   
+<<<<<<< HEAD
+@router.post("/update_term_condition_flag")
+async def update_term_condition_flag(request: Request, user_id: int, role_id: int, org_id: int):
+    try:
+        result = await UserService.update_term_condition_flag(user_id, role_id, org_id, request)
+        if not result:
+            raise HTTPException(status_code=400, detail="User not found or update failed")
+        return {"success": True, "message": "Terms accepted"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+=======
 # @router.post("/update_term_condition_flag")
 # async def update_term_condition_flag(request: Request, user_id: int, role_id: int, org_id: int):
 #     try:
@@ -257,5 +294,6 @@ async def update_po_comment(
 #         return {"success": True, "message": "Terms accepted"}
 #     except Exception as e:
 #         raise HTTPException(status_code=500, detail=str(e))
+>>>>>>> c91285d3e10beced0bc4f53193cdf2f4f500bcd7
 
 

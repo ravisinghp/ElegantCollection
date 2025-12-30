@@ -29,10 +29,10 @@ class CategoryService:
                 # Check keyword exists in this category
                 existing_keyword = await self.repo.is_keyword_exists(keyword_name, user_id, cat_id)
                 if existing_keyword:
-                    raise HTTPException(
-                        status_code=400,
-                        detail="Keyword already exists in this category"
-                    )
+                    return{
+                        "success": False,
+                        "message": "Keyword already exists in this category"
+                    }
 
                 # Insert keyword only
                 created_by = request.user_id

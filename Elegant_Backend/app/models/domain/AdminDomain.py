@@ -13,7 +13,6 @@ class UserInDB(BaseModel):
     folder_name: str = Field(alias="folderName")
     created_by: Optional[int] = None
     provider :str
-
     model_config = ConfigDict(
         populate_by_name=True,  # allow both snake_case and camelCase
         from_attributes=True,  # replaces orm_mode

@@ -24,11 +24,11 @@ async def get_org_id_by_name(request: Request, org_name: str) -> Optional[int]:
     
         
         
-#Creating new user
-async def create_user(request: Request, user: UserInDB, org_id: int, role_id: int,created_by:int) -> int:
+#--------------------Creating new user---------------------
+async def create_user(request: Request, user: UserInDB) -> int:
     query = """
-        INSERT INTO users_master (user_name, mail_id, password, org_id, role_id,folder_name,created_by,provider)
-        VALUES (%s, %s, %s, %s, %s,%s,%s,%s)
+        INSERT INTO users_master (user_name, mail_id, password, role_id, folder_name, created_by, provider)
+        VALUES (%s, %s, %s, %s, %s,%s,%s)
     """
     async with request.app.state.pool.acquire() as conn:
         async with conn.cursor() as cursor:
@@ -36,16 +36,13 @@ async def create_user(request: Request, user: UserInDB, org_id: int, role_id: in
                 user.user_name,
                 user.mail_id,
                 user.password,
-                org_id,
-                role_id,
+                user.role_id,
                 user.folder_name,
                 user.created_by,
                 user.provider
             ))
             await conn.commit()
-            return cursor.lastrowid
-        
-        
+            return cursor.lastrowid        
 
         
 #Update the user
@@ -84,7 +81,7 @@ async def update_user_in_db(request: Request, user_id: int, user_data: UserUpdat
             await conn.commit()
 
 
-#Encrypt the password
+#---------------Encrypt the password------------------
 def hash_password(password: str) -> str:
     hashed = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt())
     return hashed.decode('utf-8')
@@ -96,12 +93,12 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
 
 
 
-#Getting the User by email Id
-async def get_user_by_email(request: Request, email: str,org_id:int) -> Optional[UserInDB]:
-    query = "SELECT * FROM users_master WHERE mail_id = %s "
+#--------------Getting the User by email Id--------------
+async def get_user_by_emailId(request: Request, email: str, role_id:int) -> Optional[UserInDB]:
+    query = "SELECT * FROM users_master WHERE mail_id = %s AND role_id=%s AND is_active = 1"
     async with request.app.state.pool.acquire() as conn:
         async with conn.cursor() as cursor:
-            await cursor.execute(query, (email))
+            await cursor.execute(query, (email, role_id))
             row = await cursor.fetchone()
             if row:
                 columns = [col[0] for col in cursor.description]
@@ -180,120 +177,38 @@ async def get_user_by_email(request: Request, email: str) -> Optional[dict]:
             return None
 
 
-        #Listing all users on admin dashboard
-# async def get_all_users_by_org_id(request: Request,org_id:int,userId:int) -> list[dict]:
-#     query = """
-#         SELECT 
-#     u.user_id,
-#     u.org_id,
-#     u.user_name, 
-#     o.org_name, 
-#     COUNT(m.mail_dtl_id) AS email_count
-# FROM users_master u
-# JOIN org_master o 
-#     ON u.org_id = o.org_id
-# LEFT JOIN mail_details m 
-#     ON u.user_id = m.user_id 
-#     AND m.is_active = 1
-# WHERE u.is_active = 1 
-#   AND o.is_active = 1
-#   AND (u.org_id = %s AND u.created_by = %s)
-# GROUP BY u.user_id, u.org_id, u.user_name, o.org_name
-# ORDER BY u.user_id DESC;
-        
-#     """
-#     async with request.app.state.pool.acquire() as conn:
-#         async with conn.cursor() as cursor:
-#             await cursor.execute(query,(org_id, userId))
-#             rows = await cursor.fetchall()
-#             columns = [col[0] for col in cursor.description]
-#             return [dict(zip(columns, row)) for row in rows]
-
-
-#Listing All Users On admin Dashboard
-async def get_all_users_by_org_id(request, org_id: int, userId: int, page: int, limit: int, role_id:int):
-    offset = (page - 1) * limit
-    print(f"Query Params => org_id={org_id}, userId={userId}, page={page}, limit={limit}, offset={offset}")
-
+#------------Listing All Users On System Dashboard-----------------
+async def get_all_users(request):
     query_users = """
         SELECT 
-        u.user_id, 
-        u.user_name, 
-        o.org_name,
-         CAST(u.is_active AS UNSIGNED) AS is_active,  
-        COALESCE(email_counts.email_count, 0) as email_count
-    FROM users_master u
-    JOIN org_master o ON u.org_id = o.org_id
-    LEFT JOIN (
-        SELECT user_id, COUNT(*) as email_count
-        FROM mail_details
-        WHERE is_active = 1
-        GROUP BY user_id
-    ) email_counts ON email_counts.user_id = u.user_id
-    WHERE u.org_id = %s
-    AND u.role_id = 2
-    ORDER BY u.user_id DESC
-    LIMIT %s OFFSET %s
+            um.user_id,
+            um.role_id,
+            um.user_name,
+            um.mail_id,
+            rm.role_name
+        FROM users_master um
+        LEFT JOIN role_master rm ON rm.role_id = um.role_id
+        ORDER BY um.user_id DESC
     """
 
-    query_count = """
-        SELECT COUNT(*) as total_count
-        FROM users_master u
-         WHERE u.org_id = %s
-	 AND u.role_id = 2
-    """
+    query_count = "SELECT COUNT(*) AS total_count FROM users_master"
 
     async with request.app.state.pool.acquire() as conn:
         async with conn.cursor(aiomysql.DictCursor) as cur:
-            # Fetch users
-            await cur.execute(query_users, (org_id, limit, offset))
+
+            await cur.execute(query_users)
             users = await cur.fetchall()
 
-            # Fetch total count
-            await cur.execute(query_count, (org_id))
-            total_count_row = await cur.fetchone()
-            total_count = total_count_row["total_count"] if total_count_row else 0
-
-    
+            await cur.execute(query_count)
+            total_count = (await cur.fetchone())["total_count"]
 
     return {
         "users": users,
         "totalCount": total_count
     }
-    
-    
-    
- #Listing all keywords on admin dashboard
-async def get_all_keywords_by_org_id(request: Request, org_id: int, userId: int, page: int, limit: int):
-    offset = (page - 1) * limit
 
-    query = """
-       SELECT k.keyword_id, k.keyword_name, k.org_id,k.is_active,c.cat_name AS category_name
-        FROM keyword_master k
-        Join category_master c ON k.cat_id = c.cat_id 
-        WHERE k.org_id = %s 
-        ORDER BY k.keyword_id DESC
-        LIMIT %s OFFSET %s;
-    """
-    count_query = """
-        SELECT COUNT(*) as total_count
-        FROM keyword_master k
-        WHERE k.org_id = %s
-    """
 
-    async with request.app.state.pool.acquire() as conn:
-        async with conn.cursor(aiomysql.DictCursor) as cursor:
-            await cursor.execute(query, (org_id, limit, offset))
-            keywords = await cursor.fetchall()
-
-            await cursor.execute(count_query, (org_id))
-            total_count = (await cursor.fetchone())["total_count"]
-
-    return {"keywords": keywords, "totalCount": total_count}
-   
-   
-   
-   #listing the roles in dropdown at the time of creation of user On UI     
+#--------------Fetch all roles----------------   
 async def get_all_roles(request: Request) -> list[dict]:
     query = """
         SELECT r.role_id, r.role_name
@@ -303,22 +218,6 @@ async def get_all_roles(request: Request) -> list[dict]:
     async with request.app.state.pool.acquire() as conn:
         async with conn.cursor() as cursor:
             await cursor.execute(query)
-            rows = await cursor.fetchall()
-            columns = [col[0] for col in cursor.description]
-            return [dict(zip(columns, row)) for row in rows]
-       
-        
-    #listing the categories in dropdown at the time of creation of user On UI     
-async def get_all_categories(request: Request,userId:int,org_id:int) -> list[dict]:
-    query = """
-        SELECT c.cat_id, c.cat_name
-        FROM category_master c
-        where c.is_active = 1
-        AND c.user_id=%s AND c.org_id=%s
-    """
-    async with request.app.state.pool.acquire() as conn:
-        async with conn.cursor() as cursor:
-            await cursor.execute(query,(userId,org_id))
             rows = await cursor.fetchall()
             columns = [col[0] for col in cursor.description]
             return [dict(zip(columns, row)) for row in rows]

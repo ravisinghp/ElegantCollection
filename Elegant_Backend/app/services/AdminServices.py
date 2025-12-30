@@ -109,15 +109,10 @@ async def register_user(request: Request, user: UserCreate) -> int:
     return user_id
 
 
-#update user
+##----------------update user---------------
 async def update_user(request: Request, user_id: int, user: UserUpdate):
-    org_id = (
-        await admin_repo.get_org_id_by_name(request, user.org_name)
-        if user.org_name
-        else None
-    )
     role_id = user.role_id if user.role_id else None
-    await admin_repo.update_user_in_db(request, user_id, user, org_id, role_id)
+    await admin_repo.update_user_in_db(request, user_id, user, role_id)
 
 
 #Login User

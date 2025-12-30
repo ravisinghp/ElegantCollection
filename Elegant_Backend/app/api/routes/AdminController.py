@@ -54,9 +54,9 @@ async def get_all_roles(request: Request):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# User Updation
+##---------------User Updation---------------
 @router.put("/updateUser/{user_id}")
-async def update_user_endpoint(user_id: int, user_data: UserUpdate, request: Request):
+async def update_user(user_id: int, user_data: UserUpdate, request: Request):
     try:
         await update_user(request, user_id, user_data)
         return {"message": "User updated successfully"}

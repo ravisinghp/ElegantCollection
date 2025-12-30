@@ -137,28 +137,125 @@ def _generate_po_pdf(df, filename_prefix):
         "application/pdf"
     )
     
-    
-    
-#Update the PO Comment On UI 
-async def update_po_comment(
+    #Adding and Update comment for po missing and po mismatch from UI
+async def save_po_comment(
     report_type: str,
     record_id: int,
     comment: str,
     request: Request
 ):
     if report_type == "missing":
-        return await UserRepo.update_po_missing_comment(
+        return await UserRepo.save_po_missing_comment(
             record_id, comment, request
         )
 
     elif report_type == "mismatch":
-        return await UserRepo.update_po_mismatch_comment(
+        return await UserRepo.save_po_mismatch_comment(
             record_id, comment, request
         )
 
-    else:
-        raise ValueError("Invalid report type")
+
+#For Fetching the PO comment ON UI 
+async def fetch_po_comment(
+        report_type: str,
+        record_id: int,
+        request: Request
+    ) -> str | None:
+
+        if report_type == "missing":
+            return await UserRepo.fetch_missing_po_comment(
+                record_id, request
+            )
+
+        elif report_type == "mismatch":
+            return await UserRepo.fetch_mismatch_po_comment(
+                record_id, request
+            )
+
+        else:
+            raise ValueError("Invalid report type")
+
+
+#For Ignoring the PO in Next Sync On UI
+async def ignore_po(
+        report_type: str,
+        record_id: int,
+        request: Request
+    ) -> bool:
+
+        if report_type == "missing":
+            return await UserRepo.ignore_missing_po(
+                record_id, request
+            )
+
+        elif report_type == "mismatch":
+            return await UserRepo.ignore_mismatch_po(
+                record_id, request
+            )
+
+        else:
+            raise ValueError("Invalid report type")
+
+# async def create_po_comment(
+#     report_type: str,
+#     record_id: int,
+#     comment: str,
+#     request: Request
+# ):
+#     if report_type == "missing":
+#         return await UserRepo.create_po_missing_comment(
+#             record_id, comment, request
+#         )
+
+#     elif report_type == "mismatch":
+#         return await UserRepo.create_po_mismatch_comment(
+#             record_id, comment, request
+#         )
     
+# #Update the PO Comment On UI 
+# async def update_po_comment(
+#     report_type: str,
+#     record_id: int,
+#     comment: str,
+#     request: Request
+# ):
+#     if report_type == "missing":
+#         return await UserRepo.update_po_missing_comment(
+#             record_id, comment, request
+#         )
+
+#     elif report_type == "mismatch":
+#         return await UserRepo.update_po_mismatch_comment(
+#             record_id, comment, request
+#         )
+
+#     else:
+#         raise ValueError("Invalid report type")
+    
+
+async def missing_po_data_fetch(request: Request):
+        data = await UserRepo.fetch_missing_po_data(request)
+        return {
+            "status": "success",
+            "count": len(data),
+            "data": data
+        }
+        
+async def mismatch_po_data_fetch(request: Request):
+        data = await UserRepo.fetch_mismatch_po_data(request)
+        return {
+            "status": "success",
+            "count": len(data),
+            "data": data
+        }
+        
+async def matched_po_data_fetch(request: Request):
+        data = await UserRepo.fetch_matched_po_data(request)
+        return {
+            "status": "success",
+            "count": len(data),
+            "data": data
+        }
  #Fetching Total Numbers of Meeting on User Dashboard   
 # async def get_meetings_processed_by_user_id(user_id: int, from_date: str, to_date: str, request: Request):
 #     try:

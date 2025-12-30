@@ -1512,8 +1512,11 @@ async def generate_missing_po_report_service(mails_repo):
         if row.get("po_number") and row.get("vendor_number") and row.get("po_date")
     }
 
+    generated_missing_ids = []
+    generated_mismatch_ids = []
+
     # ==================================================
-    # PASS 1: SCANNED PO → SYSTEM (YOUR EXISTING LOGIC)
+    # PASS 1: SCANNED → SYSTEM
     # ==================================================
     for po in po_details:
 
@@ -1524,7 +1527,7 @@ async def generate_missing_po_report_service(mails_repo):
         vendor_number = po.get("vendor_number")
         po_date = po.get("po_date")
 
-        # CASE 1: Vendor missing in scanned
+        # CASE 1: Vendor missing
         if not vendor_number or vendor_number in ("", "NULL"):
 
             duplicate = await mails_repo.get_existing_po_missing(
@@ -1532,7 +1535,7 @@ async def generate_missing_po_report_service(mails_repo):
             )
 
             if duplicate is None:
-                await mails_repo.insert_po_missing(
+                missing_id = await mails_repo.insert_po_missing(
                     po_det_id=po["po_det_id"],
                     system_po_id=None,
                     attribute="po_missing",
@@ -1540,6 +1543,7 @@ async def generate_missing_po_report_service(mails_repo):
                     scanned_value=po_number,
                     comment="Vendor number missing in scanned PO"
                 )
+                generated_missing_ids.append(missing_id)
             continue
 
         key = (
@@ -1548,7 +1552,7 @@ async def generate_missing_po_report_service(mails_repo):
             normalize_value(po_date),
         )
 
-        # CASE 2: Scanned PO not in system
+        # CASE 2: PO not found in system
         if key not in sys_map:
 
             duplicate = await mails_repo.get_existing_po_missing(
@@ -1556,7 +1560,7 @@ async def generate_missing_po_report_service(mails_repo):
             )
 
             if duplicate is None:
-                await mails_repo.insert_po_missing(
+                missing_id = await mails_repo.insert_po_missing(
                     po_det_id=po["po_det_id"],
                     system_po_id=None,
                     attribute="po_missing",
@@ -1564,6 +1568,7 @@ async def generate_missing_po_report_service(mails_repo):
                     scanned_value=po_number,
                     comment="PO not found in system"
                 )
+                generated_missing_ids.append(missing_id)
             continue
 
         # CASE 3: Exists → mismatch check
@@ -1610,7 +1615,7 @@ async def generate_missing_po_report_service(mails_repo):
                 if duplicate:
                     continue
 
-                await mails_repo.insert_mismatch(
+                mismatch_id = await mails_repo.insert_mismatch(
                     po_det_id=po["po_det_id"],
                     system_po_id=system_row["system_po_id"],
                     field=field,
@@ -1618,9 +1623,11 @@ async def generate_missing_po_report_service(mails_repo):
                     scanned_value=str(val_scanned),
                     comment=f"{field} mismatch"
                 )
+                generated_mismatch_ids.append(mismatch_id)
 
     # ==================================================
-    # PASS 2: SYSTEM PO → SCANNED  MISSING LOGIC)
+    # PASS 2: SYSTEM → SCANNED (Missing in scanned)
+    # ==================================================
     for key, system_row in sys_map.items():
 
         if key not in scanned_map:
@@ -1632,7 +1639,7 @@ async def generate_missing_po_report_service(mails_repo):
             if duplicate:
                 continue
 
-            await mails_repo.insert_po_missing(
+            missing_id = await mails_repo.insert_po_missing(
                 po_det_id=None,
                 system_po_id=system_row["system_po_id"],
                 attribute="po_missing",
@@ -1640,9 +1647,17 @@ async def generate_missing_po_report_service(mails_repo):
                 scanned_value="",
                 comment="PO exists in system but not found in scanned data"
             )
+            generated_missing_ids.append(missing_id)
 
     return {
         "status": "success",
-        "message": "Missing & mismatch report generated"
+        "message": "Missing & mismatch report generated",
+        "summary": {
+            "missing_count": len(generated_missing_ids),
+            "mismatch_count": len(generated_mismatch_ids),
+        },
+        "generated_ids": {
+            "missing_po_ids": generated_missing_ids,
+            "mismatch_po_ids": generated_mismatch_ids,
+        }
     }
-

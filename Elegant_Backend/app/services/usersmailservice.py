@@ -71,8 +71,9 @@ def get_auth_url(provider: str):
         return (
             f"https://login.microsoftonline.com/{TENANT_ID}/oauth2/v2.0/authorize?"
             f"client_id={CLIENT_ID}&response_type=code&redirect_uri={REDIRECT_URI}"
-            f"&response_mode=query&scope=offline_access%20Mail.Read%20Mail.ReadWrite%20Calendars.Read"
-            # f"&prompt=login"   # ðŸ”‘ This forces login screen every time
+            # f"&response_mode=query&scope=offline_access%20Mail.Read%20Mail.ReadWrite%20Calendars.Read"
+            f"&response_mode=query&scope=offline_access%20Mail.Read"
+            f"&prompt=login"   # ðŸ”‘ This forces login screen every time
         )
     elif provider == "google":
         params = {
@@ -88,34 +89,62 @@ def get_auth_url(provider: str):
         raise ValueError("Invalid provider")
 
 
+# async def exchange_code_for_token(code: str):
+#     url = f"https://login.microsoftonline.com/{TENANT_ID}/oauth2/v2.0/token"
+#     data = {
+#         'client_id': CLIENT_ID,
+#         # 'scope': 'Mail.Read Mail.ReadWrite offline_access Calendars.Read Calendars.ReadWrite',
+#         'scope': 'Mail.Read Mail.ReadWrite',
+#         'code': code,
+#         'redirect_uri': REDIRECT_URI,
+#         'grant_type': 'authorization_code',
+#         'client_secret': CLIENT_SECRET
+#     }
+#     timeout = httpx.Timeout(connect=10.0, read=30.0, write=30.0, pool=30.0)
+#     async with httpx.AsyncClient(timeout=timeout) as client:
+#         # response = await client.post(url, data=data)
+#         headers = {
+#             "Content-Type": "application/x-www-form-urlencoded"
+#         }
+#         response = await client.post(url, data=data, headers=headers)
+
+#         token_json = response.json()
+    
+#     access_token = token_json.get("access_token")
+#     if access_token:
+#         # Redirect to frontend with token in query (or better, store in cookie or session)
+#         return f"{success_url}?mail_token={access_token}"
+#         # return f"http://localhost:3000//dashboard/user?mail_token={access_token}" # use in local system
+#         #return f"http://139.144.4.191:3000//dashboard/user?mail_token={access_token}" # use in server
+#     return {"error": "Token exchange failed"}
+
 async def exchange_code_for_token(code: str):
     url = f"https://login.microsoftonline.com/{TENANT_ID}/oauth2/v2.0/token"
     data = {
         'client_id': CLIENT_ID,
-        # 'scope': 'Mail.Read Mail.ReadWrite offline_access Calendars.Read Calendars.ReadWrite',
-        'scope': 'Mail.Read Mail.ReadWrite',
+        'scope': 'offline_access Mail.Read',  # must match authorization URL
         'code': code,
         'redirect_uri': REDIRECT_URI,
         'grant_type': 'authorization_code',
         'client_secret': CLIENT_SECRET
     }
-    timeout = httpx.Timeout(connect=10.0, read=30.0, write=30.0, pool=30.0)
-    async with httpx.AsyncClient(timeout=timeout) as client:
-        # response = await client.post(url, data=data)
-        headers = {
-            "Content-Type": "application/x-www-form-urlencoded"
-        }
-        response = await client.post(url, data=data, headers=headers)
+    headers = {"Content-Type": "application/x-www-form-urlencoded"}
 
+    async with httpx.AsyncClient(timeout=httpx.Timeout(10.0, read=30.0)) as client:
+        response = await client.post(url, data=data, headers=headers)
         token_json = response.json()
-    
-    access_token = token_json.get("access_token")
-    if access_token:
-        # Redirect to frontend with token in query (or better, store in cookie or session)
-        return f"{success_url}?mail_token={access_token}"
-        # return f"http://localhost:3000//dashboard/user?mail_token={access_token}" # use in local system
-        #return f"http://139.144.4.191:3000//dashboard/user?mail_token={access_token}" # use in server
-    return {"error": "Token exchange failed"}
+
+    if response.status_code != 200 or "access_token" not in token_json:
+        return {"error": "Token exchange failed", "details": token_json}
+
+    return {
+        "access_token": token_json.get("access_token"),
+        "refresh_token": token_json.get("refresh_token"),
+        "expires_in": token_json.get("expires_in"),
+        "url": f"{success_url}?mail_token={token_json.get('access_token')}"
+    }
+
+
     
     
 # this code is used to generate token for gmail(Google api)

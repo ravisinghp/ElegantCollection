@@ -328,7 +328,7 @@ async def fetch_missing_po_data(request: Request):
 
                 COALESCE(pd.po_number, sp.po_number) AS po_number,
                 COALESCE(pd.po_date, sp.po_date) AS po_date,
-                COALESCE(pd.vendor_number, sp.vendor_code) AS vendor_code,
+                COALESCE(pd.vendor_number, sp.vendor_number) AS vendor_code,
                 COALESCE(pd.customer_name, sp.customer_name) AS customer_name,
 
                 pm.comment,
@@ -403,7 +403,7 @@ async def fetch_matched_po_data(request: Request):
         FROM po_details pd
         JOIN system_po_details sp
             ON pd.po_number = sp.po_number
-        AND pd.vendor_number = sp.vendor_code
+        AND pd.vendor_number = sp.vendor_number
         AND pd.po_date = sp.po_date
 
         LEFT JOIN po_missing_report pm

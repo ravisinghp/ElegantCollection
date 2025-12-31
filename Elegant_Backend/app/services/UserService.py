@@ -233,29 +233,42 @@ async def ignore_po(
 #         raise ValueError("Invalid report type")
     
 
+# async def missing_po_data_fetch(request: Request):
+#         data = await UserRepo.fetch_missing_po_data(request)
+#         return {
+#             "status": "success",
+#             "count": len(data),
+#             "data": data
+#         }
+        
+# async def mismatch_po_data_fetch(request: Request):
+#         data = await UserRepo.fetch_mismatch_po_data(request)
+#         return {
+#             "status": "success",
+#             "count": len(data),
+#             "data": data
+#         }
+        
+# async def matched_po_data_fetch(request: Request):
+#         data = await UserRepo.fetch_matched_po_data(request)
+#         return {
+#             "status": "success",
+#             "count": len(data),
+#             "data": data
+#         }
+
 async def missing_po_data_fetch(request: Request):
-        data = await UserRepo.fetch_missing_po_data(request)
-        return {
-            "status": "success",
-            "count": len(data),
-            "data": data
-        }
+    data = await UserRepo.fetch_missing_po_data(request)
+    # FIX: Return empty list if None, and return the LIST directly (no wrapper object)
+    return data if data else []
         
 async def mismatch_po_data_fetch(request: Request):
-        data = await UserRepo.fetch_mismatch_po_data(request)
-        return {
-            "status": "success",
-            "count": len(data),
-            "data": data
-        }
+    data = await UserRepo.fetch_mismatch_po_data(request)
+    return data if data else []
         
 async def matched_po_data_fetch(request: Request):
-        data = await UserRepo.fetch_matched_po_data(request)
-        return {
-            "status": "success",
-            "count": len(data),
-            "data": data
-        }
+    data = await UserRepo.fetch_matched_po_data(request)
+    return data if data else []
  #Fetching Total Numbers of Meeting on User Dashboard   
 # async def get_meetings_processed_by_user_id(user_id: int, from_date: str, to_date: str, request: Request):
 #     try:

@@ -98,7 +98,7 @@ class UsersRepository(BaseRepository):
 
         raise EntityDoesNotExist(f"user with id {user_id} does not exist")
 
-    async def get_user_by_email(self, *, email: str) -> UserInDB:
+    async def get_user_by_email(self, email: str) -> UserInDB:
         user_row = await self._log_and_fetch_one(GET_USER_BY_EMAIL_QUERY, email)
         if user_row:
             return UserInDB(**user_row)

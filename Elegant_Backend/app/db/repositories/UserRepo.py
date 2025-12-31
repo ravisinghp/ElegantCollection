@@ -424,6 +424,21 @@ async def fetch_matched_po_data(request: Request):
             cols = [c[0] for c in cursor.description]
             rows = await cursor.fetchall()
             return [dict(zip(cols, r)) for r in rows]
+        
+        
+async def get_active_users(request: Request):
+    query = """
+        SELECT user_id
+        FROM user_master
+        WHERE role_id = 1
+          AND is_active = 1
+    """
+
+    async with request.app.state.pool.acquire() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(query)
+            rows = await cursor.fetchall()
+            return [row[0] for row in rows]
 #Fetching Total Numbers of Meeting on User Dashboard
 # async def fetch_meetings_processed_by_user_id(user_id: int, from_date: str, to_date: str, request: Request) -> int:
 #     query = """

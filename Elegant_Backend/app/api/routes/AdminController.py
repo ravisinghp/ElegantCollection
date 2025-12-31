@@ -18,12 +18,22 @@ router = APIRouter()
 @router.post("/createUser")
 async def create_user(user: UserCreate, request: Request):
     try:
-        user_id = await register_user(request, user)
-        return {
-            "message": "User created successfully",
-            "user_id": user_id,
-            "user_name": user.user_name,
-        }
+        response = await register_user(request, user)
+        return response
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+##--------------User Deletion---------------
+@router.delete("/deleteUser/{user_id}")
+async def delete_user(user_id: int, request: Request):
+    try:
+        result = await admin_service.delete_user(request, user_id)
+        if result:
+            return {"message": "User deleted successfully", "user_id": user_id}
+        else:
+            raise HTTPException(status_code=404, detail="User not found")
     except HTTPException:
         raise
     except Exception as e:

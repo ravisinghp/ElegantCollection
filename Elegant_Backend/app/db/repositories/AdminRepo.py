@@ -65,6 +65,19 @@ async def update_user_in_db(request: Request, user_id: int, user_data: UserUpdat
         async with conn.cursor() as cursor:
             await cursor.execute(query, tuple(values))
             await conn.commit()
+            
+            
+#--------------Delete User--------------------
+async def delete_user(request: Request, user_id: int) -> bool:
+    query = "DELETE FROM users_master WHERE user_id = %s"
+
+    async with request.app.state.pool.acquire() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(query, (user_id,))
+            await conn.commit()
+
+            # cursor.rowcount returns number of deleted rows
+            return cursor.rowcount > 0
 
 
 #---------------Encrypt the password------------------

@@ -37,3 +37,8 @@ class UpdatePoCommentRequest(BaseModel):
     po_missing_id: Optional[int] = None
     po_mismatch_id: Optional[int] = None
     comment: str
+    
+class SchedulerRequest(BaseModel):
+    days: list[str]      # ["MON", "TUE"]
+    hour: int            # 0–23
+    minute: int          # 0–59

@@ -11,13 +11,10 @@ class UserCreate(BaseModel):
     user_name: str
     mail_id: EmailStr
     password: str
-    # org_name: str
-    # user_id: int
-    # org_id: int
     role_id: int
-    folder_name: str
     provider:str
-    created_by: Optional[int] = None
+    folder_name: str
+    created_by: int
 
 
 class UserUpdate(BaseModel):

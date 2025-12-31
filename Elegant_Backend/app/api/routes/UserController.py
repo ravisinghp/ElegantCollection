@@ -6,6 +6,7 @@ from typing import List, Dict, Any
 # from pydantic import BaseModel
 from fastapi.responses import StreamingResponse
 from app.models.domain.AdminDomain import UpdatePoCommentRequest
+from fastapi.encoders import jsonable_encoder
 #User Dashboard Card Data 
 router = APIRouter()
 @router.get("/userDashboardCardData")
@@ -246,21 +247,47 @@ async def ignore_po(
 #     }
 
 
+
+# @router.get("/missing-po")
+# async def missing_po_data_fetch(request: Request):
+#     return await UserService.missing_po_data_fetch(request)
+
+
+# @router.get("/mismatch-po")
+# async def mismatch_po_data_fetch(request: Request):
+#     return await UserService.mismatch_po_data_fetch(request)
+
+# @router.get("/matched-po")
+# async def matched_po_data_fetch(request: Request):
+#     return await UserService.matched_po_data_fetch(request)
 #table Data ON User Dashboard 
 @router.get("/missing-po")
 async def missing_po_data_fetch(request: Request):
-    return await UserService.missing_po_data_fetch(request)
-
+    try:
+        data = await UserService.missing_po_data_fetch(request)
+        # Convert dates to strings and return
+        return jsonable_encoder(data)
+    except Exception as e:
+        print(f"Error fetching Missing POs: {e}")
+        return []
 
 @router.get("/mismatch-po")
 async def mismatch_po_data_fetch(request: Request):
-    return await UserService.mismatch_po_data_fetch(request)
+    try:
+        data = await UserService.mismatch_po_data_fetch(request)
+        return jsonable_encoder(data)
+    except Exception as e:
+        print(f"Error fetching Mismatch POs: {e}")
+        return []
 
 @router.get("/matched-po")
 async def matched_po_data_fetch(request: Request):
-    return await UserService.matched_po_data_fetch(request)
-
-
+    try:
+        data = await UserService.matched_po_data_fetch(request)
+        return jsonable_encoder(data)
+    except Exception as e:
+        print(f"Error fetching Matched POs: {e}")
+        return []
 
 #Business admin fetching users list and vendor number list on dashboard
 @router.get("/fetchUsersBusinessAdmin")

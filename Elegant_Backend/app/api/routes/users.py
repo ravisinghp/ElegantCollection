@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from starlette.status import HTTP_400_BAD_REQUEST
-
+from urllib.parse import unquote
 from app.api.dependencies.authentication import get_current_user_authorizer
 from app.api.dependencies.database import get_repository
 from app.core import config
@@ -13,7 +13,7 @@ from app.models.schemas.users import (
     UserWithoutToken,
 )
 from app.resources import strings
-from app.services import jwt
+import jwt
 from fastapi.responses import JSONResponse
 from fastapi.encoders import jsonable_encoder
 from app.models.domain.AdminDomain import GenerateMissingPoReport
@@ -31,7 +31,7 @@ from app.services.usersmailservice import (
     generate_missing_po_report_service
 )
 from typing import List
-
+from datetime import datetime, timedelta
 from starlette.requests import Request
 
 from starlette.responses import RedirectResponse
@@ -55,6 +55,7 @@ router = APIRouter()
 ### urls getting from .env file
 failed_url = os.getenv("failed_url")
 success_url = os.getenv("success_url")
+JWTSECRET_KEY=os.getenv("JWTSECRET_KEY")
 
 # this is working
 # @router.get("/login")
@@ -62,28 +63,71 @@ success_url = os.getenv("success_url")
 #     return {"auth_url": get_auth_url()}
 
 
+# @router.get("/login")
+# def login(provider: str = Query(..., regex="^(google|outlook)$")):
+#     return {"auth_url": get_auth_url(provider)}
 @router.get("/login")
-def login(provider: str = Query(..., regex="^(google|outlook)$")):
-    return {"auth_url": get_auth_url(provider)}
+def login(
+    provider: str = Query(..., regex="^(google|outlook)$"),
+    userId: int = Query(...),   
+):
+    return {
+        "auth_url": get_auth_url(provider, userId)
+    }
 
 
 @router.get("/callback")
 async def callback(
     code: str,  
+    state: str = Query(...), 
     mails_repo: MailsRepository = Depends(get_repository(MailsRepository)),
 ):
+    
+
+
     # url = await exchange_code_for_token(code)
     # Attempt to fetch-and-save mails immediately server-side, then redirect
     try:
+        print("State",state)
+        state = unquote(state)
+        payload = jwt.decode(state, JWTSECRET_KEY, algorithms=["HS256"])
+        print("PAYLOAD:", payload)
+        print("DECODED PAYLOAD:", payload)
+        user_id = payload["user_id"]
         url = await exchange_code_for_token(code)
         parsed_url = urlparse(url['url'])
+        refresh_token = url['refresh_token']
+        expires_in = int(url['expires_in'])
+        token_expiry = datetime.utcnow() + timedelta(seconds=expires_in)
         query_params = parse_qs(parsed_url.query)
         token = query_params.get("mail_token", [None])[0]
         if token:
             # await fetch_and_save_mails(token, mails_repo)
             # await fetch_and_save_mails_by_folders(token, mails_repo)
-            return RedirectResponse(url['url'])
-    except Exception:
+            # INSERT INTO DB
+
+            exists = await mails_repo.user_token_exists(user_id)
+
+        if exists:
+            await mails_repo.update_outlook_token(
+                user_id=user_id,
+                access_token=token,
+                refresh_token=refresh_token,
+                token_expiry=token_expiry,
+            )
+        else:
+            await mails_repo.insert_outlook_token(
+                user_id=user_id,
+                access_token=token,
+                refresh_token=refresh_token,
+                token_expiry=token_expiry,
+            )
+            await mails_repo.update_first_login_flag(
+                user_id=user_id
+            )
+        return RedirectResponse(url['url'])
+    except Exception as e:
+        print("JWT ERROR:", e)
         # If anything goes wrong, still continue with redirect
         pass
         # Fallback if no token
@@ -180,7 +224,8 @@ async def get_emails(
         token = body.get("access_token")
         folders = body.get("folders", [])  # <-- frontend sends list of folder names
         user_id = body.get("user_id")
-        org_id = body.get("org_id")
+        # org_id = body.get("org_id")
+        org_id = '1'
         provider = body.get("provider")
         from_date = body.get("from_date")
         to_date = body.get("to_date")

@@ -4,7 +4,7 @@ import jwt
 import pytest
 
 from app.models.domain.users import UserInDB
-from app.services.jwt import (
+from app.services.jwt_utils import (
     ALGORITHM,
     create_access_token_for_user,
     create_jwt_token,

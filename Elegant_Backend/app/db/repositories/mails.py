@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Optional, List, Dict, Any
 from app.db.repositories.base import BaseRepository
 
@@ -308,7 +309,55 @@ class MailsRepository(BaseRepository):
             raise RuntimeError("Failed to retrieve inserted cal_master id")
         return int(last_id)
     
+    async def user_token_exists(self, user_id: int) -> bool:
+     query = "SELECT COUNT(*) AS cnt FROM outlook_tokens WHERE user_id = %s"
+     await self._log_and_execute(query, (user_id,))
+     result = await self._cur.fetchone()
+     return result['cnt'] > 0 
     
+
+    async def insert_outlook_token(
+        self,
+        user_id: int,
+        access_token: str,
+        refresh_token: str,
+        token_expiry: datetime,
+    ):
+        query = """
+            INSERT INTO outlook_tokens (user_id, access_token, refresh_token, token_expiry)
+            VALUES (%s, %s, %s, %s)
+        """
+        await self._log_and_execute(query, (user_id, access_token, refresh_token,token_expiry))
+        
+
+
+    async def update_outlook_token(
+        self,
+        user_id: int,
+        access_token: str,
+        refresh_token: str,
+        token_expiry: datetime,
+    ):
+        query = """
+            UPDATE outlook_tokens
+            SET access_token = %s,
+                refresh_token = %s,
+                token_expiry = %s,
+                updated_at = NOW()
+            WHERE user_id = %s
+        """
+        await self._log_and_execute(query, (access_token, refresh_token, token_expiry, user_id))
+
+
+    async def update_first_login_flag(self, user_id: int):
+     query = """
+        UPDATE users_master
+        SET is_first_login = 0,
+            updated_on = NOW()
+        WHERE user_id = %s
+        """
+     await self._log_and_execute(query, (user_id,))
+
     async def insert_po_details(
         self,
         *,
@@ -451,6 +500,7 @@ class MailsRepository(BaseRepository):
 
         return int(last_id)
     
+ 
     
     async def insert_po_missing(
         self,

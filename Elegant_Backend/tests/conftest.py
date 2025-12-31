@@ -16,7 +16,7 @@ from app.db.repositories.articles import ArticlesRepository
 from app.db.repositories.users import UsersRepository
 from app.models.domain.articles import Article
 from app.models.domain.users import UserInDB
-from app.services import jwt
+from app.services import jwt_utils
 from tests.testing_helpers import FakePool, ping_postgres, pull_image
 
 POSTGRES_DOCKER_IMAGE = "postgres:11.4-alpine"
@@ -130,7 +130,7 @@ async def test_article(test_user: UserInDB, pool: Pool) -> Article:
 
 @pytest.fixture
 def token(test_user: UserInDB) -> str:
-    return jwt.create_access_token_for_user(test_user, environ["SECRET_KEY"])
+    return jwt_utils.create_access_token_for_user(test_user, environ["SECRET_KEY"])
 
 
 @pytest.fixture

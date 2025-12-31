@@ -8,6 +8,7 @@ import boto3
 import json
 from loguru import logger
 import pytesseract
+import jwt
 # from PIL import Image
 # import cv2
 # import numpy as np
@@ -27,6 +28,7 @@ CLIENT_SECRET = os.getenv("CLIENT_SECRET")
 TENANT_ID = os.getenv("TENANT_ID")
 REDIRECT_URI = os.getenv("REDIRECT_URI")
 GRAPH_API = os.getenv("GRAPH_API")
+JWTSECRET_KEY=os.getenv("JWTSECRET_KEY")
 #---------------outlook end ----------------------#
 #---------------Google---------------------------#
 GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID")
@@ -84,14 +86,29 @@ import asyncio
 #         f"&prompt=login"   # ðŸ”‘ This forces login screen every time
 #     )
 
-def get_auth_url(provider: str):
+def get_auth_url(provider: str, user_id: int):
+
+    state = jwt.encode(
+        {"user_id": user_id},
+        JWTSECRET_KEY,
+        algorithm="HS256"
+       )
     if provider == "outlook":
         return (
-            f"https://login.microsoftonline.com/{TENANT_ID}/oauth2/v2.0/authorize?"
-            f"client_id={CLIENT_ID}&response_type=code&redirect_uri={REDIRECT_URI}"
-            # f"&response_mode=query&scope=offline_access%20Mail.Read%20Mail.ReadWrite%20Calendars.Read"
-            f"&response_mode=query&scope=offline_access%20Mail.Read"
-            f"&prompt=login"   # ðŸ”‘ This forces login screen every time
+            # f"https://login.microsoftonline.com/{TENANT_ID}/oauth2/v2.0/authorize?"
+            # f"client_id={CLIENT_ID}&response_type=code&redirect_uri={REDIRECT_URI}"
+            # # f"&response_mode=query&scope=offline_access%20Mail.Read%20Mail.ReadWrite%20Calendars.Read"
+            # f"&response_mode=query&scope=offline_access%20Mail.Read"
+            # f"&prompt=login"   # ðŸ”‘ This forces login screen every time
+
+             f"https://login.microsoftonline.com/{TENANT_ID}/oauth2/v2.0/authorize?"
+            f"client_id={CLIENT_ID}"
+            f"&response_type=code"
+            f"&redirect_uri={REDIRECT_URI}"
+            f"&response_mode=query"
+            f"&scope=offline_access%20Mail.Read%20User.Read"
+            f"&state={state}"
+            f"&prompt=login"
         )
     elif provider == "google":
         params = {

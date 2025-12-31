@@ -234,6 +234,59 @@ async def ignore_mismatch_po(
                 await cursor.execute(query, (po_mismatch_id,))
                 await conn.commit()
                 return cursor.rowcount > 0
+     
+            
+#Business admin fetching users list and vendor number list on dashboard
+async def get_all_users_by_role_id_business_admin(request, role_id: int):
+    query = """
+        SELECT
+            user_name
+        FROM users_master
+        WHERE role_id = %s
+          AND is_active = 1
+        ORDER BY user_name ASC
+    """
+
+    try:
+        async with request.app.state.pool.acquire() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute(query, (role_id,))
+                rows = await cursor.fetchall()
+
+                return [
+                    {
+                        "user_name": row[0]
+                    }
+                    for row in rows
+                ]
+
+    except Exception as e:
+        raise Exception(f"DB error while fetching users: {str(e)}")
+
+async def get_vendors_business_admin(request):
+        query = """
+            SELECT DISTINCT
+                vendor_number
+            FROM po_details
+            WHERE active = 1
+              AND vendor_number IS NOT NULL
+        """
+
+        try:
+            async with request.app.state.pool.acquire() as conn:
+                async with conn.cursor() as cursor:
+                    await cursor.execute(query)
+                    rows = await cursor.fetchall()
+
+                    return [
+                        {
+                            "vendor_number": row[0]
+                        }
+                        for row in rows
+                    ]
+
+        except Exception as e:
+            raise Exception(f"DB error while fetching vendors: {str(e)}")
 # async def create_po_missing_comment(
 #     po_missing_id: int,
 #     comment: str,
@@ -328,7 +381,7 @@ async def fetch_missing_po_data(request: Request):
 
                 COALESCE(pd.po_number, sp.po_number) AS po_number,
                 COALESCE(pd.po_date, sp.po_date) AS po_date,
-                COALESCE(pd.vendor_number, sp.vendor_code) AS vendor_code,
+                COALESCE(pd.vendor_number, sp.vendor_number) AS vendor_code,
                 COALESCE(pd.customer_name, sp.customer_name) AS customer_name,
 
                 pm.comment,
@@ -390,33 +443,16 @@ async def fetch_mismatch_po_data(request: Request):
 
 async def fetch_matched_po_data(request: Request):
     query = """
-                SELECT
-            pd.po_det_id,
-            sp.system_po_id,
-
-            pd.po_number,
-            pd.po_date,
-            pd.vendor_number AS vendor_code,
-            pd.customer_name,
-
-            'MATCHED' AS po_status
+        SELECT 
+            pd.*
         FROM po_details pd
-        JOIN system_po_details sp
-            ON pd.po_number = sp.po_number
-        AND pd.vendor_number = sp.vendor_code
-        AND pd.po_date = sp.po_date
-
-        LEFT JOIN po_missing_report pm
-        ON pm.po_det_id = pd.po_det_id AND pm.active = 1
-
-        LEFT JOIN po_mismatch_report mm
-        ON mm.po_det_id = pd.po_det_id AND mm.active = 1
-
+        LEFT JOIN po_missing_report pm 
+            ON pm.po_det_id = pd.po_det_id AND pm.active = 1
+        LEFT JOIN po_mismatch_report mm 
+            ON mm.po_det_id = pd.po_det_id AND mm.active = 1
         WHERE pm.po_det_id IS NULL
-        AND mm.po_det_id IS NULL
-
-        ORDER BY pd.po_date DESC;
-    """
+        AND mm.po_det_id IS NULL;
+  """
 
     async with request.app.state.pool.acquire() as conn:
         async with conn.cursor() as cursor:

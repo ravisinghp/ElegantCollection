@@ -78,12 +78,13 @@ SELECT * FROM system_po_details WHERE active = 1
 INSERT_MISMATCH = """
 INSERT INTO po_mismatch_report (
     po_det_id,
+    user_id,
     system_po_id,
     mismatch_attribute,
     system_value,
     scanned_value,
     comment
-) VALUES (%s, %s, %s, %s, %s, %s)
+) VALUES (%s,%s, %s, %s, %s, %s, %s)
 """
 
 CHECK_PO_EXISTS = """
@@ -116,12 +117,13 @@ LIMIT 1
 INSERT_PO_MISSING = """
 INSERT INTO po_missing_report (
     po_det_id,
+    user_id,
     system_po_id,
     mismatch_attribute,
     system_value,
     scanned_value,
     comment
-) VALUES (%s, %s, %s, %s, %s, %s)
+) VALUES (%s,%s, %s, %s, %s, %s, %s)
 """
 
 GET_EXISTING_PO_MISSING_BY_SYSTEM_PO = """
@@ -423,6 +425,7 @@ class MailsRepository(BaseRepository):
         self,
         *,
         po_det_id: Optional[int],
+        user_id,
         system_po_id: Optional[int],
         field: str,
         system_value: str,
@@ -435,6 +438,7 @@ class MailsRepository(BaseRepository):
             INSERT_MISMATCH,
             [
                 po_det_id,
+                user_id,
                 system_po_id,
                 field,
                 system_value,
@@ -456,6 +460,7 @@ class MailsRepository(BaseRepository):
         self,
         *,
         po_det_id: int,
+        user_id:int,
         system_po_id: Optional[int],
         attribute: str,
         system_value: str,
@@ -467,6 +472,7 @@ class MailsRepository(BaseRepository):
             INSERT_PO_MISSING,
             [
                 po_det_id,
+                user_id,
                 system_po_id,
                 attribute,
                 system_value,

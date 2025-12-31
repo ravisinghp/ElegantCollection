@@ -42,3 +42,7 @@ class SchedulerRequest(BaseModel):
     days: list[str]      # ["MON", "TUE"]
     hour: int            # 0–23
     minute: int          # 0–59
+
+
+class GenerateMissingPoReport(BaseModel):
+    user_id : int

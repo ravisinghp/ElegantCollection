@@ -256,6 +256,44 @@ async def matched_po_data_fetch(request: Request):
             "count": len(data),
             "data": data
         }
+        
+
+#Business admin fetching users list and vendor number list on dashboard
+async def get_all_users_by_role_id_business_admin(request, role_id: int):
+        try:
+            users = await UserRepo.get_all_users_by_role_id_business_admin(request, role_id)
+
+            if not users:
+                return {
+                    "success": False,
+                    "message": "No active users found"
+                }
+
+            return {
+                "success": True,
+                "data": users
+            }
+
+        except Exception as e:
+            raise Exception(f"Service error while fetching users: {str(e)}")
+
+async def get_vendors_business_admin(request):
+        try:
+            vendors = await UserRepo.get_vendors_business_admin(request)
+
+            if not vendors:
+                return {
+                    "success": False,
+                    "message": "No active vendors found"
+                }
+
+            return {
+                "success": True,
+                "data": vendors
+            }
+
+        except Exception as e:
+            raise Exception(f"Service error while fetching vendors: {str(e)}")  
  #Fetching Total Numbers of Meeting on User Dashboard   
 # async def get_meetings_processed_by_user_id(user_id: int, from_date: str, to_date: str, request: Request):
 #     try:

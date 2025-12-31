@@ -246,7 +246,7 @@ async def ignore_po(
 #     }
 
 
-
+#table Data ON User Dashboard 
 @router.get("/missing-po")
 async def missing_po_data_fetch(request: Request):
     return await UserService.missing_po_data_fetch(request)
@@ -261,6 +261,34 @@ async def matched_po_data_fetch(request: Request):
     return await UserService.matched_po_data_fetch(request)
 
 
+
+#Business admin fetching users list and vendor number list on dashboard
+@router.get("/fetchUsersBusinessAdmin")
+async def get_all_users_by_role_id_business_admin(
+    request: Request,
+    role_id: int = Query(..., description="Role ID")
+):
+    try:
+        return await UserService.get_all_users_by_role_id_business_admin(
+            request=request,
+            role_id=role_id
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to fetch users list: {str(e)}"
+        )
+
+
+@router.get("/fetchVendorsBusinessAdmin")
+async def get_vendors_business_admin(request: Request):
+    try:
+        return await UserService.get_vendors_business_admin(request)
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to fetch vendor list: {str(e)}"
+        )
 
 ### This code is used to fetch calculateing one month to current date data week wise
 # @router.get("/weekly-hours-previous-month")

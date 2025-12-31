@@ -448,7 +448,7 @@ async def fetch_matched_po_data(request: Request):
         FROM po_details pd
         JOIN system_po_details sp
             ON pd.po_number = sp.po_number
-        AND pd.vendor_number = sp.vendor_code
+        AND pd.vendor_number = sp.vendor_number
         AND pd.po_date = sp.po_date
 
         LEFT JOIN po_missing_report pm

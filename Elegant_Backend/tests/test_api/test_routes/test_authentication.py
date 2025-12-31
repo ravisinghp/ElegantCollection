@@ -4,7 +4,7 @@ from httpx import Client
 from starlette.status import HTTP_403_FORBIDDEN
 
 from app.models.domain.users import User
-from app.services.jwt import create_access_token_for_user
+from app.services.jwt_utils import create_access_token_for_user
 
 pytestmark = pytest.mark.asyncio
 

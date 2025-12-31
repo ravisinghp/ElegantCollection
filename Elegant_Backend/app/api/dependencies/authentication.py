@@ -11,7 +11,7 @@ from app.db.errors import EntityDoesNotExist
 from app.db.repositories.users import UsersRepository
 from app.models.domain.users import User
 from app.resources import strings
-from app.services import jwt
+from app.services import jwt_utils
 
 
 class RWAPIKeyHeader(APIKeyHeader):
@@ -75,7 +75,7 @@ async def _get_current_user(
     token: str = Depends(_get_authorization_header_retriever()),
 ) -> User:
     try:
-        username = jwt.get_username_from_token(token, str(SECRET_KEY))
+        username = jwt_utils.get_username_from_token(token, str(SECRET_KEY))
     except ValueError:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, detail=strings.MALFORMED_PAYLOAD

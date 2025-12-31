@@ -19,7 +19,7 @@ from app.models.schemas.users import (
 )
 from app.models.schemas.AdminSchema import LoginResponse
 from app.resources import strings
-from app.services import jwt as jwt_service
+from app.services import jwt_utils as jwt_service
 from app.services.authentication import check_email_is_taken, check_username_is_taken
 from app.services.AdminServices import login_user, check_email_exists, reset_password
 from app.services.EmailService import EmailService

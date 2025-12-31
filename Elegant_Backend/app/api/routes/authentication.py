@@ -44,7 +44,7 @@ async def login(
     )
     try:
         user_data = await login_user(request, user_login.email, user_login.password)
-        
+        raw = user_data["is_first_login"]
         if user_data:
             token = jwt_service.create_access_token_for_user(user_data, SECRET_KEY)
             return LoginResponse(
@@ -53,7 +53,9 @@ async def login(
                 email=user_data["mail_id"],
                 roleid=user_data["role_id"],
                 token=token,
-            )
+                is_first_login=raw[0] == 1 if isinstance(raw, (bytes, bytearray)) else raw == 1,   
+                 
+                )      
         else:
             return None
     except EntityDoesNotExist:

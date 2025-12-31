@@ -179,7 +179,8 @@ async def get_emails(
         token = body.get("access_token")
         folders = body.get("folders", [])  # <-- frontend sends list of folder names
         user_id = body.get("user_id")
-        org_id = body.get("org_id")
+        # org_id = body.get("org_id")
+        org_id = '1'
         provider = body.get("provider")
         from_date = body.get("from_date")
         to_date = body.get("to_date")

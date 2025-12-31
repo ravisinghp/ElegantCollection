@@ -16,6 +16,7 @@ from app.resources import strings
 import jwt
 from fastapi.responses import JSONResponse
 from fastapi.encoders import jsonable_encoder
+from app.models.domain.AdminDomain import GenerateMissingPoReport
 
 # from app.services.authentication import check_email_is_taken, check_username_is_taken
 from app.services.usersmailservice import (
@@ -336,9 +337,9 @@ def health_check():
 # ---------------------------------------------------------------------
 @router.post("/generate-missing-po-report")
 async def generate_missing_po_report(
+    request : GenerateMissingPoReport,
     repo: MailsRepository = Depends(get_repository(MailsRepository))
 ):
-    result = await generate_missing_po_report_service(repo)
+    result = await generate_missing_po_report_service(repo, request.user_id)
     return JSONResponse(content=jsonable_encoder(result))
-
 

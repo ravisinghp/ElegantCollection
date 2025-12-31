@@ -601,6 +601,23 @@ def merge_po_data(body_data: dict, attachments_data: list[dict]) -> dict:
     return merged
 
 
+# ---------------------- Clean extracted text ---------------------- #
+def clean_extracted_text(text: str) -> str:
+    if not text:
+        return ""
+
+    # Replace both literal and real newline
+    text = text.replace("\\n", " ")  # literal slash-n
+    text = text.replace("\n", " ")   # actual new line
+    text = text.replace("\r", " ")
+
+    text = re.sub(r'\s*-\s*', '-', text)
+    text = re.sub(r'\s*:\s*', ': ', text)
+    text = re.sub(r'\s+', ' ', text)
+
+    return text.strip()
+
+
 async def fetch_and_save_mails_by_folders(
     access_token: str,
     folder_names: list[str],
@@ -761,13 +778,16 @@ async def fetch_and_save_mails_by_folders(
                         try:
                             if ct.startswith("text/") or ext.endswith((".txt", ".md", ".csv", ".log")):
                                 attachment_text = content_bytes.decode("utf-8", errors="ignore")
+                                attachment_text = clean_extracted_text(attachment_text)
                             elif ct == "application/pdf" or ext.endswith(".pdf"):
                                 reader = PyPDF2.PdfReader(io.BytesIO(content_bytes))
                                 attachment_text = " ".join((p.extract_text() or "") for p in reader.pages)
+                                attachment_text = clean_extracted_text(attachment_text)
                             elif ct in ("application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                                         "application/msword") or ext.endswith((".docx", ".doc")):
                                 document = docx.Document(io.BytesIO(content_bytes))
                                 attachment_text = " ".join(p.text for p in document.paragraphs)
+                                attachment_text = clean_extracted_text(attachment_text)
                             elif ct in ("application/vnd.openxmlformats-officedocument.presentationml.presentation",
                                         "application/vnd.ms-powerpoint") or ext.endswith((".pptx", ".ppt")):
                                 prs = Presentation(io.BytesIO(content_bytes))
@@ -777,8 +797,9 @@ async def fetch_and_save_mails_by_folders(
                                     for shape in slide.shapes
                                     if hasattr(shape, "text")
                                 )
-                            elif content_type.startswith("image/") or ext.endswith((".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff")):
-                                attachment_text = ocr_from_image_bytes(content_bytes)
+                                attachment_text = clean_extracted_text(attachment_text)
+                            # elif content_type.startswith("image/") or ext.endswith((".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff")):
+                            #     attachment_text = ocr_from_image_bytes(content_bytes)
                         except Exception:
                             attachment_text = None
 
@@ -813,6 +834,7 @@ async def fetch_and_save_mails_by_folders(
                 if po_data_body:
                     await mails_repo.insert_po_details(
                         mail_dtl_id=mail_id,
+                        user_id=user_id,
                         po_number=po_data_body.get("po_number"),
                         customer_name=po_data_body.get("customer_name"),
                         vendor_number=po_data_body.get("vendor_number"),
@@ -831,6 +853,7 @@ async def fetch_and_save_mails_by_folders(
 
                 # ---------------- PO data from attachments ----------------
                 for att_text in attachment_texts:
+                    att_text = clean_extracted_text(att_text)
                     po_data_att = await extract_po_fields_from_llm(att_text)
 
                     if isinstance(po_data_att, list):
@@ -840,6 +863,7 @@ async def fetch_and_save_mails_by_folders(
 
                             await mails_repo.insert_po_details(
                                 mail_dtl_id=mail_id,
+                                user_id=user_id,
                                 po_number=po.get("po_number"),
                                 customer_name=po.get("customer_name"),
                                 vendor_number=po.get("vendor_number"),
@@ -860,6 +884,7 @@ async def fetch_and_save_mails_by_folders(
                         if po:
                             await mails_repo.insert_po_details(
                                 mail_dtl_id=mail_id,
+                                user_id=user_id,
                                 po_number=po.get("po_number"),
                                 customer_name=po.get("customer_name"),
                                 vendor_number=po.get("vendor_number"),

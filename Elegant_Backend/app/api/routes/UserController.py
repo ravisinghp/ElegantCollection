@@ -6,6 +6,7 @@ from typing import List, Dict, Any
 # from pydantic import BaseModel
 from fastapi.responses import StreamingResponse
 from app.models.domain.AdminDomain import UpdatePoCommentRequest
+from fastapi.encoders import jsonable_encoder
 #User Dashboard Card Data 
 router = APIRouter()
 @router.get("/userDashboardCardData")
@@ -247,20 +248,74 @@ async def ignore_po(
 
 
 
+# @router.get("/missing-po")
+# async def missing_po_data_fetch(request: Request):
+#     return await UserService.missing_po_data_fetch(request)
+
+
+# @router.get("/mismatch-po")
+# async def mismatch_po_data_fetch(request: Request):
+#     return await UserService.mismatch_po_data_fetch(request)
+
+# @router.get("/matched-po")
+# async def matched_po_data_fetch(request: Request):
+#     return await UserService.matched_po_data_fetch(request)
+#table Data ON User Dashboard 
 @router.get("/missing-po")
 async def missing_po_data_fetch(request: Request):
-    return await UserService.missing_po_data_fetch(request)
-
+    try:
+        data = await UserService.missing_po_data_fetch(request)
+        # Convert dates to strings and return
+        return jsonable_encoder(data)
+    except Exception as e:
+        print(f"Error fetching Missing POs: {e}")
+        return []
 
 @router.get("/mismatch-po")
 async def mismatch_po_data_fetch(request: Request):
-    return await UserService.mismatch_po_data_fetch(request)
+    try:
+        data = await UserService.mismatch_po_data_fetch(request)
+        return jsonable_encoder(data)
+    except Exception as e:
+        print(f"Error fetching Mismatch POs: {e}")
+        return []
 
 @router.get("/matched-po")
 async def matched_po_data_fetch(request: Request):
-    return await UserService.matched_po_data_fetch(request)
+    try:
+        data = await UserService.matched_po_data_fetch(request)
+        return jsonable_encoder(data)
+    except Exception as e:
+        print(f"Error fetching Matched POs: {e}")
+        return []
+
+#Business admin fetching users list and vendor number list on dashboard
+@router.get("/fetchUsersBusinessAdmin")
+async def get_all_users_by_role_id_business_admin(
+    request: Request,
+    role_id: int = Query(..., description="Role ID")
+):
+    try:
+        return await UserService.get_all_users_by_role_id_business_admin(
+            request=request,
+            role_id=role_id
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to fetch users list: {str(e)}"
+        )
 
 
+@router.get("/fetchVendorsBusinessAdmin")
+async def get_vendors_business_admin(request: Request):
+    try:
+        return await UserService.get_vendors_business_admin(request)
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to fetch vendor list: {str(e)}"
+        )
 
 ### This code is used to fetch calculateing one month to current date data week wise
 # @router.get("/weekly-hours-previous-month")

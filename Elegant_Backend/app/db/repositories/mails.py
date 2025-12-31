@@ -47,6 +47,7 @@ INSERT INTO cal_master (
 INSERT_PO_DETAILS = """
 INSERT INTO po_details (
     mail_dtl_id,
+    user_id,
     po_number,
     customer_name,
     vendor_number,
@@ -61,7 +62,7 @@ INSERT INTO po_details (
     description,
     mail_folder,
     created_by
-) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
 """
 
 
@@ -362,6 +363,7 @@ class MailsRepository(BaseRepository):
         self,
         *,
         mail_dtl_id: int,
+        user_id: int,
         po_number: Optional[str],
         customer_name: Optional[str],
         vendor_number: Optional[str],
@@ -382,6 +384,7 @@ class MailsRepository(BaseRepository):
             INSERT_PO_DETAILS,
             [
                 mail_dtl_id,
+                user_id,
                 po_number,
                 customer_name,
                 vendor_number,

@@ -43,9 +43,10 @@ async def register_user(request: Request, user: UserCreate) -> int:
     # Check if user exists by email
     existing_user = await admin_repo.get_user_by_emailId(request, user.mail_id,user.role_id)
     if existing_user:
-        raise HTTPException(
-            status_code=400, detail="User already exists with this email"
-        )
+        return{
+            "success": False,
+            "message": "User already exists with this email"
+        }
 
     role_id = user.role_id
 
@@ -72,7 +73,12 @@ async def register_user(request: Request, user: UserCreate) -> int:
     user_id = await admin_repo.create_user(
         request, user_in_db
     )
-
+    if user_id :
+        return {
+            "message": "User created successfully",
+            "user_id": user_id,
+            "user_name": user.user_name,
+        }
     #   send mail to the created user
     # message = MessageSchema(
     #     subject="Welcome to Our Platform",
@@ -106,13 +112,16 @@ async def register_user(request: Request, user: UserCreate) -> int:
     # except Exception as e:
     #     print(f"Failed to send email: {e}")
     #     pass
-    return user_id
 
 
 ##----------------update user---------------
 async def update_user(request: Request, user_id: int, user: UserUpdate):
     role_id = user.role_id if user.role_id else None
     await admin_repo.update_user_in_db(request, user_id, user, role_id)
+
+##------------------delete user--------------------
+async def delete_user(request, user_id: int):
+    return await admin_repo.delete_user(request, user_id)
 
 
 #Login User

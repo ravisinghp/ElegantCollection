@@ -4,6 +4,7 @@ from app.api.routes import authentication, users
 from app.api.routes import authentication, users, report_data
 from app.api.routes.AdminController import router as admin_router
 from app.api.routes.UserController import router as user_router
+from app.api.routes.SystemAdminSchedular import router as SystemAdmin_router
 from app.api.routes import category_section
 
 
@@ -18,6 +19,6 @@ router.include_router(user_router, tags=["userdash"], prefix="/userdash")
 router.include_router(
     category_section.router, tags=["categories"], prefix="/categories"
 )
-
+router.include_router(SystemAdmin_router, tags=["SystemAdmin"], prefix="/systemadmin")
 # Include user router
 # router.include_router(auth.router, prefix="/auth", tags=["auth"])

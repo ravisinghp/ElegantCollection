@@ -24,7 +24,6 @@ class UserUpdate(BaseModel):
     user_name: Optional[str] = None
     mail_id: Optional[EmailStr] = None
     password: Optional[str] = None
-    org_name: Optional[str] = None
     role_id: Optional[int] = None
 
 

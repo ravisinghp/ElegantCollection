@@ -8,7 +8,8 @@ from starlette.config import Config
 from starlette.datastructures import CommaSeparatedStrings, Secret
 
 from app.core.logging import InterceptHandler
-
+# ADD THIS LINE:
+ALGORITHM = "HS256"
 API_PREFIX = "/api"
 
 JWT_TOKEN_PREFIX = "Token"  

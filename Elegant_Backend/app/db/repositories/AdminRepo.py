@@ -11,17 +11,6 @@ from datetime import datetime, timedelta
 IST_OFFSET = timedelta(hours=5, minutes=30)
 
 
-
-
-#Getting the Org_id By name 
-async def get_org_id_by_name(request: Request, org_name: str) -> Optional[int]:
-    query = "SELECT org_id FROM org_master WHERE LOWER(org_name) = LOWER(%s)"
-    async with request.app.state.pool.acquire() as conn:
-        async with conn.cursor() as cursor:
-            await cursor.execute(query, (org_name,))
-            row = await cursor.fetchone()
-            return row[0] if row else None
-    
         
         
 #--------------------Creating new user---------------------
@@ -45,8 +34,8 @@ async def create_user(request: Request, user: UserInDB) -> int:
             return cursor.lastrowid        
 
         
-#Update the user
-async def update_user_in_db(request: Request, user_id: int, user_data: UserUpdate, org_id: Optional[int], role_id: Optional[int]):
+##-------------------Update the user-----------------
+async def update_user_in_db(request: Request, user_id: int, user_data: UserUpdate, role_id: Optional[int]):
     fields = []
     values = []
 
@@ -61,9 +50,6 @@ async def update_user_in_db(request: Request, user_id: int, user_data: UserUpdat
         from app.db.repositories import hash_password
         fields.append("password = %s")
         values.append(hash_password(user_data.password))
-    if org_id:
-        fields.append("org_id = %s")
-        values.append(org_id)
     if role_id:
         fields.append("role_id = %s")
         values.append(role_id)

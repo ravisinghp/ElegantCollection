@@ -5,7 +5,7 @@ from app.services import UserService
 from typing import List, Dict, Any
 # from pydantic import BaseModel
 from fastapi.responses import StreamingResponse
-from app.models.domain.AdminDomain import UpdatePoCommentRequest
+from app.models.domain.AdminDomain import UpdatePoCommentRequest, GenerateMissingPoReport, DownloadMissingMismatchRequest
 from fastapi.encoders import jsonable_encoder
 #User Dashboard Card Data 
 router = APIRouter()
@@ -33,12 +33,15 @@ async def get_dashboard_stats(request: Request,userId:int):
 @router.get("/downloadMissingPOReport")
 async def download_missing_po_report(
     request: Request,
+    payload: DownloadMissingMismatchRequest,
     format: str = Query("excel", regex="^(excel|pdf)$")
 ):
     try:
         file_stream, filename, media_type = await UserService.download_missing_po_report(
-            format=format,
-            request=request
+            request=request,
+            user_id =payload.user_id,
+            role_id=payload.role_id,
+            format=format
         )
 
         return StreamingResponse(
@@ -57,12 +60,15 @@ async def download_missing_po_report(
 @router.get("/downloadMismatchPOReport")
 async def download_mismatch_po_report(
     request: Request,
+    payload: DownloadMissingMismatchRequest,
     format: str = Query("excel", regex="^(excel|pdf)$")
 ):
     try:
         file_stream, filename, media_type = await UserService.download_mismatch_po_report(
-            format=format,
-            request=request
+            request,
+            user_id=payload.user_id,
+            role_id=payload.role_id,
+            format=format
         )
 
         return StreamingResponse(
@@ -261,10 +267,10 @@ async def ignore_po(
 # async def matched_po_data_fetch(request: Request):
 #     return await UserService.matched_po_data_fetch(request)
 #table Data ON User Dashboard 
-@router.get("/missing-po")
-async def missing_po_data_fetch(request: Request):
+@router.post("/missing-po")
+async def missing_po_data_fetch(request: Request, frontendRequest: GenerateMissingPoReport):
     try:
-        data = await UserService.missing_po_data_fetch(request)
+        data = await UserService.missing_po_data_fetch(request, frontendRequest)
         # Convert dates to strings and return
         return jsonable_encoder(data)
     except Exception as e:
@@ -272,18 +278,18 @@ async def missing_po_data_fetch(request: Request):
         return []
 
 @router.get("/mismatch-po")
-async def mismatch_po_data_fetch(request: Request):
+async def mismatch_po_data_fetch(request: Request, frontendRequest: GenerateMissingPoReport):
     try:
-        data = await UserService.mismatch_po_data_fetch(request)
+        data = await UserService.mismatch_po_data_fetch(request, frontendRequest)
         return jsonable_encoder(data)
     except Exception as e:
         print(f"Error fetching Mismatch POs: {e}")
         return []
 
 @router.get("/matched-po")
-async def matched_po_data_fetch(request: Request):
+async def matched_po_data_fetch(request: Request, frontendRequest: GenerateMissingPoReport):
     try:
-        data = await UserService.matched_po_data_fetch(request)
+        data = await UserService.matched_po_data_fetch(request, frontendRequest)
         return jsonable_encoder(data)
     except Exception as e:
         print(f"Error fetching Matched POs: {e}")

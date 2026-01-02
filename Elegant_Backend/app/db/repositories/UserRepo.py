@@ -51,8 +51,8 @@ async def fetch_documents_analyzed_by_user_id(user_id: int, request: Request) ->
             return int(row[0]) if row else 0
         
         
-   #For Doanloading the PO Missing Report     
-async def fetch_po_missing_report(request: Request):
+#For Downloading the PO Missing Report     
+async def download_missing_po_report(request: Request, user_id: int, role_id: int):
     query = """
         SELECT
             pd.po_number,
@@ -63,8 +63,15 @@ async def fetch_po_missing_report(request: Request):
         FROM po_missing_report pm
         JOIN po_details pd ON pd.po_det_id = pm.po_det_id
         WHERE pm.active = 1
-        ORDER BY pm.created_on DESC
     """
+    
+    params = []
+    
+    if role_id == 1:
+        base_query += " AND pm.user_id = %s"
+        params.append(user_id)
+        
+    base_query += " ORDER BY pm.po_missing_id DESC"
 
     async with request.app.state.pool.acquire() as conn:
         async with conn.cursor() as cursor:
@@ -77,7 +84,7 @@ async def fetch_po_missing_report(request: Request):
 
 
    #For Doanloading the PO Mismatch Report   
-async def fetch_po_mismatch_report(request: Request):
+async def download_mismatch_po_report(request: Request, user_id: int, role_id: int):
     query = """
         SELECT
             pd.po_number,
@@ -99,9 +106,16 @@ async def fetch_po_mismatch_report(request: Request):
         FROM po_mismatch_report mm
         JOIN po_details pd ON pd.po_det_id = mm.po_det_id
         WHERE mm.active = 1
-        ORDER BY mm.created_on DESC
     """
-
+    
+    params = []
+    
+    if role_id == 1:
+        base_query += " AND mm.user_id = %s"
+        params.append(user_id)
+        
+    base_query += " ORDER BY mm.po_mismatch_id DESC"
+    
     async with request.app.state.pool.acquire() as conn:
         async with conn.cursor() as cursor:
             await cursor.execute(query)
@@ -371,44 +385,55 @@ async def get_vendors_business_admin(request):
 #             await cursor.execute(query, (comment, po_mismatch_id))
 #             await conn.commit()
 #             return cursor.rowcount > 0    
+
         
-async def fetch_missing_po_data(request: Request):
-    query = """
-                    SELECT
-                pm.po_missing_id,
-                pm.po_det_id,
-                pm.system_po_id,
+async def fetch_missing_po_data(request: Request, frontendRequest):
 
-                COALESCE(pd.po_number, sp.po_number) AS po_number,
-                COALESCE(pd.po_date, sp.po_date) AS po_date,
-                COALESCE(pd.vendor_number, sp.vendor_number) AS vendor_code,
-                COALESCE(pd.customer_name, sp.customer_name) AS customer_name,
+    base_query = """
+        SELECT
+            pm.po_missing_id,
+            pm.po_det_id,
+            pm.system_po_id,
 
-                pm.comment,
-                'MISSING' AS po_status,
+            COALESCE(pd.po_number, sp.po_number) AS po_number,
+            COALESCE(pd.po_date, sp.po_date) AS po_date,
+            COALESCE(pd.vendor_number, sp.vendor_number) AS vendor_code,
+            COALESCE(pd.customer_name, sp.customer_name) AS customer_name,
 
-                CASE
-                    WHEN pm.po_det_id IS NOT NULL THEN 'SCANNED'
-                    ELSE 'SYSTEM'
-                END AS source
-            FROM po_missing_report pm
-            LEFT JOIN po_details pd ON pm.po_det_id = pd.po_det_id
-            LEFT JOIN system_po_details sp ON pm.system_po_id = sp.system_po_id
-            WHERE pm.active = 1
-            ORDER BY pm.created_on DESC;
+            pm.comment,
+            'MISSING' AS po_status,
+
+            CASE
+                WHEN pm.po_det_id IS NOT NULL THEN 'SCANNED'
+                ELSE 'SYSTEM'
+            END AS source
+        FROM po_missing_report pm
+        LEFT JOIN po_details pd ON pm.po_det_id = pd.po_det_id
+        LEFT JOIN system_po_details sp ON pm.system_po_id = sp.system_po_id
+        WHERE pm.active = 1
     """
+
+    params = []
+
+    # Apply condition only when user_id == 1
+    if frontendRequest.user_id == 1:
+        base_query += " AND pm.user_id = %s"
+        params.append(frontendRequest.user_id)
+
+    base_query += " ORDER BY pm.created_on DESC"
 
     async with request.app.state.pool.acquire() as conn:
         async with conn.cursor() as cursor:
-            await cursor.execute(query)
+            await cursor.execute(base_query, tuple(params))
             cols = [c[0] for c in cursor.description]
             rows = await cursor.fetchall()
-            return [dict(zip(cols, r)) for r in rows]
+
+    return [dict(zip(cols, r)) for r in rows]
         
         
-async def fetch_mismatch_po_data(request: Request):
+async def fetch_mismatch_po_data(request: Request, frontendRequest):
     query = """
-                    SELECT
+                SELECT
                 mm.po_mismatch_id,
                 mm.po_det_id,
                 mm.system_po_id,
@@ -425,13 +450,21 @@ async def fetch_mismatch_po_data(request: Request):
 
                 'MISMATCH' AS po_status
             FROM po_mismatch_report mm
-            JOIN po_details pd 
+            LEFT JOIN po_details pd 
                 ON mm.po_det_id = pd.po_det_id
             LEFT JOIN system_po_details sp
                 ON mm.system_po_id = sp.system_po_id
             WHERE mm.active = 1
-            ORDER BY mm.created_on DESC;
     """
+    
+    params = []
+
+    # Apply condition only when user_id == 1
+    if frontendRequest.user_id == 1:
+        base_query += " AND mm.user_id = %s"
+        params.append(frontendRequest.user_id)
+
+    base_query += " ORDER BY mm.po_mismatch_id DESC"
 
     async with request.app.state.pool.acquire() as conn:
         async with conn.cursor() as cursor:
@@ -441,26 +474,35 @@ async def fetch_mismatch_po_data(request: Request):
             return [dict(zip(cols, r)) for r in rows]
         
 
-async def fetch_matched_po_data(request: Request):
-    query = """
-         SELECT
-                pd.*,
-                pd.vendor_number AS vendor_code
-            FROM po_details pd
-            LEFT JOIN po_missing_report pm
-                ON pm.po_det_id = pd.po_det_id AND pm.active = 1
-            LEFT JOIN po_mismatch_report mm
-                ON mm.po_det_id = pd.po_det_id AND mm.active = 1
-            WHERE pm.po_det_id IS NULL
-            AND mm.po_det_id IS NULL;
+async def fetch_matched_po_data(request: Request, frontendRequest):
+
+    base_query = """
+        SELECT
+            pd.*,
+            pd.vendor_number AS vendor_code
+        FROM po_details pd
+        LEFT JOIN po_missing_report pm
+            ON pm.po_det_id = pd.po_det_id AND pm.active = 1
+        LEFT JOIN po_mismatch_report mm
+            ON mm.po_det_id = pd.po_det_id AND mm.active = 1
+        WHERE pm.po_det_id IS NULL
+        AND mm.po_det_id IS NULL
     """
+
+    params = []
+
+    # Apply user filter only when user_id == 1
+    if frontendRequest.user_id == 1:
+        base_query += " AND pd.user_id = %s"
+        params.append(frontendRequest.user_id)
 
     async with request.app.state.pool.acquire() as conn:
         async with conn.cursor() as cursor:
-            await cursor.execute(query)
+            await cursor.execute(base_query, tuple(params))
             cols = [c[0] for c in cursor.description]
             rows = await cursor.fetchall()
-            return [dict(zip(cols, r)) for r in rows]
+
+    return [dict(zip(cols, r)) for r in rows]
         
         
 async def get_active_users(request: Request):

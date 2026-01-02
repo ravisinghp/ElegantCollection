@@ -33,10 +33,12 @@ async def get_documents_analyzed_by_user_id(user_id: int, request: Request):
 
 #Download Missing Report and Mismatch Report
 async def download_missing_po_report(
-    format: str,
-    request: Request
+    request: Request,
+    user_id: int,
+    role_id: int,
+    format: str
 ):
-    data = await UserRepo.fetch_po_missing_report(request)
+    data = await UserRepo.download_missing_po_report(request, user_id, role_id)
 
     if not data:
         raise HTTPException(status_code=404, detail="No missing PO data available")
@@ -65,10 +67,12 @@ async def download_missing_po_report(
 
 
 async def download_mismatch_po_report(
-    format: str,
-    request: Request
+    request: Request,
+    user_id: int,
+    role_id: int,
+    format: str
 ):
-    data = await UserRepo.fetch_po_mismatch_report(request)
+    data = await UserRepo.download_mismatch_po_report(request, user_id, role_id)
 
     if not data:
         raise HTTPException(status_code=404, detail="No mismatch PO data available")
@@ -257,17 +261,17 @@ async def ignore_po(
 #             "data": data
 #         }
 
-async def missing_po_data_fetch(request: Request):
-    data = await UserRepo.fetch_missing_po_data(request)
+async def missing_po_data_fetch(request: Request, frontendRequest):
+    data = await UserRepo.fetch_missing_po_data(request, frontendRequest)
     # FIX: Return empty list if None, and return the LIST directly (no wrapper object)
     return data if data else []
         
-async def mismatch_po_data_fetch(request: Request):
-    data = await UserRepo.fetch_mismatch_po_data(request)
+async def mismatch_po_data_fetch(request: Request, frontendRequest):
+    data = await UserRepo.fetch_mismatch_po_data(request, frontendRequest)
     return data if data else []
         
-async def matched_po_data_fetch(request: Request):
-    data = await UserRepo.fetch_matched_po_data(request)
+async def matched_po_data_fetch(request: Request, frontendRequest):
+    data = await UserRepo.fetch_matched_po_data(request, frontendRequest)
     return data if data else []
         
 

@@ -44,5 +44,9 @@ class SchedulerRequest(BaseModel):
     minute: int          # 0–59
 
 
+class DownloadMissingMismatchRequest(BaseModel):
+    user_id : int
+    role_id : int
+
 class GenerateMissingPoReport(BaseModel):
     user_id : int

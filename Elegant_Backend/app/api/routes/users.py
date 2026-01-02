@@ -28,7 +28,8 @@ from app.services.usersmailservice import (
     get_user_email,
     fetch_all_labels,
     fetch_and_save_mails_by_labels,
-    generate_missing_po_report_service
+    generate_missing_po_report_service,
+    get_valid_outlook_token
 )
 from typing import List
 from datetime import datetime, timedelta
@@ -323,6 +324,25 @@ async def get_emails_folders(
         # Catch unexpected errors
         raise HTTPException(
             status_code=500, detail={"error": f"Failed to fetch emails: {str(e)}"}
+        )
+
+
+
+@router.get("/outlook/token")
+async def get_outlook_token_api(
+    user_id: int,
+    repo: MailsRepository = Depends(get_repository(MailsRepository)),
+):
+    try:
+        access_token = await get_valid_outlook_token(user_id, repo)
+        return {
+            "success": True,
+            "access_token": access_token,
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=400,
+            detail=str(e),
         )
 
 

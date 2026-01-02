@@ -1,7 +1,8 @@
 from datetime import datetime
+import token
 from typing import Optional, List, Dict, Any
 from app.db.repositories.base import BaseRepository
-
+from app.models.outlook_token import OutlookToken
 
 # Insert into your existing mail_details table (including `keyword`, `repeated_keyword`, and `graph_mail_id` columns)
 INSERT_MAIL_DETAILS = """
@@ -426,6 +427,31 @@ class MailsRepository(BaseRepository):
         await self._log_and_execute(query, [file_hash])
         result = await self._cur.fetchone()
         return result is not None
+    
+    
+    async def get_outlook_token(self, user_id: int) -> token:
+        query = """
+            SELECT
+                access_token,
+                refresh_token,
+                token_expiry
+            FROM outlook_tokens
+            WHERE user_id = %s
+            LIMIT 1
+        """
+
+        await self._log_and_execute(query, [user_id])
+        row = await self._cur.fetchone()
+
+        if not row:
+            raise Exception("Outlook token not found for user")
+
+        return OutlookToken(
+            access_token=row["access_token"],
+            refresh_token=row["refresh_token"],
+            token_expiry=row["token_expiry"],
+        )
+
     
 
 

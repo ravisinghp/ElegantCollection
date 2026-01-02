@@ -50,3 +50,7 @@ class DownloadMissingMismatchRequest(BaseModel):
 
 class GenerateMissingPoReport(BaseModel):
     user_id : int
+    
+class FetchMissingMismatchReport(BaseModel):
+    user_id : int
+    role_id:int

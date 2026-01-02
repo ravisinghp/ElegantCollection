@@ -5,7 +5,7 @@ from app.services import UserService
 from typing import List, Dict, Any
 # from pydantic import BaseModel
 from fastapi.responses import StreamingResponse
-from app.models.domain.AdminDomain import UpdatePoCommentRequest, GenerateMissingPoReport, DownloadMissingMismatchRequest
+from app.models.domain.AdminDomain import UpdatePoCommentRequest, GenerateMissingPoReport, DownloadMissingMismatchRequest,FetchMissingMismatchReport
 from fastapi.encoders import jsonable_encoder
 #User Dashboard Card Data 
 router = APIRouter()
@@ -268,7 +268,7 @@ async def ignore_po(
 #     return await UserService.matched_po_data_fetch(request)
 #table Data ON User Dashboard 
 @router.post("/missing-po")
-async def missing_po_data_fetch(request: Request, frontendRequest: GenerateMissingPoReport):
+async def missing_po_data_fetch(request: Request, frontendRequest: FetchMissingMismatchReport):
     try:
         data = await UserService.missing_po_data_fetch(request, frontendRequest)
         # Convert dates to strings and return
@@ -277,8 +277,8 @@ async def missing_po_data_fetch(request: Request, frontendRequest: GenerateMissi
         print(f"Error fetching Missing POs: {e}")
         return []
 
-@router.get("/mismatch-po")
-async def mismatch_po_data_fetch(request: Request, frontendRequest: GenerateMissingPoReport):
+@router.post("/mismatch-po")
+async def mismatch_po_data_fetch(request: Request, frontendRequest: FetchMissingMismatchReport):
     try:
         data = await UserService.mismatch_po_data_fetch(request, frontendRequest)
         return jsonable_encoder(data)
@@ -286,8 +286,8 @@ async def mismatch_po_data_fetch(request: Request, frontendRequest: GenerateMiss
         print(f"Error fetching Mismatch POs: {e}")
         return []
 
-@router.get("/matched-po")
-async def matched_po_data_fetch(request: Request, frontendRequest: GenerateMissingPoReport):
+@router.post("/matched-po")
+async def matched_po_data_fetch(request: Request, frontendRequest: FetchMissingMismatchReport):
     try:
         data = await UserService.matched_po_data_fetch(request, frontendRequest)
         return jsonable_encoder(data)

@@ -416,11 +416,11 @@ async def fetch_missing_po_data(request: Request, frontendRequest):
     params = []
 
     # Apply condition only when user_id == 1
-    if frontendRequest.user_id == 1:
+    if frontendRequest.role_id == 1:
         base_query += " AND pm.user_id = %s"
         params.append(frontendRequest.user_id)
 
-    base_query += " ORDER BY pm.created_on DESC"
+    base_query += " ORDER BY pm.po_missing_id DESC"
 
     async with request.app.state.pool.acquire() as conn:
         async with conn.cursor() as cursor:
@@ -432,35 +432,35 @@ async def fetch_missing_po_data(request: Request, frontendRequest):
         
         
 async def fetch_mismatch_po_data(request: Request, frontendRequest):
-    query = """
-                SELECT
-                mm.po_mismatch_id,
-                mm.po_det_id,
-                mm.system_po_id,
 
-                pd.po_number,
-                pd.po_date,
-                pd.vendor_number AS vendor_code,
-                pd.customer_name,
+    base_query = """
+        SELECT
+            mm.po_mismatch_id,
+            mm.po_det_id,
+            mm.system_po_id,
 
-                mm.mismatch_attribute,
-                mm.scanned_value,
-                mm.system_value,
-                mm.comment,
+            pd.po_number,
+            pd.po_date,
+            pd.vendor_number AS vendor_code,
+            pd.customer_name,
 
-                'MISMATCH' AS po_status
-            FROM po_mismatch_report mm
-            LEFT JOIN po_details pd 
-                ON mm.po_det_id = pd.po_det_id
-            LEFT JOIN system_po_details sp
-                ON mm.system_po_id = sp.system_po_id
-            WHERE mm.active = 1
+            mm.mismatch_attribute,
+            mm.scanned_value,
+            mm.system_value,
+            mm.comment,
+
+            'MISMATCH' AS po_status
+        FROM po_mismatch_report mm
+        LEFT JOIN po_details pd 
+            ON mm.po_det_id = pd.po_det_id
+        LEFT JOIN system_po_details sp
+            ON mm.system_po_id = sp.system_po_id
+        WHERE mm.active = 1
     """
-    
+
     params = []
 
-    # Apply condition only when user_id == 1
-    if frontendRequest.user_id == 1:
+    if frontendRequest.role_id == 1:
         base_query += " AND mm.user_id = %s"
         params.append(frontendRequest.user_id)
 
@@ -468,10 +468,11 @@ async def fetch_mismatch_po_data(request: Request, frontendRequest):
 
     async with request.app.state.pool.acquire() as conn:
         async with conn.cursor() as cursor:
-            await cursor.execute(query)
+            await cursor.execute(base_query, tuple(params))
             cols = [c[0] for c in cursor.description]
             rows = await cursor.fetchall()
-            return [dict(zip(cols, r)) for r in rows]
+
+    return [dict(zip(cols, r)) for r in rows]
         
 
 async def fetch_matched_po_data(request: Request, frontendRequest):
@@ -492,7 +493,7 @@ async def fetch_matched_po_data(request: Request, frontendRequest):
     params = []
 
     # Apply user filter only when user_id == 1
-    if frontendRequest.user_id == 1:
+    if frontendRequest.role_id == 1:
         base_query += " AND pd.user_id = %s"
         params.append(frontendRequest.user_id)
 

@@ -254,6 +254,52 @@ async def fetch_all_folders(access_token: str) -> List[Dict[str, Any]]:
 
     return folder_list
 
+# mansi-------------------------------------------------------------
+
+async def refresh_outlook_access_token(refresh_token: str) -> dict:
+    url = "https://login.microsoftonline.com/common/oauth2/v2.0/token"
+
+    data = {
+        "client_id": CLIENT_ID,
+        "client_secret": CLIENT_SECRET,
+        "grant_type": "refresh_token",
+        "refresh_token": refresh_token,
+        "scope": "https://graph.microsoft.com/.default",
+    }
+
+    timeout = httpx.Timeout(connect=10.0, read=30.0, write=30.0, pool=30.0)
+
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        resp = await client.post(url, data=data)
+        resp.raise_for_status()
+        return resp.json()
+
+
+# mansi --------------------------------------------------------------------------------------------------------
+async def get_valid_outlook_token(
+    user_id: int,
+    repo: MailsRepository,
+) -> str:
+    token = await repo.get_outlook_token(user_id)
+
+    if token.token_expiry > datetime.utcnow() + timedelta(minutes=2):
+        return token.access_token
+
+    new_tokens = await refresh_outlook_access_token(token.refresh_token)
+
+    new_expiry = datetime.utcnow() + timedelta(
+        seconds=int(new_tokens["expires_in"])
+    )
+
+    await repo.update_outlook_token(
+        user_id=user_id,
+        access_token=new_tokens["access_token"],
+        refresh_token=new_tokens.get("refresh_token", token.refresh_token),
+        token_expiry=new_expiry,
+    )
+
+    return new_tokens["access_token"]
+
 # ------------------Email + Attachment Fetching + LLM keyword logic start ------------------ #
 def strip_html_to_text(html_content: Optional[str]) -> str:
     if not html_content:
@@ -605,23 +651,6 @@ def merge_po_data(body_data: dict, attachments_data: list[dict]) -> dict:
     return merged
 
 
-# ---------------------- Clean extracted text ---------------------- #
-def clean_extracted_text(text: str) -> str:
-    if not text:
-        return ""
-
-    # Replace both literal and real newline
-    text = text.replace("\\n", " ")  # literal slash-n
-    text = text.replace("\n", " ")   # actual new line
-    text = text.replace("\r", " ")
-
-    text = re.sub(r'\s*-\s*', '-', text)
-    text = re.sub(r'\s*:\s*', ': ', text)
-    text = re.sub(r'\s+', ' ', text)
-
-    return text.strip()
-
-
 async def fetch_and_save_mails_by_folders(
     access_token: str,
     folder_names: list[str],
@@ -782,16 +811,13 @@ async def fetch_and_save_mails_by_folders(
                         try:
                             if ct.startswith("text/") or ext.endswith((".txt", ".md", ".csv", ".log")):
                                 attachment_text = content_bytes.decode("utf-8", errors="ignore")
-                                attachment_text = clean_extracted_text(attachment_text)
                             elif ct == "application/pdf" or ext.endswith(".pdf"):
                                 reader = PyPDF2.PdfReader(io.BytesIO(content_bytes))
                                 attachment_text = " ".join((p.extract_text() or "") for p in reader.pages)
-                                attachment_text = clean_extracted_text(attachment_text)
                             elif ct in ("application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                                         "application/msword") or ext.endswith((".docx", ".doc")):
                                 document = docx.Document(io.BytesIO(content_bytes))
                                 attachment_text = " ".join(p.text for p in document.paragraphs)
-                                attachment_text = clean_extracted_text(attachment_text)
                             elif ct in ("application/vnd.openxmlformats-officedocument.presentationml.presentation",
                                         "application/vnd.ms-powerpoint") or ext.endswith((".pptx", ".ppt")):
                                 prs = Presentation(io.BytesIO(content_bytes))
@@ -801,9 +827,8 @@ async def fetch_and_save_mails_by_folders(
                                     for shape in slide.shapes
                                     if hasattr(shape, "text")
                                 )
-                                attachment_text = clean_extracted_text(attachment_text)
-                            # elif content_type.startswith("image/") or ext.endswith((".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff")):
-                            #     attachment_text = ocr_from_image_bytes(content_bytes)
+                            elif content_type.startswith("image/") or ext.endswith((".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff")):
+                                attachment_text = ocr_from_image_bytes(content_bytes)
                         except Exception:
                             attachment_text = None
 
@@ -838,7 +863,6 @@ async def fetch_and_save_mails_by_folders(
                 if po_data_body:
                     await mails_repo.insert_po_details(
                         mail_dtl_id=mail_id,
-                        user_id=user_id,
                         po_number=po_data_body.get("po_number"),
                         customer_name=po_data_body.get("customer_name"),
                         vendor_number=po_data_body.get("vendor_number"),
@@ -857,7 +881,6 @@ async def fetch_and_save_mails_by_folders(
 
                 # ---------------- PO data from attachments ----------------
                 for att_text in attachment_texts:
-                    att_text = clean_extracted_text(att_text)
                     po_data_att = await extract_po_fields_from_llm(att_text)
 
                     if isinstance(po_data_att, list):
@@ -867,7 +890,6 @@ async def fetch_and_save_mails_by_folders(
 
                             await mails_repo.insert_po_details(
                                 mail_dtl_id=mail_id,
-                                user_id=user_id,
                                 po_number=po.get("po_number"),
                                 customer_name=po.get("customer_name"),
                                 vendor_number=po.get("vendor_number"),
@@ -888,7 +910,6 @@ async def fetch_and_save_mails_by_folders(
                         if po:
                             await mails_repo.insert_po_details(
                                 mail_dtl_id=mail_id,
-                                user_id=user_id,
                                 po_number=po.get("po_number"),
                                 customer_name=po.get("customer_name"),
                                 vendor_number=po.get("vendor_number"),
@@ -1601,11 +1622,8 @@ async def generate_missing_po_report_service(mails_repo,user_id:int):
         if row.get("po_number") and row.get("vendor_number") and row.get("po_date")
     }
 
-    generated_missing_ids = []
-    generated_mismatch_ids = []
-
     # ==================================================
-    # PASS 1: SCANNED → SYSTEM
+    # PASS 1: SCANNED PO → SYSTEM (YOUR EXISTING LOGIC)
     # ==================================================
     for po in po_details:
 
@@ -1616,7 +1634,7 @@ async def generate_missing_po_report_service(mails_repo,user_id:int):
         vendor_number = po.get("vendor_number")
         po_date = po.get("po_date")
 
-        # CASE 1: Vendor missing
+        # CASE 1: Vendor missing in scanned
         if not vendor_number or vendor_number in ("", "NULL"):
 
             duplicate = await mails_repo.get_existing_po_missing(
@@ -1624,7 +1642,7 @@ async def generate_missing_po_report_service(mails_repo,user_id:int):
             )
 
             if duplicate is None:
-                missing_id = await mails_repo.insert_po_missing(
+                await mails_repo.insert_po_missing(
                     po_det_id=po["po_det_id"],
                     user_id=user_id,
                     system_po_id=None,
@@ -1633,7 +1651,6 @@ async def generate_missing_po_report_service(mails_repo,user_id:int):
                     scanned_value=po_number,
                     comment="Vendor number missing in scanned PO"
                 )
-                generated_missing_ids.append(missing_id)
             continue
 
         key = (
@@ -1642,7 +1659,7 @@ async def generate_missing_po_report_service(mails_repo,user_id:int):
             normalize_value(po_date),
         )
 
-        # CASE 2: PO not found in system
+        # CASE 2: Scanned PO not in system
         if key not in sys_map:
 
             duplicate = await mails_repo.get_existing_po_missing(
@@ -1650,7 +1667,7 @@ async def generate_missing_po_report_service(mails_repo,user_id:int):
             )
 
             if duplicate is None:
-                missing_id = await mails_repo.insert_po_missing(
+                await mails_repo.insert_po_missing(
                     po_det_id=po["po_det_id"],
                     user_id=user_id,
                     system_po_id=None,
@@ -1659,7 +1676,6 @@ async def generate_missing_po_report_service(mails_repo,user_id:int):
                     scanned_value=po_number,
                     comment="PO not found in system"
                 )
-                generated_missing_ids.append(missing_id)
             continue
 
         # CASE 3: Exists → mismatch check
@@ -1706,7 +1722,7 @@ async def generate_missing_po_report_service(mails_repo,user_id:int):
                 if duplicate:
                     continue
 
-                mismatch_id = await mails_repo.insert_mismatch(
+                await mails_repo.insert_mismatch(
                     po_det_id=po["po_det_id"],
                     user_id=user_id,
                     system_po_id=system_row["system_po_id"],
@@ -1715,11 +1731,9 @@ async def generate_missing_po_report_service(mails_repo,user_id:int):
                     scanned_value=str(val_scanned),
                     comment=f"{field} mismatch"
                 )
-                generated_mismatch_ids.append(mismatch_id)
 
     # ==================================================
-    # PASS 2: SYSTEM → SCANNED (Missing in scanned)
-    # ==================================================
+    # PASS 2: SYSTEM PO → SCANNED  MISSING LOGIC)
     for key, system_row in sys_map.items():
 
         if key not in scanned_map:
@@ -1731,7 +1745,7 @@ async def generate_missing_po_report_service(mails_repo,user_id:int):
             if duplicate:
                 continue
 
-            missing_id = await mails_repo.insert_po_missing(
+            await mails_repo.insert_po_missing(
                 po_det_id=None,
                 user_id=user_id,
                 system_po_id=system_row["system_po_id"],
@@ -1740,17 +1754,9 @@ async def generate_missing_po_report_service(mails_repo,user_id:int):
                 scanned_value="",
                 comment="PO exists in system but not found in scanned data"
             )
-            generated_missing_ids.append(missing_id)
 
     return {
         "status": "success",
-        "message": "Missing & mismatch report generated",
-        "summary": {
-            "missing_count": len(generated_missing_ids),
-            "mismatch_count": len(generated_mismatch_ids),
-        },
-        "generated_ids": {
-            "missing_po_ids": generated_missing_ids,
-            "mismatch_po_ids": generated_mismatch_ids,
-        }
+        "message": "Missing & mismatch report generated"
     }
+

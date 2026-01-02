@@ -384,7 +384,7 @@ class MailsRepository(BaseRepository):
         
         await self._log_and_execute(
             INSERT_PO_DETAILS,
-            [
+            (
                 mail_dtl_id,
                 user_id,
                 po_number,
@@ -401,7 +401,7 @@ class MailsRepository(BaseRepository):
                 description,
                 mail_folder,
                 created_by,
-            ],
+            ),
         )
 
         last_id = self._cur.lastrowid

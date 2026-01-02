@@ -443,23 +443,17 @@ async def fetch_mismatch_po_data(request: Request):
 
 async def fetch_matched_po_data(request: Request):
     query = """
-        SELECT 
-            pd.*
-        FROM po_details pd
-        JOIN system_po_details sp
-            ON pd.po_number = sp.po_number
-        AND pd.vendor_number = sp.vendor_number
-        AND pd.po_date = sp.po_date
-
-        LEFT JOIN po_missing_report pm
-        ON pm.po_det_id = pd.po_det_id AND pm.active = 1
-
-        LEFT JOIN po_mismatch_report mm
-        ON mm.po_det_id = pd.po_det_id AND mm.active = 1
-
-        WHERE pm.po_det_id IS NULL
-        AND mm.po_det_id IS NULL;
-  """
+         SELECT
+                pd.*,
+                pd.vendor_number AS vendor_code
+            FROM po_details pd
+            LEFT JOIN po_missing_report pm
+                ON pm.po_det_id = pd.po_det_id AND pm.active = 1
+            LEFT JOIN po_mismatch_report mm
+                ON mm.po_det_id = pd.po_det_id AND mm.active = 1
+            WHERE pm.po_det_id IS NULL
+            AND mm.po_det_id IS NULL;
+    """
 
     async with request.app.state.pool.acquire() as conn:
         async with conn.cursor() as cursor:

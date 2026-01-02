@@ -127,7 +127,7 @@ async def callback(
             )
         return RedirectResponse(url['url'])
     except Exception as e:
-        print("JWT ERROR:", e)
+        print("ERROR:", e)
         # If anything goes wrong, still continue with redirect
         pass
         # Fallback if no token

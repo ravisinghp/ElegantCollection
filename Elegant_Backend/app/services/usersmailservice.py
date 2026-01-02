@@ -92,7 +92,11 @@ def get_auth_url(provider: str, user_id: int):
         {"user_id": user_id},
         JWTSECRET_KEY,
         algorithm="HS256"
-       )
+    )
+    
+    if isinstance(state, bytes):
+        state = state.decode("utf-8")
+      
     if provider == "outlook":
         return (
             # f"https://login.microsoftonline.com/{TENANT_ID}/oauth2/v2.0/authorize?"
@@ -1569,7 +1573,7 @@ def normalize_value(val):
     return val
 
 
-async def generate_missing_po_report_service(mails_repo):
+async def generate_missing_po_report_service(mails_repo,user_id:int):
 
     po_details = await mails_repo.get_all_po_details()
     sys_po_details = await mails_repo.get_all_system_po_details()
@@ -1622,6 +1626,7 @@ async def generate_missing_po_report_service(mails_repo):
             if duplicate is None:
                 missing_id = await mails_repo.insert_po_missing(
                     po_det_id=po["po_det_id"],
+                    user_id=user_id,
                     system_po_id=None,
                     attribute="po_missing",
                     system_value="",
@@ -1647,6 +1652,7 @@ async def generate_missing_po_report_service(mails_repo):
             if duplicate is None:
                 missing_id = await mails_repo.insert_po_missing(
                     po_det_id=po["po_det_id"],
+                    user_id=user_id,
                     system_po_id=None,
                     attribute="po_missing",
                     system_value="",
@@ -1702,6 +1708,7 @@ async def generate_missing_po_report_service(mails_repo):
 
                 mismatch_id = await mails_repo.insert_mismatch(
                     po_det_id=po["po_det_id"],
+                    user_id=user_id,
                     system_po_id=system_row["system_po_id"],
                     field=field,
                     system_value=str(val_system),
@@ -1726,6 +1733,7 @@ async def generate_missing_po_report_service(mails_repo):
 
             missing_id = await mails_repo.insert_po_missing(
                 po_det_id=None,
+                user_id=user_id,
                 system_po_id=system_row["system_po_id"],
                 attribute="po_missing",
                 system_value=system_row["po_number"],

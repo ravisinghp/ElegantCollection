@@ -53,7 +53,7 @@ async def fetch_documents_analyzed_by_user_id(user_id: int, request: Request) ->
         
 #For Downloading the PO Missing Report     
 async def download_missing_po_report(request: Request, user_id: int, role_id: int):
-    query = """
+    base_query  = """
         SELECT
             pd.po_number,
             pd.po_date,
@@ -75,7 +75,7 @@ async def download_missing_po_report(request: Request, user_id: int, role_id: in
 
     async with request.app.state.pool.acquire() as conn:
         async with conn.cursor() as cursor:
-            await cursor.execute(query)
+            await cursor.execute(base_query, tuple(params))
 
             columns = [col[0] for col in cursor.description]
             rows = await cursor.fetchall()
@@ -85,7 +85,7 @@ async def download_missing_po_report(request: Request, user_id: int, role_id: in
 
    #For Doanloading the PO Mismatch Report   
 async def download_mismatch_po_report(request: Request, user_id: int, role_id: int):
-    query = """
+    base_query  = """
         SELECT
             pd.po_number,
             pd.po_date,
@@ -118,7 +118,7 @@ async def download_mismatch_po_report(request: Request, user_id: int, role_id: i
     
     async with request.app.state.pool.acquire() as conn:
         async with conn.cursor() as cursor:
-            await cursor.execute(query)
+            await cursor.execute(base_query, tuple(params))
 
             columns = [col[0] for col in cursor.description]
             rows = await cursor.fetchall()

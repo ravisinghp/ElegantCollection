@@ -863,6 +863,7 @@ async def fetch_and_save_mails_by_folders(
                 if po_data_body:
                     await mails_repo.insert_po_details(
                         mail_dtl_id=mail_id,
+                        user_id=user_id,
                         po_number=po_data_body.get("po_number"),
                         customer_name=po_data_body.get("customer_name"),
                         vendor_number=po_data_body.get("vendor_number"),

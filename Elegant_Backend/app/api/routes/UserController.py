@@ -30,7 +30,7 @@ async def get_dashboard_stats(request: Request,userId:int):
         return None
     
     #Donwload Missing Report and Missmatch Report 
-@router.get("/downloadMissingPOReport")
+@router.post("/downloadMissingPOReport")
 async def download_missing_po_report(
     request: Request,
     payload: DownloadMissingMismatchRequest,
@@ -57,7 +57,7 @@ async def download_missing_po_report(
 
 
 #Donwload Missing Report and Missmatch Report 
-@router.get("/downloadMismatchPOReport")
+@router.post("/downloadMismatchPOReport")
 async def download_mismatch_po_report(
     request: Request,
     payload: DownloadMissingMismatchRequest,

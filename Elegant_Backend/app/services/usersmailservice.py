@@ -3,25 +3,18 @@ from dotenv import load_dotenv
 import os, base64
 import httpx
 from urllib.parse import urlencode
-import hashlib
-import boto3
 import json
 from loguru import logger
-import pytesseract
 import jwt
-# from PIL import Image
-# import cv2
-# import numpy as np
-from botocore.exceptions import BotoCoreError, ClientError
-import shutil
-import traceback
-# import openpyxl
-# import xlrd
 from datetime import date, datetime
+from openai import OpenAI
+from rapidfuzz import fuzz
+
 # Load the .env file
 load_dotenv()
 failed_url = os.getenv("failed_url")
 success_url = os.getenv("success_url")
+
 #----------------- outlook ------------------#
 CLIENT_ID = os.getenv("CLIENT_ID")
 CLIENT_SECRET = os.getenv("CLIENT_SECRET")
@@ -30,32 +23,27 @@ REDIRECT_URI = os.getenv("REDIRECT_URI")
 GRAPH_API = os.getenv("GRAPH_API")
 JWTSECRET_KEY=os.getenv("JWTSECRET_KEY")
 #---------------outlook end ----------------------#
+
 #---------------Google---------------------------#
 GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID")
 GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET")
 # TENANT_ID = os.getenv("TENANT_ID")
 GOOGLE_REDIRECT_URI = os.getenv("GOOGLE_REDIRECT_URI")
 GMAIL_API = os.getenv("GMAIL_API")
-
 #---------------Google end-------------------------#
 
-# --------- boto3 session for AWS Bedrock------
-session = boto3.Session(
-    aws_access_key_id=os.getenv("aws_access_key_id"),
-    aws_secret_access_key=os.getenv("aws_secret_access_key"),
-    region_name=os.getenv("region_name")  # Adjust as per your model access
+#---------------OpenAI Client------------------
+openai_client = OpenAI(
+    api_key=os.getenv("OPENAI_API_KEY")
 )
-client = session.client("bedrock-runtime")
-# --------- boto3 session for AWS Bedrock------
+#----------OpenAI Client end ------------------
 
-from datetime import datetime, timezone,timedelta
+from datetime import datetime,timedelta
 import re
 from typing import List, Dict, Any, Optional
 import html
 import io
-
 import aiohttp, json
-from datetime import datetime, timezone
 from typing import List, Dict, Any
 from pptx import Presentation  # for PPTX support
 from fastapi.responses import RedirectResponse
@@ -75,7 +63,6 @@ try:
     import docx  # python-docx
 except Exception:
     docx = None  # type: ignore
-import asyncio
 
 # this code is used for outlook
 # def get_auth_url():
@@ -356,265 +343,248 @@ def compute_file_hash(content: bytes) -> str:
     return hashlib.sha256(content).hexdigest()
 
 
-# ------------------- AWS Bedrock Keyword Extraction ------------------- #
+# ------------------- Keyword Extraction ------------------- #
 def normalize_text(text: str) -> str:
-    """
-    Normalize text for PO and invoice parsing.
-    - Lowercase everything
-    - Keep alphanumerics, spaces, dots, colons, #, dashes, and slashes
-    - Reduce multiple spaces to single space
-    - Strip leading/trailing spaces
-    """
     if not text:
         return ""
 
-    text = text.lower()
-    text = re.sub(r'[^a-z0-9\.\-/:#\s]', ' ', text)
-    text = re.sub(r'\s+', ' ', text)
+    text = text.replace("\xa0", " ")     # non-breaking space
+    text = text.replace("\u200b", " ")   # zero-width space
+    text = text.replace("\r", "\n")
+
+    # normalize separators
+    text = re.sub(r"[=]", ":", text)
+
+    # collapse whitespace
+    text = re.sub(r"\s+", " ", text)
+
     return text.strip()
 
 
-
-# ---------------------- OCR Helper ---------------------- #
-# Create Textract client from session
-textract_client = session.client("textract")
-
-def ocr_from_image_bytes(image_bytes: bytes) -> str:
-    """
-    Perform OCR using AWS Textract DetectDocumentText.
-    Handles scanned and structured documents (POs, invoices, forms).
-    """
-    if not image_bytes:
-        logger.warning("No image bytes provided for OCR.")
-        return ""
-
-    try:
-        response = textract_client.detect_document_text(
-            Document={"Bytes": image_bytes}
-        )
-
-        # Extract lines of text
-        lines = [
-            block["Text"]
-            for block in response.get("Blocks", [])
-            if block["BlockType"] == "LINE"
-        ]
-
-        extracted_text = "\n".join(lines).strip()
-        logger.info(f"Textract OCR extracted {len(lines)} lines.")
-        return extracted_text
-
-    except (BotoCoreError, ClientError) as e:
-        logger.error(f"AWS Textract OCR FAILED: {e}")
-        return ""
-    except Exception as e:
-        logger.error(f"Unexpected error during OCR: {e}")
-        return ""
-
-
-# Usage example
-# if __name__ == "__main__":
-#     file_path = "po_image.jpg"
-#     with open(file_path, "rb") as f:
-#         img_bytes = f.read()
-
-#     text = ocr_aws_textract(img_bytes)
-#     print(text)
-    
-    
-
-async def get_keywords_from_llm(text: str) -> list[str]:
-    if not text or not text.strip():
-        return []
-
-    #Normalize text
-    norm = normalize_text(text)
-    tokens = norm.split()
-
-    #PO detection
-    if "po" in tokens:
-        return ["PO#"]
-
-    ROOT_KEYWORDS = [
-        "PO#",
-        "Customer name",
-        "Vendor Number",
-        "PO DATE",
-        "Delivery date",
-        "Cancel date",
-        "Gold lock",
-        "EC Style#",
-        "Customer style #",
-        "Kt",
-        "Color",
-        "Quantity",
-        "Description"
+#--------------------Regex-----------------------------
+PO_REGEX_PATTERNS = {
+    "po_number": [
+        # Key:value style
+        r"po_number\s*:\s*(.+?)(?=\s+(?:customer_name|vendor_number|po_date|delivery_date|cancel_date|ec_style_number|customer_style_number|quantity|gold_karat|color|description)\s*:|$)",
+        # Human-readable aliases
+        r"(?:po\s*(?:number|no|num|#)|p\.?\s*o\.?|purchase\s*(?:order|no|number)|purchase[_\- ]order|order\s*(?:number|no|#))\s*[:\-]?\s*([A-Z0-9\/\-_.]+)",
+        r"\bPO[\s\-_:]*([0-9]{1,}[A-Z0-9\-\/_.]*)",
+        r"\bP\s*O\s*[:\-]?\s*([A-Z0-9\/\-_.]+)"
+    ],
+    "customer_name": [
+        r"customer_name\s*:\s*(.+?)(?=\s+(?:vendor_number|po_date|delivery_date|cancel_date|ec_style_number|customer_style_number|quantity|gold_karat|color|description)\s*:|$)",
+        r"(?:customer\s*name|buyer\s*name|client\s*name|customer|client)\s*[:\-]?\s*([a-zA-Z\s]+?)(?=\s+(?:vendor|po|order|delivery|cancel|date|quantity|gold|color|colour|description|remarks|details)|$)"
+    ],
+    "vendor_number": [
+        r"vendor_number\s*:\s*(\d+)",
+        r"(?:vendor\s*number|vendor\s*no|supplier\s*code|vendor)\s*[:\-]?\s*(\d+)"
+    ],
+    "po_date": [
+        r"po_date\s*:\s*([\d]{4}-[\d]{2}-[\d]{2})",
+        r"(?:po\s*date|order\s*date|purchase\s*date)\s*[:\-]?\s*(\d{4}-\d{2}-\d{2})"
+    ],
+    "delivery_date": [
+        r"delivery_date\s*:\s*([\d]{4}-[\d]{2}-[\d]{2})",
+        r"(?:delivery\s*date|expected\s*delivery|shipment\s*date|delivery)\s*[:\-]?\s*(\d{4}-\d{2}-[\d]{2})"
+    ],
+    "cancel_date": [
+        r"cancel_date\s*:\s*([\d]{4}-[\d]{2}-[\d]{2})",
+        r"(?:cancel\s*date|cancellation\s*date|order\s*cancel\s*date)\s*[:\-]?\s*(\d{4}-[\d]{2}-[\d]{2})"
+    ],
+    "ec_style_number": [
+        r"ec_style_number\s*:\s*([A-Za-z0-9\-]+)",
+        r"(?:ec\s*style\s*number|ec\s*style|ec\s*no)\s*[:\-]?\s*([A-Za-z0-9\-]+)"
+    ],
+    "customer_style_number": [
+        r"customer_style_number\s*:\s*([A-Za-z0-9\-]+)",
+        r"(?:customer\s*style\s*number|customer\s*style|cust\s*style)\s*[:\-]?\s*([A-Za-z0-9\-]+)"
+    ],
+    "quantity": [
+        r"quantity\s*:\s*(\d+)",
+        r"(?:quantity|qty|ordered\s*quantity)\s*[:\-]?\s*(\d+)"
+    ],
+    "gold_karat": [
+        r"gold_karat\s*:\s*([0-9]{1,2}\s*K)",
+        r"(?:gold\s*karat|karat|kt|gold\s*purity)\s*[:\-]?\s*(\d{1,2}\s*k)"
+    ],
+    "color": [
+        r"color\s*:\s*(.+?)(?=\s+description\s*:|$)",
+        r"(?:color|colour)\s*[:\-]?\s*([a-zA-Z\s]+?)(?=\s+(?:quantity|gold|description|remarks|details)|$)"
+    ],
+    "description": [
+        r"description\s*:\s*(.+)$",
+        r"(?:description|remarks|details|order\s*details|item\s*description)\s*[:\-]?\s*(.+)$"
     ]
+}
 
-    keyword_list = "\n".join(f"- {k}" for k in ROOT_KEYWORDS)
 
+
+EMPTY_PO = {
+    "po_number": None,
+    "customer_name": None,
+    "vendor_number": None,
+    "po_date": None,
+    "delivery_date": None,
+    "cancel_date": None,
+    "gold_karat": None,
+    "ec_style_number": None,
+    "customer_style_number": None,
+    "color": None,
+    "quantity": None,
+    "description": None,
+}
+
+def extract_po_fields_regex(text: str) -> dict:
+    text = normalize_text(text)
+    out = EMPTY_PO.copy()
+
+    for field, patterns in PO_REGEX_PATTERNS.items():
+        for pat in patterns:
+            match = re.search(pat, text, re.IGNORECASE)
+            if match:
+                out[field] = match.group(1).strip()
+                break
+
+    return out if any(out.values()) else EMPTY_PO
+
+async def extract_po_fields(text: str) -> dict:
+    # REGEX
+    data = extract_po_fields_regex(text)
+    if any(data.values()):
+        return data
+
+    #LLM fallback
+    return await extract_po_fields_from_llm(text)
+
+
+async def detect_keywords(
+    text: str,
+    db_keywords: list[str]
+):
+    if not text or not text.strip():
+        return [], None
+
+    text_l = text.lower()
+    keywords = [normalize_keyword(k) for k in db_keywords]
+
+    # ---------------- 1️⃣ EXACT MATCH ----------------
+    for k in keywords:
+        if k in text_l:
+            return [k], "EXACT"
+
+    # ---------------- 2️⃣ REGEX MATCH ----------------
+    for k in keywords:
+        pattern = r"\b" + re.escape(k).replace(r"\ ", r"\s*") + r"\b"
+        if re.search(pattern, text_l, re.IGNORECASE):
+            return [k], "REGEX"
+
+    # ---------------- 3️⃣ FUZZY MATCH ----------------
+    for k in keywords:
+        if fuzz.partial_ratio(k, text_l) >= 85:
+            return [k], "FUZZY"
+
+    # ---------------- 4️⃣ OPENAI (LAST OPTION) ----------------
+    ai_hits = await openai_keyword_fallback(text, keywords)
+    if ai_hits:
+        return ai_hits, "OPENAI"
+
+    return [], None
+
+
+
+def normalize_keyword(k: str) -> str:
+    return re.sub(r"\s+", " ", k.strip().lower())
+
+
+
+async def openai_keyword_fallback(text: str, keywords: list[str]) -> list[str]:
     prompt = f"""
-You are an expert semantic keyword detector.
+Match text to keyword names ONLY if clearly present.
+If unsure return [].
 
-### TASK
-Identify which ROOT KEYWORDS are present in meaning,
-even if the exact words differ.
+KEYWORDS:
+{keywords}
 
-### HARD RULE
-Any appearance of the standalone token "po" (example: po, po:, po., po#, p.o.)
-ALWAYS maps to ROOT KEYWORD "PO#".
+TEXT:
+{text}
 
-### ROOT KEYWORDS (allowed output ONLY)
-{keyword_list}
-
-### VARIATION MAPPING EXAMPLES
-PO# → po number, po no, p.o., po#, po #, purchase order, purchase order number, po, p.o. number 
-Customer name → customer, customer:, cust, customer name  
-Vendor Number → vendor, vendor no, vend no, vendor number, Vendor #   
-PO DATE → po date, order date, purchase order date, date:  
-Delivery date → delivery date, expected delivery, est delivery  
-Cancel date → cancel date, cancellation date  
-Gold lock → gold lock, g lock  
-EC Style# → ec style, e.c style, style ec  
-Customer style # → customer style, cust style, style number, customer#
-Kt → kt, k.t, karat  
-Color → color, colour, clr  
-Quantity → quantity, qty, qnty, pcs, pieces  
-Description → description, desc, item description, item desc  
-
-### RULES
-- Match based on meaning
-- Return ONLY ROOT KEYWORDS
-- No new keywords
-- If no match → []
-- OUTPUT MUST be valid JSON array ONLY
-
-### TEXT:
-{norm}
-
-### OUTPUT:
-JSON array only.
+Return JSON array only.
 """
 
     try:
-        response = client.invoke_model(
-            modelId="mistral.mistral-large-2402-v1:0",
-            body=json.dumps({
-                "messages": [{"role": "user", "content": prompt}],
-                "max_tokens": 200,
-                "temperature": 0.0
-            })
+        resp = openai_client.chat.completions.create(
+            model="gpt-4o-mini",
+            temperature=0,
+            messages=[{"role": "user", "content": prompt}]
         )
 
-        resp_str = response["body"].read().decode("utf-8")
-        result = json.loads(resp_str)
+        raw = resp.choices[0].message.content.strip()
+        match = re.search(r"\[.*\]", raw, re.DOTALL)
+        return json.loads(match.group()) if match else []
 
-        raw = result["choices"][0]["message"]["content"].strip()
-
-        # If pure JSON
-        if raw.startswith("[") and raw.endswith("]"):
-            return json.loads(raw)
-
-        # Extract JSON inside text
-        match = re.search(r'\[.*?\]', raw, re.DOTALL)
-        if match:
-            return json.loads(match.group(0))
-
-        return []
-
-    except Exception as e:
-        print("LLM keyword detection failed:", e)
+    except Exception:
         return []
 
 
-# ------------------- AWS Bedrock Extraction ------------------- #
-po_fields = [
-    "po_number", "customer_name", "vendor_number", "po_date", "delivery_date",
-    "cancel_date", "gold_karat", "ec_style_number", "customer_style_number",
-    "color", "quantity", "description"
+# ------------------- Extraction ------------------- #
+PO_FIELD_NAMES = [
+    "po_number",
+    "customer_name",
+    "vendor_number",
+    "po_date",
+    "delivery_date",
+    "cancel_date",
+    "ec_style_number",
+    "customer_style_number",
+    "quantity",
+    "gold_karat",
+    "color",
+    "description",
 ]
 
-EMPTY_PO = {field: None for field in po_fields}
-
+EMPTY_PO = {field: None for field in PO_FIELD_NAMES}
 
 async def extract_po_fields_from_llm(text: str) -> dict:
-    """
-    Safely extracts PO fields using AWS Bedrock LLM.
-    Prevents hallucination — returns null values if not explicitly present.
-    """
-
     if not text or not text.strip():
         return EMPTY_PO
 
-    cleaned = text.strip()
-
-    # ✅ EARLY EXIT — if message clearly not a PO
-    # PO always contains at least one number, date, or code
-    if len(cleaned) < 30 or not re.search(r"\d{2,}", cleaned):
+    if len(text) < 30 or not re.search(r"\d{2,}", text):
         return EMPTY_PO
 
-    # ✅ Another safety — no known PO keywords
-    po_keywords = ["po", "purchase order", "qty", "quantity", "vendor", "invoice"]
-    if not any(k.lower() in cleaned.lower() for k in po_keywords):
-        return EMPTY_PO
-
-    # ✅ STRICT ANTI-HALLUCINATION PROMPT
     prompt = f"""
-You are a strict information extractor.
+Extract ONLY explicitly present values.
+Return null if missing.
+Never guess.
 
-Extract ONLY if the value is explicitly present in the text.
-If unsure — return null.
-Never guess, infer, assume, create examples, or fabricate PO data.
-Do NOT use prior knowledge or imagination.
+Return JSON with keys:
+{PO_FIELD_NAMES}
 
-Return JSON only with these exact keys:
-{po_fields}
-
-Text:
-\"\"\"{cleaned}\"\"\"
-
-Output rules:
-- JSON only — no explanation
-- Values MUST come from the text
-- Null if missing
+TEXT:
+{text}
 """
 
     try:
-        response = client.invoke_model(
-            modelId="mistral.mistral-7b-instruct-v0:2",
-            contentType="application/json",
-            accept="application/json",
-            body=json.dumps({
-                "prompt": prompt,
-                "max_tokens": 300,
-                "temperature": 0.0
-            }),
+        resp = openai_client.chat.completions.create(
+            model="gpt-4o-mini",
+            temperature=0,
+            messages=[{"role": "user", "content": prompt}]
         )
 
-        raw = response["body"].read().decode()
-        llm_text = json.loads(raw)["outputs"][0]["text"]
-
-        # ✅ Extract JSON safely
-        json_match = re.search(r"\{.*\}", llm_text, re.DOTALL)
-        if not json_match:
+        raw = resp.choices[0].message.content
+        match = re.search(r"\{{.*\}}", raw, re.DOTALL)
+        if not match:
             return EMPTY_PO
 
-        data = json.loads(json_match.group(0))
+        data = json.loads(match.group())
+        out = EMPTY_PO.copy()
 
-        # ✅ Ensure only allowed fields + convert invalid to null
-        cleaned_output = EMPTY_PO.copy()
-        for f in po_fields:
-            val = data.get(f)
-            cleaned_output[f] = val if val not in ["", "N/A", "null", None] else None
+        for f in PO_FIELD_NAMES:
+            v = data.get(f)
+            out[f] = v if v not in ["", None, "null", "N/A"] else None
 
-        # ✅ Extra check — if ALL fields null → discard
-        if all(v is None for v in cleaned_output.values()):
-            return EMPTY_PO
+        return out if any(out.values()) else EMPTY_PO
 
-        return cleaned_output
-
-    except Exception as e:
-        logger.error(f"PO extraction failed: {e} | text={text[:80]}")
+    except Exception:
         return EMPTY_PO
 
 
@@ -655,7 +625,6 @@ async def fetch_and_save_mails_by_folders(
     access_token: str,
     folder_names: list[str],
     user_id: int,
-    org_id: int,
     from_date: str,
     to_date: str,
     mails_repo: "MailsRepository"
@@ -716,6 +685,8 @@ async def fetch_and_save_mails_by_folders(
                 messages.extend(data.get("value", []))
                 next_url = data.get("@odata.nextLink")
 
+
+                keywords = await mails_repo.fetch_keywords()
             # ---------------- PROCESS EACH MESSAGE ----------------
             for msg in messages:
                 graph_mail_id = msg.get("id")
@@ -739,9 +710,13 @@ async def fetch_and_save_mails_by_folders(
                 body_clean = clean_email_body(body_plain)
 
                 # ---------------- LLM KEYWORD MATCH ----------------
-                matched_keywords = await get_keywords_from_llm(body_clean)
+                matched_keywords, match_source = await detect_keywords(
+                    body_clean,
+                    keywords
+                )
+
                 if not matched_keywords:
-                    continue
+                    continue  #skip mail
 
                 from_email = (msg.get('from') or {}).get('emailAddress', {}).get('address')
                 to_emails = collect_addresses_from_message(msg, 'toRecipients')
@@ -754,18 +729,19 @@ async def fetch_and_save_mails_by_folders(
                 # ---------------- INSERT MAILS ----------------
                 try:
                     mail_id = await mails_repo.insert_mail_detail(
-                        subject=subject,
-                        body=body_clean,
-                        date_time=date_only,
-                        mail_from=from_email,
-                        mail_to=to_emails,
-                        mail_cc=merged_cc,
-                        keyword=None,
-                        graph_mail_id=graph_mail_id,
-                        folder_name=folder_name,
-                        user_id=user_id,
-                        created_by=user_id,
-                    )
+                    user_id=user_id,
+                    subject=subject,
+                    body=body_clean,
+                    date_time=date_only,
+                    mail_from=from_email,
+                    mail_to=to_emails,
+                    mail_cc=merged_cc,
+                    created_by=user_id,
+                    updated_by=user_id,
+                    is_active=1,
+                    graph_mail_id=graph_mail_id,
+                    folder_name=folder_name
+                )
                 except Exception as e:
                     logger.error("DB insert failed for mail %s: %s", graph_mail_id, e)
                     continue
@@ -827,14 +803,15 @@ async def fetch_and_save_mails_by_folders(
                                     for shape in slide.shapes
                                     if hasattr(shape, "text")
                                 )
-                            elif content_type.startswith("image/") or ext.endswith((".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff")):
-                                attachment_text = ocr_from_image_bytes(content_bytes)
+                            # elif content_type.startswith("image/") or ext.endswith((".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff")):
+                            #     attachment_text = ocr_from_image_bytes(content_bytes)
                         except Exception:
                             attachment_text = None
 
                         if attachment_text:
                             attachment_texts.append(attachment_text)
-                            attach_keywords = await get_keywords_from_llm(attachment_text)
+                            attach_keywords, match_type = await detect_keywords(attachment_text, keywords)
+
                         else:
                             attach_keywords = []
 
@@ -845,12 +822,13 @@ async def fetch_and_save_mails_by_folders(
                         try:
                             await mails_repo.insert_attachment(
                                 mail_dtl_id=mail_id,
+                                user_id=user_id,
                                 attach_name=filename,
                                 attach_type=content_type,
                                 attach_path=file_path,
-                                keyword=None,
-                                user_id=user_id,
                                 created_by=user_id,
+                                updated_by=user_id,
+                                is_active=1,
                                 file_hash=file_hash,
                             )
                             saved_attachments.append(filename)
@@ -859,8 +837,8 @@ async def fetch_and_save_mails_by_folders(
 
                 
                 # ---------------- PO data from email body ----------------
-                po_data_body = await extract_po_fields_from_llm(body_clean)
-                if po_data_body:
+                po_data_body = await extract_po_fields(body_clean)
+                if any(po_data_body.values()):
                     await mails_repo.insert_po_details(
                         mail_dtl_id=mail_id,
                         user_id=user_id,
@@ -882,50 +860,28 @@ async def fetch_and_save_mails_by_folders(
 
                 # ---------------- PO data from attachments ----------------
                 for att_text in attachment_texts:
-                    po_data_att = await extract_po_fields_from_llm(att_text)
+                    po = await extract_po_fields(att_text)
+                    if not any(po.values()):
+                        continue
 
-                    if isinstance(po_data_att, list):
-                        for po in po_data_att:
-                            if not po:
-                                continue
-
-                            await mails_repo.insert_po_details(
-                                mail_dtl_id=mail_id,
-                                po_number=po.get("po_number"),
-                                customer_name=po.get("customer_name"),
-                                vendor_number=po.get("vendor_number"),
-                                po_date=normalize_po_date_ddmmyyyy(po.get("po_date")),
-                                delivery_date=po.get("delivery_date"),
-                                cancel_date=normalize_po_date_ddmmyyyy(po.get("cancel_date")),
-                                gold_karat=po.get("gold_karat"),
-                                ec_style_number=po.get("ec_style_number"),
-                                customer_style_number=po.get("customer_style_number"),
-                                color=po.get("color"),
-                                quantity=po.get("quantity"),
-                                description=po.get("description"),
-                                mail_folder=folder_name,
-                                created_by=user_id,
-                            )
-                    else:
-                        po = po_data_att
-                        if po:
-                            await mails_repo.insert_po_details(
-                                mail_dtl_id=mail_id,
-                                po_number=po.get("po_number"),
-                                customer_name=po.get("customer_name"),
-                                vendor_number=po.get("vendor_number"),
-                                po_date=normalize_po_date_ddmmyyyy(po.get("po_date")),
-                                delivery_date=po.get("delivery_date"),
-                                cancel_date=normalize_po_date_ddmmyyyy(po.get("cancel_date")),
-                                gold_karat=po.get("gold_karat"),
-                                ec_style_number=po.get("ec_style_number"),
-                                customer_style_number=po.get("customer_style_number"),
-                                color=po.get("color"),
-                                quantity=po.get("quantity"),
-                                description=po.get("description"),
-                                mail_folder=folder_name,
-                                created_by=user_id,
-                            )
+                    await mails_repo.insert_po_details(
+                        mail_dtl_id=mail_id,
+                        user_id=user_id,
+                        po_number=po.get("po_number"),
+                        customer_name=po.get("customer_name"),
+                        vendor_number=po.get("vendor_number"),
+                        po_date=normalize_po_date_ddmmyyyy(po.get("po_date")),
+                        delivery_date=po.get("delivery_date"),
+                        cancel_date=normalize_po_date_ddmmyyyy(po.get("cancel_date")),
+                        gold_karat=po.get("gold_karat"),
+                        ec_style_number=po.get("ec_style_number"),
+                        customer_style_number=po.get("customer_style_number"),
+                        color=po.get("color"),
+                        quantity=po.get("quantity"),
+                        description=po.get("description"),
+                        mail_folder=folder_name,
+                        created_by=user_id,
+                    )
                 # ---------------- COLLECT RESULT ----------------
                 results.append({
                     "mail_dtl_id": mail_id,

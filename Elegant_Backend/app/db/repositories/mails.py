@@ -7,11 +7,10 @@ from app.models.outlook_token import OutlookToken
 # Insert into your existing mail_details table (including `keyword`, `repeated_keyword`, and `graph_mail_id` columns)
 INSERT_MAIL_DETAILS = """
 INSERT INTO mail_details (
-  user_id, 
-  subject, body, date_time,
+  user_id, subject, body, date_time,
   mail_from, mail_to, mail_cc,
-keyword, created_by, updated_by, is_active, graph_mail_id, folder_name
-) VALUES ( %s, %s, %s, %s, %s, %s, %s,  %s, %s, %s, %s, %s, %s)
+  created_by, updated_by, is_active, graph_mail_id, folder_name
+) VALUES ( %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
 """
 
 # Insert into your existing attach_master table (including `keyword` and `repeated_keyword` columns)
@@ -19,8 +18,8 @@ INSERT_ATTACHMENT = """
 INSERT INTO email_attachments (
   mail_dtl_id, user_id, 
   attach_name, attach_type, attach_path,
-  created_by, updated_by, is_active, keyword, file_hash
-) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s,  %s)
+  created_by, updated_by, is_active, file_hash
+) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
 """
 
 # Insert into calendar master table for events matched by keywords
@@ -140,17 +139,13 @@ class MailsRepository(BaseRepository):
     async def insert_mail_detail(
         self,
         *,
+        user_id: Optional[int],
         subject: Optional[str],
         body: Optional[str],
         date_time: Optional[str],  # YYYY-MM-DD
         mail_from: Optional[str],
         mail_to: Optional[str],
         mail_cc: Optional[str],
-        keyword: Optional[str],
-        repeated_keyword: Optional[str] = None,
-        # cal_id: Optional[int] = None,
-        user_id: Optional[int] = None,
-        keyword_id: Optional[int] = None,
         created_by: Optional[int] = None,
         updated_by: Optional[int] = None,
         is_active: int = 1,
@@ -160,10 +155,10 @@ class MailsRepository(BaseRepository):
         await self._log_and_execute(
             INSERT_MAIL_DETAILS,
             [
-                 user_id, 
+                user_id, 
                 subject, body, date_time,
                 mail_from, mail_to, mail_cc,
-                keyword,  created_by, updated_by, is_active,
+                created_by, updated_by, is_active,
                 graph_mail_id, folder_name
             ],
         )
@@ -173,24 +168,18 @@ class MailsRepository(BaseRepository):
             raise RuntimeError("Failed to retrieve inserted mail_details id")
         return int(last_id)
     
-    
-
 
     async def insert_attachment(
         self,
         *,
         mail_dtl_id: int,
+        user_id: Optional[int],
         attach_name: Optional[str],
         attach_type: Optional[str],
         attach_path: Optional[str],
-        word_count: Optional[str] = None,
-        user_id: Optional[int] = None,
-        cal_id: Optional[int] = None,
         created_by: Optional[int] = None,
         updated_by: Optional[int] = None,
         is_active: int = 1,
-        keyword: Optional[str] = None,
-        repeated_keyword: Optional[str] = None,
         file_hash: Optional[str] = None,
     ) -> None:
         await self._log_and_execute(
@@ -198,7 +187,7 @@ class MailsRepository(BaseRepository):
             [
                 mail_dtl_id, user_id, 
                 attach_name, attach_type, attach_path,
-                created_by, updated_by, is_active, keyword,  file_hash
+                created_by, updated_by, is_active, file_hash
             ],
         )
         await self._cur.connection.commit() 
@@ -254,17 +243,17 @@ class MailsRepository(BaseRepository):
     #         await self.conn.commit()
 
 
-    async def fetch_keywords(self, orgid: int) -> List[str]:
+    async def fetch_keywords(self) -> List[str]:
         """
-        Fetch active keywords for a given orgid from keyword_master table.
+        Fetch active keywords for a given user_id from keyword_master table.
         """
         query = """
             SELECT keyword_name 
             FROM keyword_master 
-            WHERE org_id = %s AND is_active = 1
+            WHERE is_active = 1
         """
         
-        await self._log_and_execute(query, (orgid,))
+        await self._log_and_execute(query, )
         result = await self._cur.fetchall()
         return [row['keyword_name'].lower() for row in result] if result else []
 

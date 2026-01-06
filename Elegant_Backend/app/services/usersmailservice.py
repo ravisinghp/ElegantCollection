@@ -364,12 +364,9 @@ def normalize_text(text: str) -> str:
 #--------------------Regex-----------------------------
 PO_REGEX_PATTERNS = {
     "po_number": [
-        # Key:value style
-        r"po_number\s*:\s*(.+?)(?=\s+(?:customer_name|vendor_number|po_date|delivery_date|cancel_date|ec_style_number|customer_style_number|quantity|gold_karat|color|description)\s*:|$)",
-        # Human-readable aliases
-        r"(?:po\s*(?:number|no|num|#)|p\.?\s*o\.?|purchase\s*(?:order|no|number)|purchase[_\- ]order|order\s*(?:number|no|#))\s*[:\-]?\s*([A-Z0-9\/\-_.]+)",
-        r"\bPO[\s\-_:]*([0-9]{1,}[A-Z0-9\-\/_.]*)",
-        r"\bP\s*O\s*[:\-]?\s*([A-Z0-9\/\-_.]+)"
+        r"(?:po\s*(?:number|no|num|#))\s*[:\-]?\s*(PO[\- ]?[A-Z0-9\/_.]+)",
+        r"(?:purchase\s*(?:order|no|number)|purchase[_\- ]order)\s*[:\-]?\s*(PO[\- ]?[A-Z0-9\/_.]+)",
+        r"\bPO[\- ]+([0-9]{1,}[A-Z0-9\-\/_.]*)",
     ],
     "customer_name": [
         r"customer_name\s*:\s*(.+?)(?=\s+(?:vendor_number|po_date|delivery_date|cancel_date|ec_style_number|customer_style_number|quantity|gold_karat|color|description)\s*:|$)",

@@ -182,7 +182,7 @@ async def forgot_password(
         token_data = {"user_id": user["user_id"], "exp": expire}
         reset_token = jwt.encode(token_data, SECRET_KEY, algorithm=ALGORITHM)
 
-        reset_link = f"http://localhost:3000/reset-password?token={reset_token}"
+        reset_link = f"http://localhost:5173/reset-password?token={reset_token}"
         
         email_service = EmailService()
         try:

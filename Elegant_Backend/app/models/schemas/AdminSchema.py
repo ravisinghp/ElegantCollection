@@ -109,18 +109,37 @@ class CategoryResponse(BaseModel):
 from pydantic import BaseModel, EmailStr
 
 
+# class EmailSettings(BaseModel):
+#     MAIL_USERNAME: str = config("MAIL_USERNAME", default="")
+#     MAIL_PASSWORD: str = config("MAIL_PASSWORD", default="")
+#     MAIL_FROM: EmailStr = config("MAIL_FROM", default="no-reply@example.com")
+#     MAIL_FROM_NAME: str = config("MAIL_FROM_NAME", default="iCapture")
+#     MAIL_PORT: int = int(config("MAIL_PORT", default=587))
+#     MAIL_SERVER: str = config("MAIL_SERVER", default="smtp.gmail.com")
+#     # New flags expected by fastapi-mail (replacing TLS/SSL)
+#     MAIL_STARTTLS: bool = bool(config("MAIL_STARTTLS", default=True))
+#     MAIL_SSL_TLS: bool = bool(config("MAIL_SSL_TLS", default=False))
+#     # Backward compatibility (not used directly in ConnectionConfig)
+#     MAIL_TLS: bool = bool(config("MAIL_TLS", default=True))
+#     MAIL_SSL: bool = bool(config("MAIL_SSL", default=False))
+#     USE_CREDENTIALS: bool = bool(config("USE_CREDENTIALS", default=True))
+
+
+def str_to_bool(value):
+    return str(value).lower() in ("true", "1", "yes", "on")
+
 class EmailSettings(BaseModel):
     MAIL_USERNAME: str = config("MAIL_USERNAME", default="")
     MAIL_PASSWORD: str = config("MAIL_PASSWORD", default="")
-    MAIL_FROM: EmailStr = config("MAIL_FROM", default="no-reply@example.com")
+    MAIL_FROM: EmailStr = config("MAIL_FROM", default="")
     MAIL_FROM_NAME: str = config("MAIL_FROM_NAME", default="iCapture")
     MAIL_PORT: int = int(config("MAIL_PORT", default=587))
     MAIL_SERVER: str = config("MAIL_SERVER", default="smtp.gmail.com")
-    # New flags expected by fastapi-mail (replacing TLS/SSL)
-    MAIL_STARTTLS: bool = bool(config("MAIL_STARTTLS", default=True))
-    MAIL_SSL_TLS: bool = bool(config("MAIL_SSL_TLS", default=False))
-    # Backward compatibility (not used directly in ConnectionConfig)
+
+    MAIL_STARTTLS: bool = str_to_bool(config("MAIL_STARTTLS", default="true"))
+    MAIL_SSL_TLS: bool = str_to_bool(config("MAIL_SSL_TLS", default="false"))
+
     MAIL_TLS: bool = bool(config("MAIL_TLS", default=True))
     MAIL_SSL: bool = bool(config("MAIL_SSL", default=False))
-    USE_CREDENTIALS: bool = bool(config("USE_CREDENTIALS", default=True))
+    USE_CREDENTIALS: bool = str_to_bool(config("USE_CREDENTIALS", default="true"))
 

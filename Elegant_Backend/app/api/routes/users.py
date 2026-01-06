@@ -272,7 +272,7 @@ async def get_emails(
         if provider == "outlook":
             # Call your mail fetching function
             return await fetch_and_save_mails_by_folders(
-                token, folders, user_id, org_id, from_date, to_date, mails_repo
+                token, folders, user_id, from_date, to_date, mails_repo
             )
         elif provider == "google":
             return await fetch_and_save_mails_by_labels(

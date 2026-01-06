@@ -30,7 +30,7 @@ async def get_dashboard_stats(request: Request,userId:int):
         return None
     
     #Donwload Missing Report and Missmatch Report 
-@router.get("/downloadMissingPOReport")
+@router.post("/downloadMissingPOReport")
 async def download_missing_po_report(
     request: Request,
     payload: DownloadMissingMismatchRequest,
@@ -57,7 +57,7 @@ async def download_missing_po_report(
 
 
 #Donwload Missing Report and Missmatch Report 
-@router.get("/downloadMismatchPOReport")
+@router.post("/downloadMismatchPOReport")
 async def download_mismatch_po_report(
     request: Request,
     payload: DownloadMissingMismatchRequest,
@@ -295,17 +295,18 @@ async def matched_po_data_fetch(request: Request, frontendRequest: FetchMissingM
         print(f"Error fetching Matched POs: {e}")
         return []
 
+
+
 #Business admin fetching users list and vendor number list on dashboard
-@router.get("/fetchUsersBusinessAdmin")
+@router.get("/fetchUsersForBusinessAdmin")
 async def get_all_users_by_role_id_business_admin(
-    request: Request,
-    role_id: int = Query(..., description="Role ID")
+    request: Request
 ):
     try:
-        return await UserService.get_all_users_by_role_id_business_admin(
-            request=request,
-            role_id=role_id
+        result =  await UserService.get_all_users_by_role_id_business_admin(
+            request=request
         )
+        return result
     except Exception as e:
         raise HTTPException(
             status_code=500,
@@ -313,10 +314,11 @@ async def get_all_users_by_role_id_business_admin(
         )
 
 
-@router.get("/fetchVendorsBusinessAdmin")
+@router.get("/fetchVendorsForBusinessAdmin")
 async def get_vendors_business_admin(request: Request):
     try:
-        return await UserService.get_vendors_business_admin(request)
+        result = await UserService.get_vendors_business_admin(request)
+        return result
     except Exception as e:
         raise HTTPException(
             status_code=500,

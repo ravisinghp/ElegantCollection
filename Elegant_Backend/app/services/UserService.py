@@ -276,9 +276,9 @@ async def matched_po_data_fetch(request: Request, frontendRequest):
         
 
 #Business admin fetching users list and vendor number list on dashboard
-async def get_all_users_by_role_id_business_admin(request, role_id: int):
+async def get_all_users_by_role_id_business_admin(request):
         try:
-            users = await UserRepo.get_all_users_by_role_id_business_admin(request, role_id)
+            users = await UserRepo.get_all_users_by_role_id_business_admin(request)
 
             if not users:
                 return {

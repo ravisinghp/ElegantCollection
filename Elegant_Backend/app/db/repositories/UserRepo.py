@@ -39,10 +39,13 @@ async def fetch_emails_processed_by_user_id(user_id: int,  request: Request) -> 
 #Fetching Total Numbers of Attachments on User Dashboard
 async def fetch_documents_analyzed_by_user_id(user_id: int, request: Request) -> int:
     query = """
-       SELECT COUNT(m.mail_dtl_id) 
-        FROM email_attachments em,mail_details m
-        WHERE em.mail_dtl_id=m.mail_dtl_id and m.user_id = %s 
-          AND m.is_active = TRUE
+       SELECT
+	COUNT(em.mail_dtl_id)
+FROM
+	email_attachments em
+WHERE
+	em.user_id = %s
+	AND em.is_active = 1;
     """
     async with request.app.state.pool.acquire() as conn:
         async with conn.cursor() as cursor:
@@ -55,14 +58,20 @@ async def fetch_documents_analyzed_by_user_id(user_id: int, request: Request) ->
 async def download_missing_po_report(request: Request, user_id: int, role_id: int):
     base_query  = """
         SELECT
-            pd.po_number,
-            pd.po_date,
-            pd.vendor_number AS vendor_code,
-            pd.customer_name,
-            pm.comment
-        FROM po_missing_report pm
-        JOIN po_details pd ON pd.po_det_id = pm.po_det_id
-        WHERE pm.active = 1
+            COALESCE(pd.po_number, s.po_number) AS po_number,
+            COALESCE(pd.po_date, s.po_date) AS po_date,
+            COALESCE(pd.vendor_number, s.vendor_number) AS vendor_code,
+            COALESCE(pd.customer_name, s.customer_name) AS customer_name
+        FROM
+            po_missing_report pm
+        LEFT JOIN po_details pd ON
+            pd.po_det_id = pm.po_det_id
+        LEFT JOIN system_po_details s ON
+            s.system_po_id = pm.system_po_id
+        WHERE
+            pm.active = 1
+        order by
+            pm.po_missing_id desc;
     """
     
     params = []
@@ -251,31 +260,34 @@ async def ignore_mismatch_po(
      
             
 #Business admin fetching users list and vendor number list on dashboard
-async def get_all_users_by_role_id_business_admin(request, role_id: int):
+async def get_all_users_by_role_id_business_admin(
+    request
+):
+    #Business admin can see all users
     query = """
-        SELECT
-            user_name
+        SELECT user_id, user_name
         FROM users_master
-        WHERE role_id = %s
-          AND is_active = 1
+        WHERE is_active = 1
+        AND role_id = 1
         ORDER BY user_name ASC
     """
 
     try:
         async with request.app.state.pool.acquire() as conn:
             async with conn.cursor() as cursor:
-                await cursor.execute(query, (role_id,))
+                await cursor.execute(query)
                 rows = await cursor.fetchall()
 
                 return [
                     {
-                        "user_name": row[0]
+                        "user_id": row[0],
+                        "user_name": row[1]
                     }
                     for row in rows
                 ]
-
     except Exception as e:
         raise Exception(f"DB error while fetching users: {str(e)}")
+
 
 async def get_vendors_business_admin(request):
         query = """
@@ -399,6 +411,7 @@ async def fetch_missing_po_data(request: Request, frontendRequest):
             COALESCE(pd.po_date, sp.po_date) AS po_date,
             COALESCE(pd.vendor_number, sp.vendor_number) AS vendor_code,
             COALESCE(pd.customer_name, sp.customer_name) AS customer_name,
+            um.user_name AS username,
 
             pm.comment,
             'MISSING' AS po_status,
@@ -410,6 +423,7 @@ async def fetch_missing_po_data(request: Request, frontendRequest):
         FROM po_missing_report pm
         LEFT JOIN po_details pd ON pm.po_det_id = pd.po_det_id
         LEFT JOIN system_po_details sp ON pm.system_po_id = sp.system_po_id
+        LEFT JOIN users_master um ON pm.user_id = um.user_id
         WHERE pm.active = 1
     """
 
@@ -443,11 +457,12 @@ async def fetch_mismatch_po_data(request: Request, frontendRequest):
             pd.po_date,
             pd.vendor_number AS vendor_code,
             pd.customer_name,
+            um.user_name AS username,
 
             mm.mismatch_attribute,
             mm.scanned_value,
             mm.system_value,
-            mm.comment,
+           
 
             'MISMATCH' AS po_status
         FROM po_mismatch_report mm
@@ -455,6 +470,7 @@ async def fetch_mismatch_po_data(request: Request, frontendRequest):
             ON mm.po_det_id = pd.po_det_id
         LEFT JOIN system_po_details sp
             ON mm.system_po_id = sp.system_po_id
+        LEFT JOIN users_master um ON mm.user_id = um.user_id
         WHERE mm.active = 1
     """
 
@@ -478,16 +494,23 @@ async def fetch_mismatch_po_data(request: Request, frontendRequest):
 async def fetch_matched_po_data(request: Request, frontendRequest):
 
     base_query = """
-        SELECT
+       SELECT
             pd.*,
-            pd.vendor_number AS vendor_code
+            pd.vendor_number AS vendor_code,
+            u.user_name AS username
         FROM po_details pd
         LEFT JOIN po_missing_report pm
-            ON pm.po_det_id = pd.po_det_id AND pm.active = 1
+            ON pm.po_det_id = pd.po_det_id
+        AND pm.active = 1
         LEFT JOIN po_mismatch_report mm
-            ON mm.po_det_id = pd.po_det_id AND mm.active = 1
+            ON mm.po_det_id = pd.po_det_id
+        AND mm.active = 1
+        LEFT JOIN mail_details md
+            ON md.mail_dtl_id = pd.mail_dtl_id
+        LEFT JOIN users_master u
+            ON u.user_id = md.user_id
         WHERE pm.po_det_id IS NULL
-        AND mm.po_det_id IS NULL
+        AND mm.po_det_id IS NULL;
     """
 
     params = []

@@ -70,8 +70,6 @@ async def download_missing_po_report(request: Request, user_id: int, role_id: in
             s.system_po_id = pm.system_po_id
         WHERE
             pm.active = 1
-        order by
-            pm.po_missing_id desc;
     """
     
     params = []

@@ -289,11 +289,13 @@ async def get_all_users_by_role_id_business_admin(
 
 async def get_vendors_business_admin(request):
         query = """
-            SELECT DISTINCT
-                vendor_number
-            FROM po_details
-            WHERE active = 1
-              AND vendor_number IS NOT NULL
+            SELECT DISTINCT vendor_number
+            FROM (
+                SELECT vendor_number FROM po_details WHERE vendor_number IS NOT NULL
+                UNION
+                SELECT vendor_number FROM system_po_details WHERE vendor_number IS NOT NULL
+            ) vendor_list
+            ORDER BY vendor_number;
         """
 
         try:

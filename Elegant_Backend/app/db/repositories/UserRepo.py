@@ -542,6 +542,100 @@ async def get_active_users(request: Request):
             await cursor.execute(query)
             rows = await cursor.fetchall()
             return [row[0] for row in rows]
+        
+#----------------Search PO for Business Admin Dashboard-----------------#
+async def search_pos_business_admin(request: Request, filters):
+    base_query = """
+        SELECT * FROM (
+
+            -- ================= MISSING =================
+            SELECT
+                pm.po_missing_id AS record_id,
+                COALESCE(pd.po_number, sp.po_number) AS po_number,
+                COALESCE(pd.po_date, sp.po_date) AS po_date,
+                COALESCE(pd.vendor_number, sp.vendor_number) AS vendor_code,
+                COALESCE(pd.customer_name, sp.customer_name) AS customer_name,
+                um.user_id,
+                um.user_name AS username,
+                'missing' AS record_type
+            FROM po_missing_report pm
+            LEFT JOIN po_details pd ON pm.po_det_id = pd.po_det_id
+            LEFT JOIN system_po_details sp ON pm.system_po_id = sp.system_po_id
+            LEFT JOIN users_master um ON pm.user_id = um.user_id
+            WHERE pm.active = 1
+
+            UNION ALL
+
+            -- ================= MISMATCH =================
+            SELECT
+                mm.po_mismatch_id AS record_id,
+                pd.po_number,
+                pd.po_date,
+                pd.vendor_number AS vendor_code,
+                pd.customer_name,
+                um.user_id,
+                um.user_name AS username,
+                'mismatch' AS record_type
+            FROM po_mismatch_report mm
+            JOIN po_details pd ON mm.po_det_id = pd.po_det_id
+            LEFT JOIN users_master um ON mm.user_id = um.user_id
+            WHERE mm.active = 1
+
+            UNION ALL
+
+            -- ================= NORMAL =================
+            SELECT
+                pd.po_det_id AS record_id,
+                pd.po_number,
+                pd.po_date,
+                pd.vendor_number AS vendor_code,
+                pd.customer_name,
+                um.user_id,
+                um.user_name AS username,
+                'normal' AS record_type
+            FROM po_details pd
+            LEFT JOIN po_missing_report pm
+                ON pm.po_det_id = pd.po_det_id AND pm.active = 1
+            LEFT JOIN po_mismatch_report mm
+                ON mm.po_det_id = pd.po_det_id AND mm.active = 1
+            LEFT JOIN users_master um ON um.user_id = pd.user_id
+            WHERE pm.po_det_id IS NULL
+              AND mm.po_det_id IS NULL
+
+        ) t
+        WHERE 1=1
+    """
+
+    params = []
+
+    # ---------- Filters ----------
+    if filters.fromDate:
+        base_query += " AND t.po_date >= %s"
+        params.append(filters.fromDate)
+
+    if filters.toDate:
+        base_query += " AND t.po_date <= %s"
+        params.append(filters.toDate)
+
+    if filters.userId:
+        base_query += " AND t.user_id = %s"
+        params.append(int(filters.userId))
+
+    if filters.vendorNumber:
+        base_query += " AND t.vendor_code = %s"
+        params.append(filters.vendorNumber)
+
+    base_query += " ORDER BY t.po_date DESC"
+
+    async with request.app.state.pool.acquire() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(base_query, tuple(params))
+            cols = [c[0] for c in cursor.description]
+            rows = await cursor.fetchall()
+
+    return [dict(zip(cols, row)) for row in rows]
+
+
 #Fetching Total Numbers of Meeting on User Dashboard
 # async def fetch_meetings_processed_by_user_id(user_id: int, from_date: str, to_date: str, request: Request) -> int:
 #     query = """

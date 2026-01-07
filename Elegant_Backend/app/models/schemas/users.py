@@ -77,5 +77,9 @@ class MailResponse(BaseModel):
     is_active: int = 1
     graph_mail_id: Optional[str] = None
 
-
-
+class BusinessAdminSearchRequest(BaseModel):
+    fromDate: Optional[str] = None
+    toDate: Optional[str] = None
+    userId: Optional[int] = None
+    vendorNumber: Optional[str] = None
+    

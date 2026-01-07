@@ -7,6 +7,9 @@ from typing import List, Dict, Any
 from fastapi.responses import StreamingResponse
 from app.models.domain.AdminDomain import UpdatePoCommentRequest, GenerateMissingPoReport, DownloadMissingMismatchRequest,FetchMissingMismatchReport
 from fastapi.encoders import jsonable_encoder
+from app.models.schemas.users import BusinessAdminSearchRequest
+
+
 #User Dashboard Card Data 
 router = APIRouter()
 @router.get("/userDashboardCardData")
@@ -324,6 +327,28 @@ async def get_vendors_business_admin(request: Request):
             status_code=500,
             detail=f"Failed to fetch vendor list: {str(e)}"
         )
+    
+#----------------Search PO for Business Admin Dashboard-----------------#
+@router.post("/business_admin_search_pos")
+async def search_pos_business_admin(
+    request: Request,
+    filters: BusinessAdminSearchRequest
+):
+    try:
+        data = await UserService.search_pos_business_admin(
+            request=request,
+            filters=filters
+        )
+
+        # If data is a string, treat as validation error
+        if isinstance(data, str):
+            return {"success": False, "message": data, "data": []}
+
+        return {"success": True, "message": "Search completed", "data": data}
+
+    except Exception as e:
+        return {"success": False, "message": f"Search failed: {str(e)}", "data": []}
+
 
 ### This code is used to fetch calculateing one month to current date data week wise
 # @router.get("/weekly-hours-previous-month")

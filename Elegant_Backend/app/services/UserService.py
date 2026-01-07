@@ -6,6 +6,7 @@ from typing import List, Dict, Any
 from collections import Counter
 import io
 import pandas as pd
+from app.models.schemas.users import BusinessAdminSearchRequest
 
 #Total R&D Effort On User Dashboard
 # async def get_total_user_effort_by_user_id(user_id: int, from_date: str, to_date: str, request: Request):
@@ -311,6 +312,17 @@ async def get_vendors_business_admin(request):
 
         except Exception as e:
             raise Exception(f"Service error while fetching vendors: {str(e)}")  
+        
+#----------------Search PO for Business Admin Dashboard-----------------#
+async def search_pos_business_admin(request: Request, filters: BusinessAdminSearchRequest):
+        
+        # Validation: fromDate requires toDate
+        if filters.fromDate and not filters.toDate:
+            return "toDate is required when fromDate is provided"
+
+        result = await UserRepo.search_pos_business_admin(request, filters)
+        return result
+
  #Fetching Total Numbers of Meeting on User Dashboard   
 # async def get_meetings_processed_by_user_id(user_id: int, from_date: str, to_date: str, request: Request):
 #     try:

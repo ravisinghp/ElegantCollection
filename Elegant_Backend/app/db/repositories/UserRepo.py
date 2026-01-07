@@ -510,7 +510,7 @@ async def fetch_matched_po_data(request: Request, frontendRequest):
         LEFT JOIN users_master u
             ON u.user_id = md.user_id
         WHERE pm.po_det_id IS NULL
-        AND mm.po_det_id IS NULL;
+        AND mm.po_det_id IS NULL
     """
 
     params = []
@@ -636,29 +636,27 @@ async def get_active_users(request: Request):
 #         return []
     
 #  #Last Sync On User Dashboard
-# async def get_last_sync_by_user_id(user_id: int,request:Request) -> List[Dict[str, Any]]:
-#     try:
-#         query = """
-#             SELECT r.user_id, MAX(r.created_date) AS last_sync
-#             FROM report_data r
-#             JOIN mail_details m ON r.mail_dtl_id = m.mail_dtl_id
-#             WHERE r.user_id = %s
-            
-#             ORDER BY last_sync DESC
-#         """
-#         async with request.app.state.pool.acquire() as conn:
-#             async with conn.cursor() as cursor:
-#                 await cursor.execute(query, (user_id,))
-#                 result = await cursor.fetchall()
-#                 return [
-#                     {
-#                         "user_id": row[0],
-#                         "last_sync": (row[1] + IST_OFFSET).strftime('%Y-%m-%dT%H:%M:%S+05:30') if row[1] else None
-#                     }
-#                     for row in result
-#                 ]
-#     except Exception as e:
-#         return []
+async def get_last_sync_by_user_id(user_id: int,request:Request) -> List[Dict[str, Any]]:
+    try:
+        query = """
+            SELECT m.user_id, MAX(m.created_on) AS last_sync
+            FROM mail_details m
+            WHERE m.user_id = %s
+            ORDER BY last_sync DESC
+        """
+        async with request.app.state.pool.acquire() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute(query, (user_id,))
+                result = await cursor.fetchall()
+                return [
+                    {
+                        "user_id": row[0],
+                        "last_sync": row[1].strftime('%Y-%m-%d %H:%M:%S')
+                    }
+                    for row in result
+                ]
+    except Exception as e:
+        return []
     
 
 # #Update Term Condition Fleg When User login once

@@ -364,9 +364,9 @@ async def search_pos_business_admin(request: Request, filters: BusinessAdminSear
     
 
 # #Last Sync On User Dashboard
-async def get_last_sync_by_user_id(user_id: int,request: Request):
+async def get_last_sync_by_user_id(user_id: int,role_id: int,request: Request):
     try:
-        last_sync_data = await UserRepo.get_last_sync_by_user_id(user_id,request)
+        last_sync_data = await UserRepo.get_last_sync_by_user_id(user_id,role_id,request)
         return last_sync_data
     except Exception as e:
         raise Exception(f"Error fetching last sync data: {str(e)}")

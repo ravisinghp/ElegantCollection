@@ -730,28 +730,44 @@ async def search_pos_business_admin(request: Request, filters):
 #         return []
     
 #  #Last Sync On User Dashboard
-async def get_last_sync_by_user_id(user_id: int,request:Request) -> List[Dict[str, Any]]:
+async def get_last_sync_by_user_id(
+    user_id: int,
+    role_id: int,
+    request: Request
+) -> List[Dict[str, Any]]:
     try:
-        query = """
-            SELECT m.user_id, MAX(m.created_on) AS last_sync
-            FROM mail_details m
-            WHERE m.user_id = %s
-            ORDER BY last_sync DESC
-        """
+        # 🔹 Role-based query selection
+        if role_id in (2, 3):
+            query = """
+                SELECT m.user_id, m.created_on AS last_sync
+                FROM mail_details m
+                ORDER BY m.created_on DESC
+                LIMIT 1
+            """
+            params = ()
+        else:
+            query = """
+                SELECT m.user_id, MAX(m.created_on) AS last_sync
+                FROM mail_details m
+                WHERE m.user_id = %s
+            """
+            params = (user_id,)
+
         async with request.app.state.pool.acquire() as conn:
             async with conn.cursor() as cursor:
-                await cursor.execute(query, (user_id,))
-                result = await cursor.fetchall()
-                return [
-                    {
-                        "user_id": row[0],
-                        "last_sync": row[1].strftime('%Y-%m-%d %H:%M:%S')
-                    }
-                    for row in result
-                ]
+                await cursor.execute(query, params)
+                row = await cursor.fetchone()
+
+                if not row or not row[1]:
+                    return []
+
+                return [{
+                    "user_id": row[0],
+                    "last_sync": row[1].strftime('%Y-%m-%d %H:%M:%S')
+                }]
+
     except Exception as e:
         return []
-    
 
 # #Update Term Condition Fleg When User login once
 # async def update_term_condition_flag(user_id: int, role_id: int, org_id: int, request: Request, flag: int = 1):

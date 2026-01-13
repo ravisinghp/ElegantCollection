@@ -8,6 +8,7 @@ config = Config(".env")
 
 class SourceResponse(BaseModel):
     source_id: int
+    source_name:str
    
 class UserCreate(BaseModel):
     user_name: str

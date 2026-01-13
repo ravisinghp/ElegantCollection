@@ -135,6 +135,13 @@ WHERE system_po_id = %s
   AND mismatch_attribute = 'po_missing'
 LIMIT 1
 """
+
+GET_ALL_MISMATCHES = """
+SELECT po_det_id, system_po_id, mismatch_attribute
+FROM po_mismatch_report
+WHERE active = 1
+"""
+
 class MailsRepository(BaseRepository):
     async def insert_mail_detail(
         self,
@@ -471,6 +478,12 @@ class MailsRepository(BaseRepository):
         [po_det_id, system_po_id,  mismatch_attribute,system_po_id,]
     )
         return await self._cur.fetchone()
+    
+    
+    async def get_all_mismatches(self):
+        await self._log_and_execute(GET_ALL_MISMATCHES)
+        return await self._cur.fetchall()
+
     
     async def get_existing_po_missing_by_system_po(self, system_po_id: int):
         await self._log_and_execute(

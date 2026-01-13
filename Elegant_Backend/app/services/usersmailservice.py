@@ -4,6 +4,7 @@ import os, base64
 import httpx
 from urllib.parse import urlencode
 import json
+from decimal import Decimal
 from loguru import logger
 import jwt
 from datetime import date, datetime
@@ -287,7 +288,7 @@ async def get_valid_outlook_token(
 
     return new_tokens["access_token"]
 
-# ------------------Email + Attachment Fetching + LLM keyword logic start ------------------ #
+# ------------------Email + Attachment Fetching + LLM logic start ------------------ #
 def strip_html_to_text(html_content: Optional[str]) -> str:
     if not html_content:
         return ""
@@ -343,13 +344,13 @@ def compute_file_hash(content: bytes) -> str:
     return hashlib.sha256(content).hexdigest()
 
 
-# ------------------- Keyword Extraction ------------------- #
+# ------------------- normalize text ------------------- #
 def normalize_text(text: str) -> str:
     if not text:
         return ""
 
-    text = text.replace("\xa0", " ")     # non-breaking space
-    text = text.replace("\u200b", " ")   # zero-width space
+    text = text.replace("\xa0", " ")    
+    text = text.replace("\u200b", " ")   
     text = text.replace("\r", "\n")
 
     # normalize separators
@@ -361,60 +362,134 @@ def normalize_text(text: str) -> str:
     return text.strip()
 
 
+def extract_po_fields_regex(text: str) -> dict:
+    text = normalize_text(text)
+    out = EMPTY_PO.copy()
+
+    for field, patterns in PO_REGEX_PATTERNS.items():
+        for pat in patterns:
+            match = re.search(pat, text, re.IGNORECASE)
+            if match:
+                out[field] = match.group(1).strip()
+                break
+
+    return out if any(out.values()) else EMPTY_PO
+ 
+
+MANDATORY_FIELDS = ["po_number", "customer_name"]
+
+async def extract_po_fields(text: str) -> dict:
+    regex_data = extract_po_fields_regex(text)
+
+    # Check if mandatory fields are present
+    if all(regex_data.get(f) for f in MANDATORY_FIELDS):
+        return regex_data
+
+    # Otherwise call LLM
+    llm_data = await extract_po_fields_from_llm(text)
+
+    # Merge: REGEX ALWAYS WINS
+    final = regex_data.copy()
+    for k, v in llm_data.items():
+        if final.get(k) is None and v:
+            final[k] = v
+
+    return final if any(final.values()) else EMPTY_PO
+
+
 #--------------------Regex-----------------------------
 PO_REGEX_PATTERNS = {
+
+    # ---------------- PO NUMBER ----------------
     "po_number": [
-        r"po_number\s*:\s*(PO[\- ]?)?([A-Z0-9\/_.\-]+)",
-        r"(?:po\s*(?:number|no|num|#))\s*[:\-]?\s*(PO[\- ]?)?([A-Z0-9\/_.\-]+)",
-        r"(?:purchase\s*(?:order|no|number)|purchase[_\- ]order)\s*[:\-]?\s*(PO[\- ]?)?([A-Z0-9\/_.\-]+)",
-        r"\bPO[\s\-_:]*([0-9]{1,}[A-Z0-9\/_.\-]*)"
+        r"(?:po_number|po_no)\s*:\s*(PO[\w\-_/]+)",
+        r"(?:po\s*number|po\s*no|po#|p\.o\.|purchase\s*order|po)\s*[:\-]?\s*(PO[\w\-_/]+)",
+        r"\b(PO[\s\-_:]*[0-9]{1,}[A-Z0-9\/_.\-]*)",
+        r"(?:po\s*number|po\s*no|po#|p\.o\.|purchase\s*order)\s*[:\-]?\s*(PO[\- ]?[A-Z0-9\/_.\-]+)",
+        # --------- allow any prefix like JPO, SPO, etc. ----------
+        r"(?:po\s*number|po\s*no|po#|p\.o\.|purchase\s*order)\s*[:\-]?\s*([A-Z]{1,5}-\d{4,}-\d+)"
     ],
+
+    # ---------------- CUSTOMER NAME ----------------
     "customer_name": [
-        r"customer_name\s*:\s*(.+?)(?=\s+(?:vendor_number|po_date|delivery_date|cancel_date|ec_style_number|customer_style_number|quantity|gold_karat|color|description)\s*:|$)",
-        r"(?:customer\s*name|buyer\s*name|client\s*name|customer|client)\s*[:\-]?\s*([a-zA-Z\s]+?)(?=\s+(?:vendor|po|order|delivery|cancel|date|quantity|gold|color|colour|description|remarks|details)|$)"
+        r"(?:customer\s*name|customer|buyer|client)\s*[:\-]?\s*([A-Za-z][A-Za-z\s&\.]+?)"
+        r"(?=\s+(?:vendor|vendor_no|vendor_number|supplier|po|delivery|cancel|date|quantity|gold|color|description)\b|$)",
+        r"customer_name\s*:\s*([A-Za-z][A-Za-z\s&\.]+?)"
+        r"(?=\s+(?:vendor|vendor_no|vendor_number|supplier|po|delivery|cancel|date|quantity|gold|color|description)\b|$)"
     ],
+
+    # ---------------- VENDOR NUMBER ----------------
     "vendor_number": [
-        r"vendor_number\s*:\s*(\d+)",
-        r"(?:vendor\s*number|vendor\s*no|supplier\s*code|vendor)\s*[:\-]?\s*(\d+)"
+        r"(?:vendor_number|vendor_no)\s*:\s*([A-Za-z0-9\-_]+)",
+        r"(?:vendor\s*number|vendor\s*no|supplier\s*code)\s*[:\-]?\s*([A-Za-z0-9\-_]+)",
+        r"\bvendor\b\s*[:\-]?\s*([A-Za-z0-9\-_]+)"
     ],
+
+    # ---------------- PO DATE ----------------
     "po_date": [
-        r"po_date\s*:\s*([\d]{4}-[\d]{2}-[\d]{2})",
-        r"(?:po\s*date|order\s*date|purchase\s*date)\s*[:\-]?\s*(\d{4}-\d{2}-\d{2})"
+        r"(?:po\s*date|order\s*date|date)\s*[:\-]?\s*(\d{4}-\d{1,2}-\d{1,2})",
+        r"po_date\s*:\s*(\d{4}-\d{2}-\d{2})",
+        # --------- allow 'Date:' label ----------
+        r"date\s*[:\-]?\s*(\d{4}-\d{2}-\d{2})"
     ],
+
+    # ---------------- DELIVERY DATE ----------------
     "delivery_date": [
-        r"delivery_date\s*:\s*([\d]{4}-[\d]{2}-[\d]{2})",
-        r"(?:delivery\s*date|expected\s*delivery|shipment\s*date|delivery)\s*[:\-]?\s*(\d{4}-\d{2}-[\d]{2})"
+        r"(?:delivery\s*date|expected\s*delivery)\s*[:\-]?\s*(\d{4}-\d{2}-\d{2})",
+        r"delivery_date\s*:\s*(\d{4}-\d{2}-\d{2})",
+        # --------- allow inline in item row ----------
+        r"\b(\d{4}-\d{2}-\d{2})\b"
     ],
+
+    # ---------------- CANCEL DATE ----------------
     "cancel_date": [
-        r"cancel_date\s*:\s*([\d]{4}-[\d]{2}-[\d]{2})",
-        r"(?:cancel\s*date|cancellation\s*date|order\s*cancel\s*date)\s*[:\-]?\s*(\d{4}-[\d]{2}-[\d]{2})"
+        r"(?:cancel\s*date|cancellation\s*date)\s*[:\-]?\s*(\d{4}-\d{1,2}-\d{1,2})",
+        r"cancel_date\s*:\s*(\d{4}-\d{2}-\d{2})"
     ],
+
+    # ---------------- EC STYLE NUMBER ----------------
     "ec_style_number": [
-        r"ec_style_number\s*:\s*([A-Za-z0-9\-]+)",
-        r"(?:ec\s*style\s*number|ec\s*style|ec\s*no)\s*[:\-]?\s*([A-Za-z0-9\-]+)"
+        r"(?:ec\s*style\s*number|ec\s*style|ec\s*no)\s*[:\-]?\s*([A-Z0-9\-]+)",
+        r"(?:ec_style_number|ec_style_no)\s*:\s*([A-Z0-9\-]+)"
     ],
+
+    # ---------------- CUSTOMER STYLE NUMBER ----------------
     "customer_style_number": [
-        r"customer_style_number\s*:\s*([A-Za-z0-9\-]+)",
-        r"(?:customer\s*style\s*number|customer\s*style|cust\s*style)\s*[:\-]?\s*([A-Za-z0-9\-]+)"
+        r"(?:customer\s*style\s*number|customer\s*style|cust\s*style)\s*[:\-]?\s*([A-Z0-9\-]+)",
+        r"(?:customer_style_number|customer_style_no)\s*:\s*([A-Z0-9\-]+)"
     ],
+
+    # ---------------- QUANTITY ----------------
     "quantity": [
-        r"quantity\s*:\s*(\d+)",
-        r"(?:quantity|qty|ordered\s*quantity)\s*[:\-]?\s*(\d+)"
+        r"(?:delivery\s*date|delivery|expected\s*delivery)\s*[:\-]?\s*(\d{4}-\d{1,2}-\d{1,2})",
+        r"delivery_date\s*:\s*(\d{4}-\d{2}-\d{2})",
+        # --------- allow inline in item row ----------
+        r"\b(\d{4}-\d{2}-\d{2})\b"
     ],
+
+    # ---------------- GOLD KARAT ----------------
     "gold_karat": [
-        r"gold_karat\s*:\s*([0-9]{1,2}\s*K)",
-        r"(?:gold\s*karat|karat|kt|gold\s*purity)\s*[:\-]?\s*(\d{1,2}\s*k)"
+        r"(?:gold\s*karat|karat|kt|gold\s*purity)\s*[:\-]?\s*(\d{1,2})(?:\s*K)?",
+        r"gold_karat\s*:\s*(\d{1,2}K?)",
+        # --------- capture inline in item row ----------
+        r"\b(1[68]|22)K\b"
     ],
+
+    # ---------------- COLOR ----------------
     "color": [
-        r"color\s*:\s*(.+?)(?=\s+description\s*:|$)",
-        r"(?:color|colour)\s*[:\-]?\s*([a-zA-Z\s]+?)(?=\s+(?:quantity|gold|description|remarks|details)|$)"
+        r"(?:color|colour)\s*[:\-]?\s*([A-Za-z]+(?:\s+[A-Za-z]+)*)"
+        r"(?=\s+(?:quantity|gold|karat|description|remarks|details)\s*:|$)",
+        r"color\s*:\s*([A-Za-z\s]+)"
     ],
+
+    # ---------------- DESCRIPTION ----------------
     "description": [
-        r"description\s*:\s*(.+)$",
-        r"(?:description|remarks|details|order\s*details|item\s*description)\s*[:\-]?\s*(.+)$"
+        r"(?:description|remarks|details|order\s*details)\s*[:\-]?\s*(.+)$",
+        r"description\s*:\s*(.+)$"
+        # --------- capture item description in item rows ----------
+        r"([A-Za-z\s]+)\s*-\s*([A-Za-z\s]+)"
     ]
 }
-
 
 
 EMPTY_PO = {
@@ -432,28 +507,6 @@ EMPTY_PO = {
     "description": None,
 }
 
-def extract_po_fields_regex(text: str) -> dict:
-    text = normalize_text(text)
-    out = EMPTY_PO.copy()
-
-    for field, patterns in PO_REGEX_PATTERNS.items():
-        for pat in patterns:
-            match = re.search(pat, text, re.IGNORECASE)
-            if match:
-                out[field] = match.group(1).strip()
-                break
-
-    return out if any(out.values()) else EMPTY_PO
-
-async def extract_po_fields(text: str) -> dict:
-    # REGEX
-    data = extract_po_fields_regex(text)
-    if any(data.values()):
-        return data
-
-    #LLM fallback
-    return await extract_po_fields_from_llm(text)
-
 
 async def detect_keywords(
     text: str,
@@ -465,23 +518,23 @@ async def detect_keywords(
     text_l = text.lower()
     keywords = [normalize_keyword(k) for k in db_keywords]
 
-    # ---------------- 1️⃣ EXACT MATCH ----------------
+    # ---------------- 1 EXACT MATCH ----------------
     for k in keywords:
         if k in text_l:
             return [k], "EXACT"
 
-    # ---------------- 2️⃣ REGEX MATCH ----------------
+    # ---------------- 2 REGEX MATCH ----------------
     for k in keywords:
         pattern = r"\b" + re.escape(k).replace(r"\ ", r"\s*") + r"\b"
         if re.search(pattern, text_l, re.IGNORECASE):
             return [k], "REGEX"
 
-    # ---------------- 3️⃣ FUZZY MATCH ----------------
+    # ---------------- 3 FUZZY MATCH ----------------
     for k in keywords:
         if fuzz.partial_ratio(k, text_l) >= 85:
             return [k], "FUZZY"
 
-    # ---------------- 4️⃣ OPENAI (LAST OPTION) ----------------
+    # ---------------- 4 OPENAI (LAST OPTION) ----------------
     ai_hits = await openai_keyword_fallback(text, keywords)
     if ai_hits:
         return ai_hits, "OPENAI"
@@ -489,10 +542,8 @@ async def detect_keywords(
     return [], None
 
 
-
 def normalize_keyword(k: str) -> str:
     return re.sub(r"\s+", " ", k.strip().lower())
-
 
 
 async def openai_keyword_fallback(text: str, keywords: list[str]) -> list[str]:
@@ -546,7 +597,7 @@ async def extract_po_fields_from_llm(text: str) -> dict:
     if not text or not text.strip():
         return EMPTY_PO
 
-    if len(text) < 30 or not re.search(r"\d{2,}", text):
+    if not re.search(r"(po|order|\d{3,})", text, re.IGNORECASE):
         return EMPTY_PO
 
     prompt = f"""
@@ -585,8 +636,6 @@ TEXT:
     except Exception:
         return EMPTY_PO
 
-
-# ------------------- Main Function to Fetch and Save Emails ------------------- #
 def normalize_po_date_ddmmyyyy(date_str: Optional[str]) -> Optional[str]:
     """
     Converts LLM date output to DD-MM-YYYY string.
@@ -597,7 +646,6 @@ def normalize_po_date_ddmmyyyy(date_str: Optional[str]) -> Optional[str]:
 
     date_str = date_str.strip()
 
-    # Try common LLM formats
     for fmt in ("%Y-%m-%d", "%m/%d/%y", "%d/%m/%y", "%d-%m-%Y", "%m-%d-%Y", "%y-%m-%d"):
         try:
             dt = datetime.strptime(date_str, fmt)
@@ -607,18 +655,73 @@ def normalize_po_date_ddmmyyyy(date_str: Optional[str]) -> Optional[str]:
 
     return None
 
+def normalize_attachment_text(text: str) -> str:
+    if not text:
+        return ""
+
+    # normalize OCR dashes
+    text = text.replace("\u2013", "-").replace("\u2014", "-")
+
+    # fix spaced hyphens in PO numbers and dates
+    text = re.sub(r"\s*-\s*", "-", text)
+
+    # fix broken multiline item descriptions
+    text = re.sub(r"(\w+)\s*-\s*\n\s*(\w+)", r"\1 - \2", text)
+
+    # fix broken multiline item descriptions
+    text = re.sub(r"([A-Za-z])\s*-\s*\n\s*([A-Za-z])", r"\1 - \2", text)
+
+    # CRITICAL: flatten remaining newlines
+    text = re.sub(r"\n", " ", text)
+
+    # normalize dates like 2025-07-06
+    text = re.sub(
+        r"(\d{4})-(\d{1,2})-(\d{1,2})",
+        lambda m: f"{m.group(1)}-{int(m.group(2)):02d}-{int(m.group(3)):02d}",
+        text,
+    )
+
+    # collapse extra spaces
+    text = re.sub(r"[ \t]+", " ", text)
+
+    # clean blank lines
+    text = re.sub(r"\n\s*\n", "\n", text)
+
+    return text.strip()
 
 
-# ---------------------- Merge data ---------------------- #
-def merge_po_data(body_data: dict, attachments_data: list[dict]) -> dict:
-    merged = body_data.copy()
-    for att_data in attachments_data:
-        for k, v in att_data.items():
-            if not merged.get(k) and v:
-                merged[k] = v
-    return merged
+ITEM_REGEX = re.compile(
+    r"""
+    (?P<description>[A-Za-z\s\-]+?)
+    \s+
+    (?P<material>\d{2}K\s+Gold(?:\s*\+\s*Diamond)?)
+    \s+
+    (?P<quantity>\d+)
+    \s+
+    (?P<delivery_date>\d{4}-\d{2}-\d{2})
+    """,
+    re.IGNORECASE | re.VERBOSE
+)
+
+def extract_po_items(text: str):
+    items = []
+
+    for m in ITEM_REGEX.finditer(text):
+        items.append({
+            "description": m.group("description").strip(),
+            "gold_karat": re.search(r"\d{2}", m.group("material")).group(),
+            "quantity": int(m.group("quantity")),
+            "delivery_date": m.group("delivery_date")
+        })
+
+    return items
 
 
+async def extract_po_header(text: str):
+    return await extract_po_fields(text)
+
+
+# ------------------- Main Function to Fetch and Save Emails + Attachments ------------------- #
 async def fetch_and_save_mails_by_folders(
     access_token: str,
     folder_names: list[str],
@@ -834,7 +937,7 @@ async def fetch_and_save_mails_by_folders(
                             logger.error("Attachment insert failed (%s): %s", filename, e)
 
                 
-                # ---------------- PO data from email body ----------------
+                # ---------------- Insert PO data from email body ----------------
                 po_data_body = await extract_po_fields(body_clean)
                 if any(po_data_body.values()):
                     await mails_repo.insert_po_details(
@@ -856,30 +959,59 @@ async def fetch_and_save_mails_by_folders(
                         created_by=user_id,
                     )
 
-                # ---------------- PO data from attachments ----------------
+                # ----------------Insert PO data from attachments ----------------
                 for att_text in attachment_texts:
-                    po = await extract_po_fields(att_text)
-                    if not any(po.values()):
+                    normalized_text = normalize_attachment_text(att_text)
+                    # ---------------- PO HEADER FROM ATTACHMENT ----------------
+                    header = await extract_po_header(normalized_text)
+
+                    if not any(header.values()):
                         continue
 
-                    await mails_repo.insert_po_details(
-                        mail_dtl_id=mail_id,
-                        user_id=user_id,
-                        po_number=po.get("po_number"),
-                        customer_name=po.get("customer_name"),
-                        vendor_number=po.get("vendor_number"),
-                        po_date=normalize_po_date_ddmmyyyy(po.get("po_date")),
-                        delivery_date=po.get("delivery_date"),
-                        cancel_date=normalize_po_date_ddmmyyyy(po.get("cancel_date")),
-                        gold_karat=po.get("gold_karat"),
-                        ec_style_number=po.get("ec_style_number"),
-                        customer_style_number=po.get("customer_style_number"),
-                        color=po.get("color"),
-                        quantity=po.get("quantity"),
-                        description=po.get("description"),
-                        mail_folder=folder_name,
-                        created_by=user_id,
-                    )
+                    # ---------------- PO ITEMS FROM ATTACHMENT ----------------
+                    items = extract_po_items(normalized_text)
+
+                    # Fallback: if no items found, insert header-only
+                    if not items:
+                        await mails_repo.insert_po_details(
+                            mail_dtl_id=mail_id,
+                            user_id=user_id,
+                            po_number=header.get("po_number"),
+                            customer_name=header.get("customer_name"),
+                            vendor_number=header.get("vendor_number"),
+                            po_date=normalize_po_date_ddmmyyyy(header.get("po_date")),
+                            delivery_date=header.get("delivery_date"),
+                            cancel_date=normalize_po_date_ddmmyyyy(header.get("cancel_date")),
+                            gold_karat=header.get("gold_karat"),
+                            ec_style_number=header.get("ec_style_number"),
+                            customer_style_number=header.get("customer_style_number"),
+                            color=header.get("color"),
+                            quantity=header.get("quantity"),
+                            description=header.get("description"),
+                            mail_folder=folder_name,
+                            created_by=user_id,
+                        )
+                    else:
+                        # MULTIPLE ROW INSERTS
+                        for item in items:
+                            await mails_repo.insert_po_details(
+                                mail_dtl_id=mail_id,
+                                user_id=user_id,
+                                po_number=header.get("po_number"),
+                                customer_name=header.get("customer_name"),
+                                vendor_number=header.get("vendor_number"),
+                                po_date=normalize_po_date_ddmmyyyy(header.get("po_date")),
+                                delivery_date=item.get("delivery_date"),
+                                cancel_date=normalize_po_date_ddmmyyyy(header.get("cancel_date")),
+                                gold_karat=item.get("gold_karat"),
+                                ec_style_number=header.get("ec_style_number"),
+                                customer_style_number=header.get("customer_style_number"),
+                                color=header.get("color"),
+                                quantity=item.get("quantity"),
+                                description=item.get("description"),
+                                mail_folder=folder_name,
+                                created_by=user_id,
+                            )
                 # ---------------- COLLECT RESULT ----------------
                 results.append({
                     "mail_dtl_id": mail_id,
@@ -893,7 +1025,7 @@ async def fetch_and_save_mails_by_folders(
                 })
 
     return results
-# ------------------Email + Attachment Fetching + LLM keyword logic end ------------------ #
+# ------------------Email + Attachment Fetching + LLM logic end ------------------ #
 
 #### This api is used to fetch past event to current date time events and store counts also
 # keywords = ["analysis", "research", "market"]
@@ -1512,206 +1644,263 @@ async def fetch_and_save_past_events_google(access_token: str, user_id: int, org
 
     return results
 
-
-
-
-
-def is_valid_po_key(po):
-    return (
-        po.get("po_number") not in (None, "", "NULL")
-        and po.get("po_date") is not None
-    )
-
-
-def build_po_key(po):
-    return (
-        normalize_value(po["po_number"]),
-        normalize_value(po["vendor_number"]),
-        normalize_value(po["po_date"]),
-    )
-
-
-def normalize_value(val):
-    if val is None:
+#--------------------------data comparison logic start--------------------------#
+def normalize(value: str) -> str:
+    if not value:
         return ""
+    return "".join(c for c in str(value).lower() if c.isalnum())
 
-    if isinstance(val, datetime):
-        return val.date().isoformat()
+def build_po_key(po: dict) -> tuple:
+    return (
+        normalize(po.get("customer_name")),
+        normalize(po.get("po_number")),
+    )
 
-    if isinstance(val, date):
-        return val.isoformat()
+def make_json_safe(obj):
+    if isinstance(obj, (date, datetime)):
+        return obj.isoformat()
 
-    val = str(val).strip()
+    if isinstance(obj, Decimal):
+        return float(obj)
 
-    if val.startswith('"') and val.endswith('"'):
-        val = val[1:-1]
+    if isinstance(obj, bytes):
+        # safest readable form for LLM
+        try:
+            return obj.decode("utf-8")
+        except UnicodeDecodeError:
+            return base64.b64encode(obj).decode("utf-8")
 
-    return val
+    return obj
 
+def candidate_system_pos(scanned, system_pos):
+    scanned_cust = normalize(scanned.get("customer_name"))
+    scanned_po = normalize(scanned.get("po_number"))
 
-async def generate_missing_po_report_service(mails_repo,user_id:int):
+    candidates = []
 
-    po_details = await mails_repo.get_all_po_details()
-    sys_po_details = await mails_repo.get_all_system_po_details()
-
-    # -------------------------------
-    # BUILD LOOKUP MAPS
-    # -------------------------------
-    scanned_map = {
-        (
-            normalize_value(po["po_number"]),
-            normalize_value(po["vendor_number"]),
-            normalize_value(po["po_date"]),
-        ): po
-        for po in po_details
-        if po.get("po_number") and po.get("vendor_number") and po.get("po_date")
-    }
-
-    sys_map = {
-        (
-            normalize_value(row["po_number"]),
-            normalize_value(row["vendor_number"]),
-            normalize_value(row["po_date"]),
-        ): row
-        for row in sys_po_details
-        if row.get("po_number") and row.get("vendor_number") and row.get("po_date")
-    }
-
-    # ==================================================
-    # PASS 1: SCANNED PO → SYSTEM (YOUR EXISTING LOGIC)
-    # ==================================================
-    for po in po_details:
-
-        if not is_valid_po_key(po):
+    for sys in system_pos:
+        if not sys.get("customer_name") or not sys.get("po_number"):
             continue
 
-        po_number = po.get("po_number")
-        vendor_number = po.get("vendor_number")
-        po_date = po.get("po_date")
-
-        # CASE 1: Vendor missing in scanned
-        if not vendor_number or vendor_number in ("", "NULL"):
-
-            duplicate = await mails_repo.get_existing_po_missing(
-                po_det_id=po["po_det_id"]
-            )
-
-            if duplicate is None:
-                await mails_repo.insert_po_missing(
-                    po_det_id=po["po_det_id"],
-                    user_id=user_id,
-                    system_po_id=None,
-                    attribute="po_missing",
-                    system_value="",
-                    scanned_value=po_number,
-                    comment="Vendor number missing in scanned PO"
-                )
-            continue
-
-        key = (
-            normalize_value(po_number),
-            normalize_value(vendor_number),
-            normalize_value(po_date),
+        cust_sim = fuzz.partial_ratio(
+            scanned_cust,
+            normalize(sys["customer_name"])
         )
 
-        # CASE 2: Scanned PO not in system
-        if key not in sys_map:
+        po_sim = fuzz.partial_ratio(
+            scanned_po,
+            normalize(sys["po_number"])
+        )
 
-            duplicate = await mails_repo.get_existing_po_missing(
-                po_det_id=po["po_det_id"]
+        if po_sim >= 70 or cust_sim >= 80:
+            candidates.append(sys)
+
+    return candidates[:5]
+
+async def generate_missing_po_report_service(repo, user_id: int):
+
+    scanned_pos = await repo.get_all_po_details()
+    system_pos = await repo.get_all_system_po_details()
+
+    system_map = {
+        build_po_key(po): po
+        for po in system_pos
+        if po.get("customer_name") and po.get("po_number")
+    }
+
+    existing_mismatches = await repo.get_all_mismatches()
+    existing_keys = {
+        (m["po_det_id"], m["system_po_id"], m["mismatch_attribute"])
+        for m in existing_mismatches
+    }
+
+    llm_cache = {}
+
+    for scanned in scanned_pos:
+
+        if not scanned.get("customer_name") or not scanned.get("po_number"):
+            continue
+
+        scanned_key = build_po_key(scanned)
+        system_po = system_map.get(scanned_key)
+
+        if not system_po:
+            if scanned_key in llm_cache:
+                system_po = llm_cache[scanned_key]
+            else:
+                candidates = candidate_system_pos(scanned, system_pos)
+                system_po = None
+                if candidates:
+                    system_po = await llm_fallback_match(scanned, candidates)
+                llm_cache[scanned_key] = system_po
+
+        if not system_po:
+            exists = await repo.get_existing_po_missing(
+                po_det_id=scanned["po_det_id"]
             )
-
-            if duplicate is None:
-                await mails_repo.insert_po_missing(
-                    po_det_id=po["po_det_id"],
+            if not exists:
+                await repo.insert_po_missing(
+                    po_det_id=scanned["po_det_id"],
                     user_id=user_id,
                     system_po_id=None,
                     attribute="po_missing",
                     system_value="",
-                    scanned_value=po_number,
-                    comment="PO not found in system"
+                    scanned_value=scanned.get("po_number"),
+                    comment="PO not found (rule + LLM)"
                 )
             continue
 
-        # CASE 3: Exists → mismatch check
-        system_row = sys_map[key]
+        mismatches = compare_po_fields(scanned, system_po)
 
-        fields_to_compare = [
-            "delivery_date",
-            "cancel_date",
-            "ec_style_number",
-            "customer_style_number",
-            "color",
-            "gold_karat",
-            "quantity",
-            "description",
-        ]
-
-        for field in fields_to_compare:
-
-            val_scanned = normalize_value(po.get(field))
-            val_system = normalize_value(system_row.get(field))
-
-            if field == "quantity":
-                try:
-                    val_scanned = int(val_scanned)
-                    val_system = int(val_system)
-                except:
-                    pass
-
-            if field == "gold_karat":
-                try:
-                    val_scanned = float(val_scanned)
-                    val_system = float(val_system)
-                except:
-                    pass
-
-            if val_scanned != val_system:
-
-                duplicate = await mails_repo.get_existing_mismatch(
-                    po_det_id=po["po_det_id"],
-                    system_po_id=system_row["system_po_id"],
-                    mismatch_attribute=field
-                )
-
-                if duplicate:
-                    continue
-
-                await mails_repo.insert_mismatch(
-                    po_det_id=po["po_det_id"],
-                    user_id=user_id,
-                    system_po_id=system_row["system_po_id"],
-                    field=field,
-                    system_value=str(val_system),
-                    scanned_value=str(val_scanned),
-                    comment=f"{field} mismatch"
-                )
-
-    # ==================================================
-    # PASS 2: SYSTEM PO → SCANNED  MISSING LOGIC)
-    for key, system_row in sys_map.items():
-
-        if key not in scanned_map:
-
-            duplicate = await mails_repo.get_existing_po_missing_by_system_po(
-                system_po_id=system_row["system_po_id"]
+        for mismatch in mismatches:
+            key = (
+                scanned["po_det_id"],
+                system_po["system_po_id"],
+                mismatch["field"]
             )
 
-            if duplicate:
+            if key in existing_keys:
                 continue
 
-            await mails_repo.insert_po_missing(
-                po_det_id=None,
+            await repo.insert_mismatch(
+                po_det_id=scanned["po_det_id"],
                 user_id=user_id,
-                system_po_id=system_row["system_po_id"],
-                attribute="po_missing",
-                system_value=system_row["po_number"],
-                scanned_value="",
-                comment="PO exists in system but not found in scanned data"
+                system_po_id=system_po["system_po_id"],
+                field=mismatch["field"],
+                system_value=str(mismatch["system"]),
+                scanned_value=str(mismatch["scanned"]),
+                comment=f"{mismatch['field']} mismatch"
             )
+
+            existing_keys.add(key)
 
     return {
         "status": "success",
-        "message": "Missing & mismatch report generated"
+        "message": "PO missing & mismatch report generated successfully"
     }
 
+
+async def llm_fallback_match(scanned_po, candidates):
+
+    safe_candidates = [
+        {k: make_json_safe(v) for k, v in c.items()}
+        for c in candidates
+    ]
+
+    prompt = f"""
+Match scanned PO to ONE of the following system POs.
+
+Scanned:
+PO Number: {scanned_po.get("po_number")}
+Customer Name: {scanned_po.get("customer_name")}
+
+System Candidates:
+{json.dumps(safe_candidates, indent=2)}
+
+Respond ONLY with valid JSON. No explanation. No markdown.
+
+JSON format:
+{{ "matched_index": number | null, "confidence": 0.0-1.0 }}
+"""
+
+    resp = openai_client.chat.completions.create(
+        model="gpt-4.1-mini",
+        temperature=0,
+        messages=[{"role": "user", "content": prompt}]
+    )
+
+    raw = resp.choices[0].message.content.strip()
+
+    if not raw:
+        return None
+
+    # ---- CLEAN COMMON LLM FORMATTING ----
+    # remove ```json ``` wrappers
+    raw = re.sub(r"^```json|```$", "", raw, flags=re.IGNORECASE).strip()
+
+    # extract first JSON object if text is mixed
+    match = re.search(r"\{.*\}", raw, re.DOTALL)
+    if not match:
+        return None
+
+    try:
+        result = json.loads(match.group())
+    except json.JSONDecodeError:
+        return None
+
+    if (
+        result.get("matched_index") is not None
+        and isinstance(result.get("confidence"), (int, float))
+        and result["confidence"] >= 0.85
+    ):
+        idx = result["matched_index"]
+        if 0 <= idx < len(candidates):
+            return candidates[idx]
+
+    return None
+
+
+async def llm_po_match(scanned, system):
+
+    prompt = f"""
+Determine if these two POs refer to the SAME purchase order.
+
+Scanned:
+PO Number: {scanned.get("po_number")}
+Customer Name: {scanned.get("customer_name")}
+
+System:
+PO Number: {system.get("po_number")}
+Customer Name: {system.get("customer_name")}
+
+Rules:
+- Ignore case, punctuation, spacing
+- Allow abbreviations & short forms
+- PO number is strongest signal
+
+Respond ONLY in JSON:
+{{ "match": true/false, "confidence": 0.0-1.0 }}
+"""
+
+    response = openai_client.chat.completions.create(
+        model="gpt-4.1-mini",
+        temperature=0,
+        messages=[
+            {"role": "system", "content": "You are a PO reconciliation engine."},
+            {"role": "user", "content": prompt}
+        ]
+    )
+
+    return json.loads(response.choices[0].message.content)
+
+
+FIELDS_TO_COMPARE = [
+    "vendor_number",
+    "po_date",
+    "delivery_date",
+    "cancel_date",
+    "ec_style_number",
+    "customer_style_number",
+    "quantity",
+    "gold_karat",
+    "color",
+    "description"
+]
+
+def compare_po_fields(scanned, system):
+
+    mismatches = []
+
+    for field in FIELDS_TO_COMPARE:
+        scanned_val = scanned.get(field)
+        system_val = system.get(field)
+
+        if normalize(scanned_val) != normalize(system_val):
+            mismatches.append({
+                "field": field,
+                "scanned": scanned_val,
+                "system": system_val
+            })
+
+    return mismatches
+# --------------------------data comparison logic end--------------------------#

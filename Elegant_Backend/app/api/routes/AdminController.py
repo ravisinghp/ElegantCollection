@@ -6,6 +6,7 @@ from app.models.schemas.AdminSchema import UserCreate, UserUpdate
 from app.services.AdminServices import register_user, update_user
 from app.models.schemas.AdminSchema import (
     RoleResponse,
+    SourceResponse,
     PaginatedUsersResponse
 )
 from app.services import AdminServices as admin_service
@@ -60,6 +61,15 @@ async def get_all_users(
 async def get_all_roles(request: Request):
     try:
         return await admin_service.get_all_roles(request)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+#-------------Fetch all Source-----------------
+@router.get("/fetch_sources", response_model=list[SourceResponse])
+async def get_all_sources(request: Request):
+    try:
+        return await admin_service.get_all_sources(request)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

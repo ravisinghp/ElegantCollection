@@ -4,6 +4,7 @@ from app.models.schemas.AdminSchema import (
     UserCreate,
     UserUpdate,
     RoleResponse,
+    SourceResponse,
     CategoryResponse,
     EmailSettings,
 )
@@ -59,26 +60,45 @@ async def register_user(request: Request, user: UserCreate) -> int:
 
     # for fetching the data
     user_in_db = UserInDB(
-        user_id=0,  # DB should generate this
+        user_id=0,
         user_name=user.user_name,
         mail_id=user.mail_id,
         password=hashed_password,
-        role_id=role_id,
+        role_id=user.role_id,
         folder_name=user.folder_name,
         created_by=user.created_by,
         provider=user.provider,
     )
 
-    # Save user
-    user_id = await admin_repo.create_user(
-        request, user_in_db
-    )
-    if user_id :
-        return {
-            "message": "User created successfully",
-            "user_id": user_id,
-            "user_name": user.user_name,
-        }
+    async with request.app.state.pool.acquire() as conn:
+        async with conn.cursor() as cursor:
+            try:
+                # Insert user
+                user_id = await admin_repo.create_user(
+                    request,user_in_db
+                )
+
+                # Insert source mappings
+                if user.sources:
+                    await admin_repo.insert_user_sources(
+                        request,
+                        user_id,
+                        user.sources
+                    )
+
+                # Commit once
+                await conn.commit()
+
+                return {
+                    "success": True,
+                    "message": "User created successfully",
+                    "user_id": user_id,
+                    "user_name": user.user_name,
+                }
+
+            except Exception as e:
+                await conn.rollback()
+                raise HTTPException(status_code=500, detail=str(e))
     #   send mail to the created user
     # message = MessageSchema(
     #     subject="Welcome to Our Platform",
@@ -163,6 +183,15 @@ async def get_all_roles(request: Request) -> list[RoleResponse]:
         return [RoleResponse(**role) for role in roles]
     except Exception as e:
         return None
+
+#-------------Fetch all Source-----------------
+async def get_all_sources(request: Request) -> list[SourceResponse]:
+    try:
+        sources = await admin_repo.get_all_sources(request)
+        return [SourceResponse(**source) for source in sources]
+    except Exception as e:
+        return None
+    
     
 
 

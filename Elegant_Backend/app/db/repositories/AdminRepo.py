@@ -14,7 +14,7 @@ IST_OFFSET = timedelta(hours=5, minutes=30)
         
         
 #--------------------Creating new user---------------------
-async def create_user(request: Request, user: UserInDB) -> int:
+async def   create_user(request: Request, user: UserInDB) -> int:
     query = """
         INSERT INTO users_master (user_name, mail_id, password, role_id, folder_name, created_by, provider)
         VALUES (%s, %s, %s, %s, %s,%s,%s)
@@ -30,8 +30,30 @@ async def create_user(request: Request, user: UserInDB) -> int:
                 user.created_by,
                 user.provider
             ))
-            await conn.commit()
-            return cursor.lastrowid        
+            
+            return cursor.lastrowid    
+        
+async def insert_user_sources(
+    request: Request,
+    user_id: int,
+    sources: list
+) -> None:
+    query = """
+        INSERT INTO user_source_mapping (user_id, source_id)
+        VALUES (%s, %s) 
+    """
+
+    async with request.app.state.pool.acquire() as conn:
+        async with conn.cursor() as cursor:
+            values = [
+                (
+                    user_id,
+                    src.source_id,
+                )
+                for src in sources
+            ]
+
+            await cursor.executemany(query, values)
 
         
 ##-------------------Update the user-----------------
@@ -221,6 +243,20 @@ async def get_all_roles(request: Request) -> list[dict]:
             columns = [col[0] for col in cursor.description]
             return [dict(zip(columns, row)) for row in rows]
         
+
+#-------------Fetch all Source-----------------  
+async def get_all_sources(request: Request) -> list[dict]:
+    query = """
+        SELECT s.source_id, s.source_name
+        FROM source_master s
+        where s.is_active = 1
+    """
+    async with request.app.state.pool.acquire() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(query)
+            rows = await cursor.fetchall()
+            columns = [col[0] for col in cursor.description]
+            return [dict(zip(columns, row)) for row in rows]
         
 # Total Effort (convert minutes to hours)
 # async def fetch_total_effort(request: Request) -> float:

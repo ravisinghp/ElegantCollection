@@ -6,7 +6,9 @@ from starlette.config import Config
 
 config = Config(".env")
 
-
+class SourceResponse(BaseModel):
+    source_id: int
+   
 class UserCreate(BaseModel):
     user_name: str
     mail_id: EmailStr
@@ -15,6 +17,7 @@ class UserCreate(BaseModel):
     provider:str
     folder_name: str
     created_by: int
+    sources: List[SourceResponse]
 
 
 class UserUpdate(BaseModel):
@@ -98,6 +101,8 @@ class PaginatedKeywordsResponse(BaseModel):
 class RoleResponse(BaseModel):
     role_id: int
     role_name: str
+
+
 
 
 class CategoryResponse(BaseModel):

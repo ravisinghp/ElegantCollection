@@ -12,7 +12,7 @@ from app.models.schemas.users import BusinessAdminSearchRequest
 
 #User Dashboard Card Data 
 router = APIRouter()
-@router.get("/userDashboardCardData")
+@router.get("/user_dashboard_card_data")
 async def get_dashboard_stats(request: Request,userId:int):
     user_id = userId
     if not user_id:
@@ -33,7 +33,7 @@ async def get_dashboard_stats(request: Request,userId:int):
         return None
     
     #Donwload Missing Report and Missmatch Report 
-@router.post("/downloadMissingPOReport")
+@router.post("/download_missing_po_report")
 async def download_missing_po_report(
     request: Request,
     payload: DownloadMissingMismatchRequest,
@@ -60,7 +60,7 @@ async def download_missing_po_report(
 
 
 #Donwload Missing Report and Missmatch Report 
-@router.post("/downloadMismatchPOReport")
+@router.post("/download_mismatch_po_report")
 async def download_mismatch_po_report(
     request: Request,
     payload: DownloadMissingMismatchRequest,
@@ -87,7 +87,7 @@ async def download_mismatch_po_report(
 
 
 #Adding and Update comment for po missing and po mismatch from UI
-@router.put("/savePoComment")
+@router.put("/save_po_comment")
 async def save_po_comment(
     request: Request,
     payload: UpdatePoCommentRequest,
@@ -120,7 +120,7 @@ async def save_po_comment(
 
 
 #For Fetching the PO comment ON UI 
-@router.get("/fetchPoComment")
+@router.get("/fetch_po_comment")
 async def fetch_po_comment(
     request: Request,
     report_type: str = Query(..., regex="^(missing|mismatch)$"),
@@ -153,12 +153,13 @@ async def fetch_po_comment(
 
 
 #For Ignoring the PO in Next Sync On UI
-@router.put("/ignore-po")
+@router.put("/ignore_po")
 async def ignore_po(
     request: Request,
     report_type: str = Query(..., regex="^(missing|mismatch)$"),
     po_missing_id: int | None = None,
-    po_mismatch_id: int | None = None,
+    po_mismatch_id
+    : int | None = None,
 ):
     if report_type == "missing":
         if not po_missing_id:
@@ -270,7 +271,7 @@ async def ignore_po(
 # async def matched_po_data_fetch(request: Request):
 #     return await UserService.matched_po_data_fetch(request)
 #table Data ON User Dashboard 
-@router.post("/missing-po")
+@router.post("/missing_po")
 async def missing_po_data_fetch(request: Request, frontendRequest: FetchMissingMismatchReport):
     try:
         data = await UserService.missing_po_data_fetch(request, frontendRequest)
@@ -280,7 +281,7 @@ async def missing_po_data_fetch(request: Request, frontendRequest: FetchMissingM
         print(f"Error fetching Missing POs: {e}")
         return []
 
-@router.post("/mismatch-po")
+@router.post("/mismatch_po")
 async def mismatch_po_data_fetch(request: Request, frontendRequest: FetchMissingMismatchReport):
     try:
         data = await UserService.mismatch_po_data_fetch(request, frontendRequest)
@@ -289,7 +290,7 @@ async def mismatch_po_data_fetch(request: Request, frontendRequest: FetchMissing
         print(f"Error fetching Mismatch POs: {e}")
         return []
 
-@router.post("/matched-po")
+@router.post("/matched_po")
 async def matched_po_data_fetch(request: Request, frontendRequest: FetchMissingMismatchReport):
     try:
         data = await UserService.matched_po_data_fetch(request, frontendRequest)
@@ -301,7 +302,7 @@ async def matched_po_data_fetch(request: Request, frontendRequest: FetchMissingM
 
 
 #Business admin fetching users list and vendor number list on dashboard
-@router.get("/fetchUsersForBusinessAdmin")
+@router.get("/fetch_users_for_business_admin")
 async def get_all_users_by_role_id_business_admin(
     request: Request
 ):
@@ -317,7 +318,7 @@ async def get_all_users_by_role_id_business_admin(
         )
 
 
-@router.get("/fetchVendorsForBusinessAdmin")
+@router.get("/fetch_vendors_for_business_admin")
 async def get_vendors_business_admin(request: Request):
     try:
         result = await UserService.get_vendors_business_admin(request)
@@ -383,7 +384,7 @@ async def search_pos_business_admin(
         
         
 # #Last Sync On User Dashboard        
-@router.get("/lastSync")
+@router.get("/last_sync")
 async def get_last_sync_by_user_id(user_id: int,role_id: int,request: Request):
     try: 
         result = await UserService.get_last_sync_by_user_id(user_id,role_id,request)

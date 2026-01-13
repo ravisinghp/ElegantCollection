@@ -528,7 +528,7 @@ async def fetch_matched_po_data(request: Request, frontendRequest):
 
     return [dict(zip(cols, r)) for r in rows]
         
-        
+        #for schedular we are getting all users 
 async def get_active_users(request: Request):
     query = """
         SELECT user_id

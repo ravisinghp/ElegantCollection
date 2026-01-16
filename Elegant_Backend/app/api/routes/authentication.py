@@ -46,6 +46,10 @@ async def login(
         user_data = await login_user(request, user_login.email, user_login.password)
         raw = user_data["is_first_login"]
         if user_data:
+            sources = await users_repo.get_user_sources(
+            request=request,
+            user_id=user_data["user_id"]
+        )
             token = jwt_service.create_access_token_for_user(user_data, SECRET_KEY)
             return LoginResponse(
                 userid=user_data["user_id"],
@@ -54,7 +58,7 @@ async def login(
                 roleid=user_data["role_id"],
                 token=token,
                 is_first_login=raw[0] == 1 if isinstance(raw, (bytes, bytearray)) else raw == 1,   
-                 
+                sources=sources 
                 )      
         else:
             return None

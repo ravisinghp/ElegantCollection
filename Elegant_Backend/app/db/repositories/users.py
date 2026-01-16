@@ -1,6 +1,7 @@
 from typing import Optional, Any, List
 from app.db.errors import EntityDoesNotExist
 from app.db.repositories.base import BaseRepository
+from starlette.requests import Request
 from app.models.domain.users import User, UserInDB, file_list, MasterUser
 import datetime
 from loguru import logger
@@ -80,6 +81,25 @@ WHERE username = %s
 
 
 class UsersRepository(BaseRepository):
+    
+    
+    async def get_user_sources(self, *, request: Request, user_id: int):
+        query = """
+            SELECT s.source_id, s.source_name
+            FROM user_source_mapping usm
+            JOIN source_master s ON s.source_id = usm.source_id
+            WHERE usm.user_id = %s
+        """
+
+        async with request.app.state.pool.acquire() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute(query, (user_id,))
+                rows = await cursor.fetchall()
+
+        return [
+            {"source_id": r[0], "source_name": r[1]}
+            for r in rows
+        ]
     # --- ADDED METHOD ---
     async def get_user_by_id(self, user_id: int) -> MasterUser:
         """

@@ -91,10 +91,14 @@ async def update_user_in_db(request: Request, user_id: int, user_data: UserUpdat
             
 #--------------Delete User--------------------
 async def delete_user(request: Request, user_id: int) -> bool:
+    delete_child_query = "DELETE FROM user_source_mapping WHERE user_id = %s"
     query = "DELETE FROM users_master WHERE user_id = %s"
 
     async with request.app.state.pool.acquire() as conn:
         async with conn.cursor() as cursor:
+            # Delete child rows first
+            await cursor.execute(delete_child_query, (user_id,))
+            # Then delete parent row
             await cursor.execute(query, (user_id,))
             await conn.commit()
 

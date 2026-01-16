@@ -69,6 +69,8 @@ class LoginResponse(BaseModel):
     provider: Optional[str] = None 
     term_condition_flag: Optional[int] = 0
     is_first_login: bool = True
+    sources: Optional[List[SourceResponse]] = None
+    
 
 
 # replaces allow_population_by_field_name

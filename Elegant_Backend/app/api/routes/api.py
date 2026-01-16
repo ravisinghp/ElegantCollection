@@ -1,12 +1,12 @@
 from fastapi import APIRouter
 
 from app.api.routes import authentication, users
-from app.api.routes import authentication, users, report_data
+from app.api.routes import authentication, users, report_data, sharepoint_controller
 from app.api.routes.AdminController import router as admin_router
 from app.api.routes.UserController import router as user_router
 from app.api.routes.SystemAdminSchedular import router as SystemAdmin_router
 from app.api.routes import category_section
-
+from app.api.routes.EscalationController import router as Escalation_router
 
 router = APIRouter()
 router.include_router(authentication.router, tags=["authentication"], prefix="/users")
@@ -20,5 +20,8 @@ router.include_router(
     category_section.router, tags=["categories"], prefix="/categories"
 )
 router.include_router(SystemAdmin_router, tags=["SystemAdmin"], prefix="/systemadmin")
+router.include_router(sharepoint_controller.router, tags=["sharepoint"], prefix="/sharepoint")
+router.include_router(Escalation_router, tags=["Escalation"], prefix="/escalation")
+
 # Include user router
 # router.include_router(auth.router, prefix="/auth", tags=["auth"])

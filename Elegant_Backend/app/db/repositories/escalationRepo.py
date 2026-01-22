@@ -1,251 +1,238 @@
-# from datetime import datetime
-# from sqlalchemy import text
-
-
 # class EscalationRepository:
 #     def __init__(self, cur):
 #         self._cur = cur
 
-#     async def get_reports_for_escalation(self, report_type: str):
-#         """
-#         DB-driven escalation logic:
-#         - Working days only (Mon–Fri)
-#         - Excludes holidays
-#         - created_on → now
-#         - updated_on unchanged
-#         - is_active = 1
-#         - No duplicate escalation
-#         """
+    # async def get_missing_reports(self):
+    #     query = """
+    #         SELECT *, 'missing' AS report_type
+    #         FROM po_missing_report
+    #         WHERE active = 1
+    #           AND created_on IS NOT NULL
+    #           AND updated_on IS NULL
+    #     """
+    #     await self._cur.execute(query)
+    #     return await self._cur.fetchall()
 
-#         table_name = (
-#             "po_missing_report"
-#             if report_type == "MISSING_PO"
-#             else "po_mismatch_report"
-#         )
-
-#         query = text(f"""
-#             SELECT
-#                 r.id AS report_id,
-#                 em.escalation_level,
-#                 em.recipient_role
-#             FROM {table_name} r
-#             JOIN escalation_matrix em
-#                 ON em.report_type = :report_type
-#                AND em.is_active = 1
-#             LEFT JOIN escalation_log el
-#                 ON el.report_id = r.id
-#                AND el.report_type = :report_type
-#                AND el.escalation_level = em.escalation_level
-#             WHERE
-#                 r.is_active = 1
-#                 AND r.updated_on = r.created_on
-#                 AND el.escalation_log_id IS NULL
-#                 AND (
-#                     SELECT COUNT(*)
-#                     FROM (
-#                         SELECT DATE_ADD(r.created_on, INTERVAL n DAY) AS d
-#                         FROM (
-#                             SELECT a.N + b.N * 10 + c.N * 100 AS n
-#                             FROM
-#                                 (SELECT 0 N UNION ALL SELECT 1 UNION ALL SELECT 2 UNION ALL SELECT 3 UNION ALL SELECT 4
-#                                  UNION ALL SELECT 5 UNION ALL SELECT 6 UNION ALL SELECT 7 UNION ALL SELECT 8 UNION ALL SELECT 9) a,
-#                                 (SELECT 0 N UNION ALL SELECT 1 UNION ALL SELECT 2 UNION ALL SELECT 3 UNION ALL SELECT 4
-#                                  UNION ALL SELECT 5 UNION ALL SELECT 6 UNION ALL SELECT 7 UNION ALL SELECT 8 UNION ALL SELECT 9) b,
-#                                 (SELECT 0 N UNION ALL SELECT 1 UNION ALL SELECT 2 UNION ALL SELECT 3 UNION ALL SELECT 4
-#                                  UNION ALL SELECT 5 UNION ALL SELECT 6 UNION ALL SELECT 7 UNION ALL SELECT 8 UNION ALL SELECT 9) c
-#                         ) numbers
-#                         WHERE DATE_ADD(r.created_on, INTERVAL n DAY) <= CURDATE()
-#                     ) days
-#                     WHERE
-#                         WEEKDAY(d) < 5
-#                         AND d NOT IN (SELECT holiday_date FROM holiday_calendar)
-#                 ) >= em.threshold_working_days
-#         """)
-
-#         result = await self._cur.execute(
-#             query,
-#             {"report_type": report_type}
-#         )
-
-#         return result.fetchall()
-
-#     async def get_recipient_email(self, role: str):
-#         query = text("""
-#             SELECT email
-#             FROM users
-#             WHERE role = :role
-#               AND is_active = 1
-#             LIMIT 1
-#         """)
-
-#         result = await self._cur.execute(query, {"role": role})
-#         row = result.fetchone()
-#         return row.email if row else None
-
-#     async def log_escalation(
-#         self,
-#         report_id: int,
-#         report_type: str,
-#         escalation_level: int,
-#         role: str,
-#         email: str
-#     ):
-#         query = text("""
-#             INSERT INTO escalation_log (
-#                 report_id,
-#                 report_type,
-#                 escalation_level,
-#                 escalated_to_role,
-#                 escalated_to_email,
-#                 escalated_at
-#             )
-#             VALUES (
-#                 :report_id,
-#                 :report_type,
-#                 :level,
-#                 :role,
-#                 :email,
-#                 NOW()
-#             )
-#         """)
-
-#         await self._cur.execute(
-#             query,
-#             {
-#                 "report_id": report_id,
-#                 "report_type": report_type,
-#                 "level": escalation_level,
-#                 "role": role,
-#                 "email": email
-#             }
-#         )
-#         await self._cur.commit()
+    # async def get_mismatch_reports(self):
+    #     query = """
+    #         SELECT *, 'mismatch' AS report_type
+    #         FROM po_mismatch_report
+    #         WHERE active = 1
+    #           AND created_on IS NOT NULL
+    #           AND updated_on IS NULL
+    #     """
+    #     await self._cur.execute(query)
+    #     return await self._cur.fetchall()
 
 
-# mansi 
-# -------------------------------------------------------------------------------------------------------- option 2
-# class EscalationRepository:
-#     def __init__(self, cur):
-#         self._cur = cur
-
-#     async def get_reports_for_escalation(self, report_type: str):
-#         report_type = report_type.lower()
-
-#         if report_type == "missing":
-#             table_name = "po_missing_report"
-#         elif report_type == "mismatch":
-#             table_name = "po_mismatch_report"
-#         else:
-#             raise ValueError("Invalid report_type")
-
-#         query = f"""
-#         SELECT
-#     r.created_on,
-#     r.updated_on,
-#     r.active,
-#     em.escalation_level,
-#     em.recipient_role
-# FROM {table_name} AS r
-# JOIN escalation_matrix em
-#     ON em.report_type = %s
-#    AND em.is_active = 1
-# WHERE
-#     r.active = 1
-#     AND r.created_on IS NOT NULL
-#     AND r.updated_on IS NULL
-#     AND (
-#         SELECT COUNT(*)
-#         FROM (
-#             SELECT DATE_ADD(r.created_on, INTERVAL n DAY) AS d
-#             FROM (
-#                 SELECT a.N + b.N * 10 + c.N * 100 AS n
-#                 FROM
-#                     (SELECT 0 N UNION ALL SELECT 1 UNION ALL SELECT 2 UNION ALL SELECT 3 UNION ALL SELECT 4
-#                      UNION ALL SELECT 5 UNION ALL SELECT 6 UNION ALL SELECT 7 UNION ALL SELECT 8 UNION ALL SELECT 9) a,
-#                     (SELECT 0 N UNION ALL SELECT 1 UNION ALL SELECT 2 UNION ALL SELECT 3 UNION ALL SELECT 4
-#                      UNION ALL SELECT 5 UNION ALL SELECT 6 UNION ALL SELECT 7 UNION ALL SELECT 8 UNION ALL SELECT 9) b,
-#                     (SELECT 0 N UNION ALL SELECT 1 UNION ALL SELECT 2 UNION ALL SELECT 3 UNION ALL SELECT 4
-#                      UNION ALL SELECT 5 UNION ALL SELECT 6 UNION ALL SELECT 7 UNION ALL SELECT 8 UNION ALL SELECT 9) c
-#             ) numbers
-#             WHERE DATE_ADD(r.created_on, INTERVAL n DAY) <= CURDATE()
-#         ) days
-#         WHERE
-#             WEEKDAY(d) < 5
-#             AND d NOT IN (SELECT holiday_date FROM holiday_calendar)
-#     ) >= em.threshold_working_days
-#         """
-
-#         await self._cur.execute(query, (report_type,))
-#         return await self._cur.fetchall()
+    # async def get_holidays(self):
+    #     query = """
+    #         SELECT holiday_date FROM holidays
+    #     """
+    #     await self._cur.execute(query)
+    #     rows = await self._cur.fetchall()
+    #     return [row['holiday_date'] for row in rows]
 
 
-#     async def is_escalation_already_sent(
-#         self,
-#         report_type: str,
-#         escalation_level: int,
-#         role: str
-#     ):
-#         query = """
-#             SELECT 1
-#             FROM escalation_log
-#             WHERE report_type = %s
-#             AND escalation_level = %s
-#             AND escalated_to_role = %s
-#             LIMIT 1
-#         """
-#         await self._cur.execute(
-#             query,
-#             (report_type, escalation_level, role)
-#         )
-#         return await self._cur.fetchone() is not None
 
-#     async def log_escalation(
-#         self,
-#         report_type: str,
-#         escalation_level: int,
-#         role: str,
-#         email: str
-#     ):
-#         query = """
-#             INSERT INTO escalation_log (
-#                 report_type,
-#                 escalation_level,
-#                 escalated_to_role,
-#                 escalated_to_email,
-#                 escalated_at
-#             )
-#             VALUES (%s, %s, %s, %s, NOW())
-#         """
 
-#         await self._cur.execute(
-#             query,
-#             (report_type, escalation_level, role, email)
-#     )
 
+    # async def _get_reports_by_threshold(self, table_name: str, threshold_days: int = 3):
+    #     query = f"""
+    #         SELECT *
+    #         FROM {table_name}
+    #         WHERE active = 1
+    #           AND created_on IS NOT NULL
+    #     """
+    #     await self._cur.execute(query)
+    #     rows = await self._cur.fetchall()
+
+    #     holidays = await self.get_holidays()
+    #     now = datetime.now()
+
+    #     filtered = []
+    #     for row in rows:
+    #         updated_on = row.get("updated_on") or now
+    #         if working_days_between(row["created_on"], updated_on, holidays) > threshold_days:
+    #             filtered.append(row)
+
+    #     return filtered
+
+    # #  WRITE THESE METHODS HERE 
+    # async def get_missing_reports(self, threshold_days: int = 3):
+    #     return await self._get_reports_by_threshold(
+    #         "po_missing_report", threshold_days
+    #     )
+
+    # async def get_mismatch_reports(self, threshold_days: int = 3):
+    #     return await self._get_reports_by_threshold(
+    #         "po_mismatch_report", threshold_days
+    #     )
+
+    # async def get_holidays(self):
+    #     query = "SELECT holiday_date FROM holidays"
+    #     await self._cur.execute(query)
+    #     rows = await self._cur.fetchall()
+    #     return [row["holiday_date"] for row in rows]
+
+
+    # ----------------------------------------------------------------------
+    # newwww
+
+from datetime import datetime
+from app.utils.date_utils import working_days_between
 
 class EscalationRepository:
     def __init__(self, cur):
         self._cur = cur
 
-    async def get_missing_reports(self):
-        query = """
-            SELECT *, 'missing' AS report_type
-            FROM po_missing_report
+    async def _get_reports_with_escalation(self, table_name: str, report_type: str):
+        # Fetch reports
+        query = f"""
+            SELECT *
+            FROM {table_name}
             WHERE active = 1
               AND created_on IS NOT NULL
-              AND updated_on IS NULL
         """
         await self._cur.execute(query)
-        return await self._cur.fetchall()
+        rows = await self._cur.fetchall()
+
+        # Fetch escalation rules
+        escalation_rules = await self.get_escalation_rules(report_type)
+
+        holidays = await self.get_holidays()
+        now = datetime.now()
+
+        escalated_reports = []
+
+        for row in rows:
+            updated_on = row.get("updated_on") or now
+            working_days = working_days_between(
+                row["created_on"], updated_on, holidays
+            )
+
+            # Determine escalation level dynamically
+            for rule in escalation_rules:
+                if working_days >= rule["threshold_working_days"]:
+                    escalated_reports.append({
+                        **row,
+                        "escalation_level": rule["escalation_level"],
+                        "recipient_role": rule["recipient_role"],
+                        "working_days": working_days
+                    })
+
+            # for rule in escalation_rules:
+            #     if working_days == rule["threshold_working_days"]:
+            #         escalated_reports.append({
+            #             **row,
+            #             "escalation_level": rule["escalation_level"],
+            #             "recipient_role": rule["recipient_role"],
+            #             "working_days": working_days
+            #         })
+            #         break   # 🔑 VERY IMPORTANT
+
+        return escalated_reports
+
+    #  ADD THESE METHODS RIGHT HERE 👇
+    async def get_missing_reports(self):
+        return await self._get_reports_with_escalation(
+            "po_missing_report",
+            "MISSING_PO"
+        )
 
     async def get_mismatch_reports(self):
+        return await self._get_reports_with_escalation(
+            "po_mismatch_report",
+            "MISMATCH_PO"
+        )
+    
+    
+
+    # supporting DB methods (should already exist)
+    async def get_escalation_rules(self, report_type: str):
         query = """
-            SELECT *, 'mismatch' AS report_type
-            FROM po_mismatch_report
-            WHERE active = 1
-              AND created_on IS NOT NULL
-              AND updated_on IS NULL
+            SELECT escalation_level,
+                   threshold_working_days,
+                   recipient_role
+            FROM escalation_matrix
+            WHERE report_type = %s
+              AND is_active = 1
+            ORDER BY threshold_working_days ASC
         """
-        await self._cur.execute(query)
+        await self._cur.execute(query, (report_type,))
         return await self._cur.fetchall()
+
+    async def get_holidays(self):
+        query = "SELECT holiday_date FROM holiday_calendar"
+        await self._cur.execute(query)
+        rows = await self._cur.fetchall()
+        return [row["holiday_date"] for row in rows]
+    
+
+    async def get_user_emails(self, user_ids: list[int]):
+        if not user_ids:
+            return []
+
+        placeholders = ",".join(["%s"] * len(user_ids))
+        query = f"""
+            SELECT DISTINCT mail_id
+            FROM users_master
+            WHERE user_id IN ({placeholders})
+            AND mail_id IS NOT NULL
+        """
+
+        await self._cur.execute(query, user_ids)
+        rows = await self._cur.fetchall()
+
+        return [row["mail_id"] for row in rows]
+    
+    # to insert in DB-----------------------------------------------------------------------------------
+    
+    async def insert_escalation_log(
+    self,
+    report_id: int,
+    report_type: str,
+    escalation_level: int,
+    escalated_to_role: str,
+    escalated_to_email: str,
+    created_by: int,
+    mail_sent: int
+):
+        query = """
+            INSERT INTO escalation_log
+            (
+                report_id,
+                report_type,
+                escalation_level,
+                escalated_to_role,
+                escalated_to_email,
+                escalated_at,
+                created_by,
+                created_on,
+                mail_sent,
+                active
+            )
+            VALUES
+            (
+                %s, %s, %s, %s, %s,
+                NOW(),
+                %s,
+                NOW(),
+                %s,
+                1
+            )
+        """
+        await self._cur.execute(
+            query,
+            (
+                report_id,
+                report_type,
+                escalation_level,
+                escalated_to_role,
+                escalated_to_email,
+                created_by,
+                mail_sent
+            )
+        )
+
 

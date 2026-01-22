@@ -2,6 +2,7 @@ from app.models.domain.rwmodel import RWModel
 from datetime import datetime
 from pydantic import BaseModel, Field, ConfigDict
 from typing import Optional, List, Dict
+from datetime import date
 
 
 class UserInDB(BaseModel):
@@ -37,11 +38,14 @@ class UpdatePoCommentRequest(BaseModel):
     po_missing_id: Optional[int] = None
     po_mismatch_id: Optional[int] = None
     comment: str
-    
+
+#Scheduler Information from frontend it coming
 class SchedulerRequest(BaseModel):
-    days: list[str]      # ["MON", "TUE"]
-    hour: int            # 0–23
-    minute: int          # 0–59
+    user_id:int
+    date: date
+    days: List[str]
+    hour: int
+    minute: int
 
 
 class DownloadMissingMismatchRequest(BaseModel):
@@ -54,3 +58,9 @@ class GenerateMissingPoReport(BaseModel):
 class FetchMissingMismatchReport(BaseModel):
     user_id : int
     role_id:int
+   
+  
+class FolderMappingRequest(BaseModel):
+    user_id: int
+    folder_name: str
+    

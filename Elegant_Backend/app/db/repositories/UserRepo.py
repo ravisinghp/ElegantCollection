@@ -3,7 +3,7 @@ from typing import List, Tuple
 from typing import Any,Dict
 from datetime import datetime, timedelta
 IST_OFFSET = timedelta(hours=5, minutes=30)
-
+from asyncmy.cursors import DictCursor
 
 #Total R&D Effort On User Dashboard
 # async def fetch_total_user_effort_by_id(user_id: int, from_date: str, to_date: str, request: Request) -> float:
@@ -769,6 +769,136 @@ async def get_last_sync_by_user_id(
     except Exception as e:
         return []
 
+#For duplicates folder checking
+async def check_folder_mapping_exists_repo(
+    request: Request,
+    user_id: int,
+    folder_name: str
+) -> bool:
+    query = """
+        SELECT 1
+        FROM sd_folder_mapping_table
+        WHERE user_id = %s
+          AND folder_name = %s
+          AND is_active = 1
+        LIMIT 1
+    """
+
+    try:
+        async with request.app.state.pool.acquire() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute(query, (user_id, folder_name))
+                row = await cursor.fetchone()
+                return row is not None
+
+    except Exception as e:
+        raise Exception(f"DB error while checking folder mapping: {str(e)}")
+
+#Insert Folder in DB 
+async def insert_folder_mapping_repo(
+    request: Request,
+    user_id: int,
+    folder_name: str
+) -> bool:
+    query = """
+        INSERT INTO sd_folder_mapping_table (user_id, folder_name)
+        VALUES (%s, %s)
+    """
+
+    try:
+        async with request.app.state.pool.acquire() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute(query, (user_id, folder_name))
+                await conn.commit()
+                return cursor.rowcount > 0
+
+    except Exception as e:
+        raise Exception(f"DB error while inserting folder mapping: {str(e)}")
+    
+
+#Save the Scheduler details in sd task master table in db 
+async def save_schedule(
+        request,
+        schedule_date,
+        days: str,
+        schedule_time,
+        created_by: int
+    ) -> bool:
+
+        query = """
+            INSERT INTO sd_task_master_table
+            (date,day, time, created_by)
+            VALUES (%s,%s, %s, %s)
+        """
+
+        try:
+            async with request.app.state.pool.acquire() as conn:
+                async with conn.cursor() as cursor:
+                    await cursor.execute(
+                        query,
+                        (
+                            schedule_date,   # DATE
+                            days,            # VARCHAR
+                            schedule_time,   # TIMESTAMP (datetime object)
+                            created_by
+                        )
+                    )
+                    await conn.commit()
+                    return cursor.rowcount > 0
+
+        except Exception as e:
+            raise Exception(f"DB error while inserting scheduler: {str(e)}")
+
+#---------------------Get Active Schedule From task_sd_master_table-------------
+async def get_active_schedule(request):
+    query = """
+        SELECT
+            task_sd_id,
+            day,
+            time
+        FROM sd_task_master_table
+        WHERE is_active = 1
+        ORDER BY created_on DESC
+        LIMIT 1
+    """
+
+    async with request.app.state.pool.acquire() as conn:
+        async with conn.cursor(DictCursor) as cursor:
+            await cursor.execute(query)
+            return await cursor.fetchone()
+ 
+ #--------------------Get All Active Users with refresh Token------------           
+async def get_users_with_refresh_token(request):
+    query = """
+        SELECT
+            user_id,
+            refresh_token
+        FROM outlook_tokens
+        WHERE refresh_token IS NOT NULL
+          AND is_active = 1
+    """
+
+    async with request.app.state.pool.acquire() as conn:
+        async with conn.cursor(DictCursor) as cursor:
+            await cursor.execute(query)
+            return await cursor.fetchall()
+ 
+ #---------------Get folders which we have to sync----------------           
+async def get_user_folders(request, user_id: int):
+        query = """
+            SELECT
+                folder_name
+            FROM sd_folder_mapping_table
+            WHERE user_id = %s
+              AND is_active = 1
+        """
+
+        async with request.app.state.pool.acquire() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute(query, (user_id,))
+                rows = await cursor.fetchall()
+
+        return [row[0] for row in rows]
 # #Update Term Condition Fleg When User login once
 # async def update_term_condition_flag(user_id: int, role_id: int, org_id: int, request: Request, flag: int = 1):
 #     query = """

@@ -370,7 +370,49 @@ async def get_last_sync_by_user_id(user_id: int,role_id: int,request: Request):
         return last_sync_data
     except Exception as e:
         raise Exception(f"Error fetching last sync data: {str(e)}")
-    
+
+#save the folders in folder mapping table for scheduler 
+async def save_folder_mapping_service(
+    request: Request,
+    user_id: int,
+    folder_name: str
+) -> dict:
+    try:
+        folder_name = folder_name.strip()
+
+        if not folder_name:
+            return {
+                "success": False,
+                "message": "Folder name cannot be empty"
+            }
+
+        # 🔍 Check duplicate
+        exists = await UserRepo.check_folder_mapping_exists_repo(
+            request=request,
+            user_id=user_id,
+            folder_name=folder_name
+        )
+
+        if exists:
+            return {
+                "success": False,
+                "message": "Folder already exists for this user"
+            }
+
+        #Insert
+        inserted = await UserRepo.insert_folder_mapping_repo(
+            request=request,
+            user_id=user_id,
+            folder_name=folder_name
+        )
+
+        return {
+            "success": inserted,
+            "message": "Folder mapping saved successfully"
+        }
+
+    except Exception as e:
+        raise Exception(f"Service error while saving folder mapping: {str(e)}")
     
 # #Update Term Condition Fleg When User login once
 # async def update_term_condition_flag(user_id: int, role_id: int, org_id: int, request: Request):

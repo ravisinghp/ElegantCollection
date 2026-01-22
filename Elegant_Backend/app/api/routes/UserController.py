@@ -5,7 +5,7 @@ from app.services import UserService
 from typing import List, Dict, Any
 # from pydantic import BaseModel
 from fastapi.responses import StreamingResponse
-from app.models.domain.AdminDomain import UpdatePoCommentRequest, GenerateMissingPoReport, DownloadMissingMismatchRequest,FetchMissingMismatchReport
+from app.models.domain.AdminDomain import UpdatePoCommentRequest, GenerateMissingPoReport, DownloadMissingMismatchRequest,FetchMissingMismatchReport,FolderMappingRequest
 from fastapi.encoders import jsonable_encoder
 from app.models.schemas.users import BusinessAdminSearchRequest
 
@@ -391,7 +391,35 @@ async def get_last_sync_by_user_id(user_id: int,role_id: int,request: Request):
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-    
+
+# Save the Folder in Folder mapping for scheduler to get sync
+@router.post("/save_folder_mapping")
+async def save_folder_mapping(payload: FolderMappingRequest, request: Request ):
+    try:
+        if not payload.user_id or not payload.folder_name:
+            raise ValueError("Invalid payload")
+
+        await UserService.save_folder_mapping_service(
+            request=request,
+            user_id=payload.user_id,
+            folder_name=payload.folder_name
+        )
+
+        return {
+            "status": "success",
+            "message": "Folder mapping saved successfully"
+        }
+
+    except ValueError as ve:
+        #logger.warning("Validation error: %s", ve)
+        raise HTTPException(status_code=400, detail=str(ve))
+
+    except Exception as e:
+        #logger.error("Failed to save folder mapping", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail="Internal server error while saving folder mapping"
+        )   
  
  
      

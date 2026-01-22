@@ -6,6 +6,7 @@ from app.services.sharepoint_service import SharepointService
 from app.api.dependencies.database import get_repository
 from app.services.usersmailservice import get_valid_outlook_token
 import logging
+from app.models.schemas.sharepoint_schema import FolderRequestParams
 
 
 router = APIRouter()
@@ -15,9 +16,9 @@ logger = logging.getLogger("sharepoint")
 logger.setLevel(logging.INFO)
 
 
-@router.get("/sharepoint_all_folders")
+@router.post("/sharepoint_all_folders")
 async def get_all_sharepoint_folders(
-    user_id: int = Query(..., description="Logged-in user ID"),
+    request: FolderRequestParams,
     sp_repo: SharepointRepo = Depends(get_repository(SharepointRepo)),
     mail_repo: MailsRepository = Depends(get_repository(MailsRepository)),
 ):
@@ -26,12 +27,12 @@ async def get_all_sharepoint_folders(
     """
 
     # Validate user_id
-    if user_id <= 0:
+    if request.user_id <= 0:
         raise HTTPException(status_code=HTTP_400_BAD_REQUEST, detail="Invalid user_id")
 
     try:
         # Get access token
-        access_token = await get_valid_outlook_token(user_id, mail_repo)
+        access_token = await get_valid_outlook_token(request.user_id, mail_repo)
         if not access_token:
             raise HTTPException(status_code=HTTP_400_BAD_REQUEST, detail="Unable to retrieve access token")
 

@@ -89,39 +89,63 @@ class SharepointService:
         return folders
 
     # ---------------- FETCH FILES ---------------- #
-    async def fetch_drive_files(self, access_token: str, drive_id: str, folder_path: str = "",
-                                from_date: str = None, to_date: str = None) -> List[dict]:
-        url = f"{GRAPH_API}/drives/{drive_id}/root"
-        if folder_path:
-            url += f":/{folder_path}:/children"
-        else:
-            url += "/children"
+    async def fetch_drive_files(
+        self,
+        access_token: str,
+        drive_id: str,
+        folder_path: str = "",
+        from_date: str = None,
+        to_date: str = None,
+    ) -> List[dict]:
 
         headers = {"Authorization": f"Bearer {access_token}"}
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, headers=headers) as resp:
-                if resp.status != 200:
-                    text = await resp.text()
-                    logger.error(f"Failed to fetch files: {resp.status} | {text}")
-                    return []
-                data = await resp.json()
-                files = data.get("value", [])
+        collected_files = []
 
-        # Filter by date
+        async def walk(path: str):
+            url = f"{GRAPH_API}/drives/{drive_id}/root"
+            if path:
+                url += f":/{path}:/children"
+            else:
+                url += "/children"
+
+            async with aiohttp.ClientSession(headers=headers) as session:
+                async with session.get(url) as resp:
+                    if resp.status != 200:
+                        text = await resp.text()
+                        logger.error(f"Failed to fetch files: {resp.status} | {text}")
+                        return
+
+                    data = await resp.json()
+
+            for item in data.get("value", []):
+                # ✅ FILE
+                if "file" in item:
+                    collected_files.append(item)
+
+                # ✅ FOLDER → RECURSE
+                elif "folder" in item:
+                    sub_path = f"{path}/{item['name']}" if path else item["name"]
+                    await walk(sub_path)
+
+        await walk(folder_path)
+
+        # ---------- DATE FILTER ----------
         if from_date or to_date:
             from_dt = datetime.fromisoformat(from_date) if from_date else None
             to_dt = datetime.fromisoformat(to_date) if to_date else None
+
             filtered = []
-            for f in files:
-                created_dt = datetime.fromisoformat(f.get("createdDateTime")[:19])
+            for f in collected_files:
+                created_dt = datetime.fromisoformat(f["createdDateTime"][:19])
                 if from_dt and created_dt < from_dt:
                     continue
                 if to_dt and created_dt > to_dt:
                     continue
                 filtered.append(f)
-            files = filtered
 
-        return files
+            collected_files = filtered
+
+        return collected_files
 
     # ---------------- FETCH & SAVE FILES ---------------- #
     @staticmethod
@@ -448,6 +472,17 @@ class SharepointService:
                             if not matched_keywords:
                                 continue
 
+                            parent_path = f.get("parentReference", {}).get("path", "")
+
+                            # Remove everything before root:/
+                            if "/root:/" in parent_path:
+                                actual_folder = parent_path.split("/root:/", 1)[1]
+                            else:
+                                actual_folder = ""
+
+                            # Remove leading slash if exists
+                            actual_folder = actual_folder.lstrip("/")
+
                             # -------- Save SharePoint file --------
                             await self.sp_repo.save_sharepoint_file(
                                 user_id=user_id,
@@ -455,7 +490,7 @@ class SharepointService:
                                 file_type=mime_type,
                                 file_path=f.get("webUrl"),
                                 file_size=f.get("size", 0),
-                                folder_name=folder_path,
+                                folder_name=actual_folder,
                                 uploaded_on=self.graph_datetime_to_mysql(f.get("createdDateTime")),
                                 file_hash=file_hash,
                                 created_by=user_id,

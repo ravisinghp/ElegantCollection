@@ -1,58 +1,90 @@
-# app/db/repositories/sharepoint_repo.py
-from typing import Any, Dict
-from sqlalchemy.ext.asyncio import AsyncSession
+from typing import List, Optional
+from app.db.repositories.base import BaseRepository
 from sqlalchemy import insert, select
-# from app.db.tables import sharepoint_files_table  # SQLAlchemy table for SharePoint files
+
+class SharepointRepo(BaseRepository):
+
+    #---------------- FETCH KEYWORDS ---------------- # 
+    async def fetch_keywords(self) -> List[str]:
+        """
+        Fetch active keywords for a given user_id from keyword_master table.
+        """
+        query = """
+            SELECT keyword_name 
+            FROM keyword_master 
+            WHERE is_active = 1
+        """
+        
+        await self._log_and_execute(query, )
+        result = await self._cur.fetchall()
+        return [row['keyword_name'].lower() for row in result] if result else []
+    
+    # ---------------- CHECK MAIL EXISTS ---------------- #
+    async def file_exists(self, user_id: int, file_hash: str) -> bool:
+        query = """
+            SELECT 1 
+            FROM sharepoint_files 
+            WHERE file_hash = %s 
+            AND user_id = %s 
+            AND is_active = 1 
+            LIMIT 1
+        """
+        await self._log_and_execute(query, (file_hash, user_id))
+        result = await self._cur.fetchone()
+        return result is not None
 
 
-class SharepointRepo:
-    def __init__(self, session: AsyncSession):
-        self.session = session
+    # -------------------Save Sharepoint files------------------- #
+    async def save_sharepoint_file(
+        self,
+        user_id: int,
+        file_name: str,
+        file_type: str,
+        file_path: str,
+        file_size: int,
+        folder_name: str,
+        uploaded_on: Optional[str],
+        created_by: int,
+        file_hash: str,
+        updated_by: Optional[int] = None,
+    ):
+        query = """
+            INSERT INTO sharepoint_files (
+                user_id,
+                file_name,
+                file_type,
+                file_path,
+                file_size,
+                folder_name,
+                uploaded_on,
+                created_by,
+                created_on,
+                updated_by,
+                updated_on,
+                is_active,
+                file_hash
+            )
+            VALUES (
+                %s, %s, %s, %s, %s, %s, %s,
+                %s, NOW(),
+                %s, NOW(),
+                1,
+                %s
+            )
+        """
 
-    # ---------------- SAVE FILE METADATA ---------------- #
-    # async def save_sharepoint_file_metadata(
-    #     self,
-    #     user_id: str,
-    #     file_name: str,
-    #     file_url: str,
-    #     created_date: str,
-    #     modified_date: str,
-    #     folder_path: str,
-    # ) -> Dict[str, Any]:
-    #     """
-    #     Save SharePoint file metadata to DB.
-    #     Returns the saved record.
-    #     """
-    #     query = insert(sharepoint_files_table).values(
-    #         user_id=user_id,
-    #         file_name=file_name,
-    #         file_url=file_url,
-    #         created_date=created_date,
-    #         modified_date=modified_date,
-    #         folder_path=folder_path,
-    #     ).returning(*sharepoint_files_table.c)
+        params = (
+            user_id,
+            file_name,
+            file_type,
+            file_path,
+            file_size,
+            folder_name,
+            uploaded_on,
+            created_by,
+            updated_by or created_by,
+            file_hash,
+        )
 
-    #     result = await self.session.execute(query)
-    #     await self.session.commit()
-
-    #     return dict(result.fetchone())
-
-    # # ---------------- GET FILES FOR USER ---------------- #
-    # async def get_files_by_user(self, user_id: str):
-    #     """
-    #     Get all SharePoint files fetched for a user.
-    #     """
-    #     query = select(sharepoint_files_table).where(
-    #         sharepoint_files_table.c.user_id == user_id
-    #     )
-    #     result = await self.session.execute(query)
-    #     return [dict(row) for row in result.fetchall()]
-
-    # # Optional: get files in folder
-    # async def get_files_by_folder(self, user_id: str, folder_path: str):
-    #     query = select(sharepoint_files_table).where(
-    #         sharepoint_files_table.c.user_id == user_id,
-    #         sharepoint_files_table.c.folder_path == folder_path
-    #     )
-    #     result = await self.session.execute(query)
-    #     return [dict(row) for row in result.fetchall()]
+        await self._log_and_execute(query, params)
+        return self._cur.lastrowid

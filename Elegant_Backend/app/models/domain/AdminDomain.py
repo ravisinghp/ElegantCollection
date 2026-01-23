@@ -42,7 +42,7 @@ class UpdatePoCommentRequest(BaseModel):
 #Scheduler Information from frontend it coming
 class SchedulerRequest(BaseModel):
     user_id:int
-    date: date
+    #date: date
     days: List[str]
     hour: int
     minute: int

@@ -818,36 +818,37 @@ async def insert_folder_mapping_repo(
 
 #Save the Scheduler details in sd task master table in db 
 async def save_schedule(
-        request,
-        schedule_date,
-        days: str,
-        schedule_time,
-        created_by: int
-    ) -> bool:
+    request,
+    days: str,
+    schedule_time,
+    created_by: int
+) -> bool:
 
-        query = """
-            INSERT INTO sd_task_master_table
-            (date,day, time, created_by)
-            VALUES (%s,%s, %s, %s)
-        """
+    if not isinstance(schedule_time, datetime):
+        raise ValueError("schedule_time must be datetime")
 
-        try:
-            async with request.app.state.pool.acquire() as conn:
-                async with conn.cursor() as cursor:
-                    await cursor.execute(
-                        query,
-                        (
-                            schedule_date,   # DATE
-                            days,            # VARCHAR
-                            schedule_time,   # TIMESTAMP (datetime object)
-                            created_by
-                        )
+    query = """
+        INSERT INTO sd_task_master_table
+        (day, time, created_by)
+        VALUES (%s, %s, %s)
+    """
+
+    try:
+        async with request.app.state.pool.acquire() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute(
+                    query,
+                    (
+                        days,
+                        schedule_time,
+                        created_by
                     )
-                    await conn.commit()
-                    return cursor.rowcount > 0
+                )
+                await conn.commit()
+                return cursor.rowcount > 0
 
-        except Exception as e:
-            raise Exception(f"DB error while inserting scheduler: {str(e)}")
+    except Exception as e:
+        raise Exception(f"DB error while inserting scheduler: {str(e)}")
 
 #---------------------Get Active Schedule From task_sd_master_table-------------
 async def get_active_schedule(request):

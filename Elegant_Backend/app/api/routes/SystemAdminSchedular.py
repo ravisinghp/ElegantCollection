@@ -13,7 +13,7 @@ async def save_schedule(
     request: Request,
 ):
     try:
-        if not payload.date or not payload.days:
+        if not payload.days:
             raise ValueError("Invalid scheduler payload")
 
 

@@ -2,15 +2,43 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from app.services import usersmailservice 
 from app.db.repositories import UserRepo
 import asyncio
-from datetime import date,datetime,time
+from datetime import date,datetime,time,timedelta
 from fastapi import Request
 from app.db.repositories.mails import MailsRepository
 #from app.main import app  # import your FastAPI app instance
 from app.api.routes.users import get_valid_outlook_token
 from asyncmy.cursors import DictCursor
 
+WEEKDAY_MAP = {
+    "mon": 0, "monday": 0,
+    "tue": 1, "tues": 1, "tuesday": 1,
+    "wed": 2, "wednesday": 2,
+    "thu": 3, "thurs": 3, "thursday": 3,
+    "fri": 4, "friday": 4,
+    "sat": 5, "saturday": 5,
+    "sun": 6, "sunday": 6,
+}
+#---------------Getting date of selected day--------------------
+def get_selected_weekday_date(day_name: str) -> date:
+    if not day_name:
+        raise ValueError("Day name is empty")
+
+    key = day_name.lower().strip()
+
+    if key not in WEEKDAY_MAP:
+        raise ValueError(f"Invalid weekday received: {day_name}")
+
+    today = date.today()
+    target_weekday = WEEKDAY_MAP[key]
+
+    days_ahead = target_weekday - today.weekday()
+    if days_ahead < 0:
+        days_ahead += 7
+
+    return today + timedelta(days=days_ahead)
 
 
+#--------------------Background Scheduler----------------
 scheduler = BackgroundScheduler()
 def create_scheduler_request(app):
     scope = {
@@ -68,8 +96,13 @@ class SchedulerService:
         try:
             schedule = await UserRepo.get_active_schedule(request)
 
-            from_date = schedule["time"].date().isoformat()
-            to_date = schedule["time"].date().isoformat()
+            schedule_datetime = schedule["time"]  # TIMESTAMP from DB
+
+            to_date = schedule_datetime.date()
+            from_date = to_date - timedelta(days=1)
+
+            from_date = from_date.isoformat()
+            to_date = to_date.isoformat()
 
             users = await UserRepo.get_users_with_refresh_token(request)
             print(f"Users found: {len(users)}")
@@ -126,20 +159,24 @@ class SchedulerService:
     #------------------ save schedule details----------------------      
     async def save_schedule(request, payload, user_id: int):
         try:
-            # convert days list → string
             days_str = ",".join(payload.days)
 
-            #combine date + hour + minute → datetime
+            # Take first selected day (admin selects one day)
+            selected_day = payload.days[0]
+
+            # Convert day actual date
+            run_date = get_selected_weekday_date(selected_day)
+
+            # Combine date time
             schedule_time = datetime.combine(
-                payload.date,
+                run_date,
                 time(payload.hour, payload.minute)
             )
 
             return await UserRepo.save_schedule(
                 request=request,
-                schedule_date=payload.date,
                 days=days_str,
-                schedule_time=schedule_time,
+                schedule_time=schedule_time,  # TIMESTAMP
                 created_by=user_id
             )
 

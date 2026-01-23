@@ -88,7 +88,8 @@ class SharepointService:
         await fetch_children(folder_path)
         return folders
 
-    # ---------------- FETCH FILES ---------------- #
+
+    # ---------------- FETCH DRIVE FILES ---------------- #
     async def fetch_drive_files(
         self,
         access_token: str,
@@ -118,11 +119,11 @@ class SharepointService:
                     data = await resp.json()
 
             for item in data.get("value", []):
-                # ✅ FILE
+                # FILE
                 if "file" in item:
                     collected_files.append(item)
 
-                # ✅ FOLDER → RECURSE
+                # FOLDER → RECURSE
                 elif "folder" in item:
                     sub_path = f"{path}/{item['name']}" if path else item["name"]
                     await walk(sub_path)
@@ -147,126 +148,94 @@ class SharepointService:
 
         return collected_files
 
-    # ---------------- FETCH & SAVE FILES ---------------- #
+    # ---------------- UTILS ---------------- #
     @staticmethod
     def graph_datetime_to_mysql(dt_str: str | None) -> str | None:
         if not dt_str:
             return None
-        try:
-            if dt_str.endswith("Z"):
-                dt_str = dt_str.replace("Z", "+00:00")
-            return datetime.fromisoformat(dt_str).strftime("%Y-%m-%d %H:%M:%S")
-        except Exception:
-            return None
+        return datetime.fromisoformat(
+            dt_str.replace("Z", "+00:00")
+        ).strftime("%Y-%m-%d %H:%M:%S")
 
+    # ---------------- FILE HASHING ---------------- #
     @staticmethod
     async def generate_file_hash(file_bytes: bytes) -> str:
-        sha256 = hashlib.sha256()
-        sha256.update(file_bytes)
-        return sha256.hexdigest()
+        return hashlib.sha256(file_bytes).hexdigest()
 
+    # ---------------- TEXT EXTRACTION ---------------- #
     @staticmethod
-    def extract_text_from_bytes(
-        content_bytes: bytes,
-        filename: str,
-        content_type: str
-    ) -> str | None:
-
+    def extract_text_from_bytes(content_bytes: bytes, filename: str, content_type: str) -> str | None:
         try:
-            ext = (filename or "").lower()
-            ct = (content_type or "").lower()
+            ext = filename.lower()
+            ct = content_type.lower()
 
-            if ct.startswith("text/") or ext.endswith((".txt", ".md", ".csv", ".log")):
+            if ct.startswith("text/") or ext.endswith((".txt", ".csv", ".log", ".md")):
                 return content_bytes.decode("utf-8", errors="ignore")
 
             if ct == "application/pdf" or ext.endswith(".pdf"):
                 reader = PyPDF2.PdfReader(io.BytesIO(content_bytes))
-                return " ".join((p.extract_text() or "") for p in reader.pages)
+                return " ".join(p.extract_text() or "" for p in reader.pages)
 
             if ct in (
                 "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                "application/msword"
+                "application/msword",
             ) or ext.endswith((".docx", ".doc")):
-                document = docx.Document(io.BytesIO(content_bytes))
-                return " ".join(p.text for p in document.paragraphs)
+                doc = docx.Document(io.BytesIO(content_bytes))
+                return " ".join(p.text for p in doc.paragraphs)
 
             if ct in (
                 "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-                "application/vnd.ms-powerpoint"
+                "application/vnd.ms-powerpoint",
             ) or ext.endswith((".pptx", ".ppt")):
                 prs = Presentation(io.BytesIO(content_bytes))
                 return " ".join(
-                    shape.text
-                    for slide in prs.slides
-                    for shape in slide.shapes
-                    if hasattr(shape, "text")
+                    s.text for slide in prs.slides for s in slide.shapes if hasattr(s, "text")
                 )
         except Exception:
             return None
 
         return None
 
+    # ---------------- KEYWORD DETECTION ---------------- #
     @staticmethod
     def normalize_keyword(k: str) -> str:
         return re.sub(r"\s+", " ", k.strip().lower())
 
-    @staticmethod
-    async def openai_keyword_fallback(text: str, keywords: list[str]) -> list[str]:
-        prompt = f"""
-        Match text to keyword names ONLY if clearly present.
-        If unsure return [].
-
-        KEYWORDS:
-        {keywords}
-
-        TEXT:
-        {text}
-
-        Return JSON array only.
-        """
-        try:
-            resp = openai_client.chat.completions.create(
-                model="gpt-4o-mini",
-                temperature=0,
-                messages=[{"role": "user", "content": prompt}]
-            )
-            raw = resp.choices[0].message.content.strip()
-            match = re.search(r"\[.*\]", raw, re.DOTALL)
-            return json.loads(match.group()) if match else []
-        except Exception:
-            return []
-
+    # ---------------- KEYWORD DETECTION ---------------- #
     async def detect_keywords(self, text: str, db_keywords: list[str]):
-        if not text or not text.strip():
+        if not text:
             return [], None
 
         text_l = text.lower()
         keywords = [self.normalize_keyword(k) for k in db_keywords]
 
-        # ---------------- 1 EXACT MATCH ----------------
+        hits = []
+
         for k in keywords:
             if k in text_l:
-                return [k], "EXACT"
+                hits.append(k)
 
-        # ---------------- 2 REGEX MATCH ----------------
+        if hits:
+            return hits, "EXACT"
+
         for k in keywords:
-            pattern = r"\b" + re.escape(k).replace(r"\ ", r"\s*") + r"\b"
-            if re.search(pattern, text_l, re.IGNORECASE):
-                return [k], "REGEX"
+            pat = r"\b" + re.escape(k).replace(r"\ ", r"\s*") + r"\b"
+            if re.search(pat, text_l, re.IGNORECASE):
+                hits.append(k)
 
-        # ---------------- 3 FUZZY MATCH ----------------
+        if hits:
+            return hits, "REGEX"
+
         for k in keywords:
             if fuzz.partial_ratio(k, text_l) >= 85:
-                return [k], "FUZZY"
+                hits.append(k)
 
-        # ---------------- 4 OPENAI (LAST OPTION) ----------------
-        ai_hits = await self.openai_keyword_fallback(text, keywords)
-        if ai_hits:
-            return ai_hits, "OPENAI"
+        if hits:
+            return hits, "FUZZY"
 
         return [], None
 
-    # ------------------- Extraction ------------------- #
+    # ---------------- PO EXTRACTION ---------------- #
     PO_FIELD_NAMES = [
         "po_number",
         "customer_name",
@@ -282,139 +251,124 @@ class SharepointService:
         "description",
     ]
 
-    EMPTY_PO = {field: None for field in PO_FIELD_NAMES}
+    EMPTY_PO = {k: None for k in PO_FIELD_NAMES}
 
     
-    async def extract_po_fields_from_llm(text: str) -> dict:
-        if not text or not text.strip():
-            return SharepointService.EMPTY_PO
+    #--------------------Regex-----------------------------
+    PO_REGEX_PATTERNS = {
 
-        if not re.search(r"(po|order|\d{3,})", text, re.IGNORECASE):
-            return SharepointService.EMPTY_PO
+        # ---------------- PO NUMBER ----------------
+        "po_number": [
+            r"(?:po_number|po_no)\s*:\s*(PO[\w\-_/]+)",
+            r"(?:po\s*number|po\s*no|po#|p\.o\.|purchase\s*order|po)\s*[:\-]?\s*(PO[\w\-_/]+)",
+            r"\b(PO[\s\-_:]*[0-9]{1,}[A-Z0-9\/_.\-]*)",
+            r"(?:po\s*number|po\s*no|po#|p\.o\.|purchase\s*order)\s*[:\-]?\s*(PO[\- ]?[A-Z0-9\/_.\-]+)",
+            # --------- allow any prefix like JPO, SPO, etc. ----------
+            r"(?:po\s*number|po\s*no|po#|p\.o\.|purchase\s*order)\s*[:\-]?\s*([A-Z]{1,5}-\d{4,}-\d+)"
+        ],
 
-        prompt = f"""
-        Extract ONLY explicitly present values.
-        Return null if missing.
-        Never guess.
+        # ---------------- CUSTOMER NAME ----------------
+        "customer_name": [
+            r"(?:customer\s*name|customer|buyer|client)\s*[:\-]?\s*([A-Za-z][A-Za-z\s&\.]+?)"
+            r"(?=\s+(?:vendor|vendor_no|vendor_number|supplier|po|delivery|cancel|date|quantity|gold|color|description)\b|$)",
+            r"customer_name\s*:\s*([A-Za-z][A-Za-z\s&\.]+?)"
+            r"(?=\s+(?:vendor|vendor_no|vendor_number|supplier|po|delivery|cancel|date|quantity|gold|color|description)\b|$)"
+        ],
 
-        Return JSON with keys:
-        {SharepointService.PO_FIELD_NAMES}
+        # ---------------- VENDOR NUMBER ----------------
+        "vendor_number": [
+            r"(?:vendor_number|vendor_no)\s*:\s*([A-Za-z0-9\-_]+)",
+            r"(?:vendor\s*number|vendor\s*no|supplier\s*code)\s*[:\-]?\s*([A-Za-z0-9\-_]+)",
+            r"\bvendor\b\s*[:\-]?\s*([A-Za-z0-9\-_]+)"
+        ],
 
-        TEXT:
-        {text}
-        """
-        try:
-            resp = openai_client.chat.completions.create(
-                model="gpt-4o-mini",
-                temperature=0,
-                messages=[{"role": "user", "content": prompt}]
-            )
-            raw = resp.choices[0].message.content
-            match = re.search(r"\{{.*\}}", raw, re.DOTALL)
-            if not match:
-                return SharepointService.EMPTY_PO
+        # ---------------- PO DATE ----------------
+        "po_date": [
+            r"(?:po\s*date|order\s*date|date)\s*[:\-]?\s*(\d{4}-\d{1,2}-\d{1,2})",
+            r"po_date\s*:\s*(\d{4}-\d{2}-\d{2})",
+            # --------- allow 'Date:' label ----------
+            r"date\s*[:\-]?\s*(\d{4}-\d{2}-\d{2})"
+        ],
 
-            data = json.loads(match.group())
-            out = SharepointService.EMPTY_PO.copy()
-            for f in SharepointService.PO_FIELD_NAMES:
-                v = data.get(f)
-                out[f] = v if v not in ["", None, "null", "N/A"] else None
+        # ---------------- DELIVERY DATE ----------------
+        "delivery_date": [
+            r"(?:delivery\s*date|expected\s*delivery)\s*[:\-]?\s*(\d{4}-\d{2}-\d{2})",
+            r"delivery_date\s*:\s*(\d{4}-\d{2}-\d{2})",
+            # --------- allow inline in item row ----------
+            r"\b(\d{4}-\d{2}-\d{2})\b"
+        ],
 
-            return out if any(out.values()) else SharepointService.EMPTY_PO
+        # ---------------- CANCEL DATE ----------------
+        "cancel_date": [
+            r"(?:cancel\s*date|cancellation\s*date)\s*[:\-]?\s*(\d{4}-\d{1,2}-\d{1,2})",
+            r"cancel_date\s*:\s*(\d{4}-\d{2}-\d{2})"
+        ],
 
-        except Exception:
-            return SharepointService.EMPTY_PO
-        
+        # ---------------- EC STYLE NUMBER ----------------
+        "ec_style_number": [
+            r"(?:ec\s*style\s*number|ec\s*style|ec\s*no)\s*[:\-]?\s*([A-Z0-9\-]+)",
+            r"(?:ec_style_number|ec_style_no)\s*:\s*([A-Z0-9\-]+)"
+        ],
 
-    ITEM_REGEX = re.compile(
-        r"""
-        (?P<description>[A-Za-z\s\-]+?)
-        \s+
-        (?P<material>\d{2}K\s+Gold(?:\s*\+\s*Diamond)?)
-        \s+
-        (?P<quantity>\d+)
-        \s+
-        (?P<delivery_date>\d{4}-\d{2}-\d{2})
-        """,
-        re.IGNORECASE | re.VERBOSE
-    )
+        # ---------------- CUSTOMER STYLE NUMBER ----------------
+        "customer_style_number": [
+            r"(?:customer\s*style\s*number|customer\s*style|cust\s*style)\s*[:\-]?\s*([A-Z0-9\-]+)",
+            r"(?:customer_style_number|customer_style_no)\s*:\s*([A-Z0-9\-]+)"
+        ],
 
+        # ---------------- QUANTITY ----------------
+        "quantity": [
+            r"(?:qty|quantity|pcs|pieces)\s*[:\-]?\s*(\d+)",
+            r"\b(\d+)\s*(?:pcs|pieces|nos)\b"
+        ],
 
-    def extract_po_items(text: str):
-        items = []
+        # ---------------- GOLD KARAT ----------------
+        "gold_karat": [
+            r"(?:gold\s*karat|karat|kt|gold\s*purity)\s*[:\-]?\s*(\d{1,2})(?:\s*K)?",
+            r"\b(24|22|18|14|10)\s*K?\b"
+        ],
 
-        for m in SharepointService.ITEM_REGEX.finditer(text):
-            items.append({
-                "description": m.group("description").strip(),
-                "gold_karat": re.search(r"\d{2}", m.group("material")).group(),
-                "quantity": int(m.group("quantity")),
-                "delivery_date": m.group("delivery_date")
-            })
+        # ---------------- COLOR ----------------
+        "color": [
+            r"(?:color|colour)\s*[:\-]?\s*([A-Za-z]+(?:\s+[A-Za-z]+)*)"
+            r"(?=\s+(?:quantity|gold|karat|description|remarks|details)\s*:|$)",
+            r"color\s*:\s*([A-Za-z\s]+)"
+        ],
 
-        return items
+        # ---------------- DESCRIPTION ----------------
+        "description": [
+            r"(?:description|remarks|details|order\s*details)\s*[:\-]?\s*(.+)$",
+            r"description\s*:\s*(.+)$"
+            # --------- capture item description in item rows ----------
+            r"([A-Za-z\s]+)\s*-\s*([A-Za-z\s]+)"
+        ]
+    }
 
-
-    MANDATORY_FIELDS = ["po_number", "customer_name"]
-
-
-    async def extract_po_fields(text: str) -> dict:
-        regex_data = SharepointService.extract_po_fields_regex(text)
-
-        # Check if mandatory fields are present
-        if all(regex_data.get(f) for f in SharepointService.MANDATORY_FIELDS):
-            return regex_data
-
-        # Otherwise call LLM
-        llm_data = await SharepointService.extract_po_fields_from_llm(text)
-
-        # Merge: REGEX ALWAYS WINS
-        final = regex_data.copy()
-        for k, v in llm_data.items():
-            if final.get(k) is None and v:
-                final[k] = v
-
-        return final if any(final.values()) else SharepointService.EMPTY_PO
-
-    async def extract_po_header(text: str):
-        return await SharepointService.extract_po_fields(text)
-    
-
-    def normalize_attachment_text(text: str) -> str:
-        if not text:
-            return ""
-
-        # normalize OCR dashes
-        text = text.replace("\u2013", "-").replace("\u2014", "-")
-
-        # fix spaced hyphens in PO numbers and dates
-        text = re.sub(r"\s*-\s*", "-", text)
-
-        # fix broken multiline item descriptions
-        text = re.sub(r"(\w+)\s*-\s*\n\s*(\w+)", r"\1 - \2", text)
-
-        # fix broken multiline item descriptions
-        text = re.sub(r"([A-Za-z])\s*-\s*\n\s*([A-Za-z])", r"\1 - \2", text)
-
-        # CRITICAL: flatten remaining newlines
-        text = re.sub(r"\n", " ", text)
-
-        # normalize dates like 2025-07-06
-        text = re.sub(
-            r"(\d{4})-(\d{1,2})-(\d{1,2})",
-            lambda m: f"{m.group(1)}-{int(m.group(2)):02d}-{int(m.group(3)):02d}",
-            text,
-        )
-
-        # collapse extra spaces
-        text = re.sub(r"[ \t]+", " ", text)
-
-        # clean blank lines
-        text = re.sub(r"\n\s*\n", "\n", text)
-
+    @staticmethod
+    def normalize_text(text: str) -> str:
+        text = re.sub(r"\s+", " ", text.replace("\n", " "))
         return text.strip()
 
+    # ---------------- PO FIELD EXTRACTION ---------------- #
+    @staticmethod
+    def extract_po_fields_regex(text: str) -> dict:
+        out = SharepointService.EMPTY_PO.copy()
+        text = SharepointService.normalize_text(text)
 
-    # -------------------- fetch_and_save_sharepoint_files -------------------- #
+        for field, patterns in SharepointService.PO_REGEX_PATTERNS.items():
+            for pat in patterns:
+                m = re.search(pat, text, re.IGNORECASE)
+                if m:
+                    out[field] = m.group(1) if m.groups() else m.group(0)
+                    break
+
+        return out
+
+    async def extract_po_fields(self, text: str) -> dict:
+        regex_data = self.extract_po_fields_regex(text)
+        return regex_data if any(regex_data.values()) else self.EMPTY_PO
+
+    # ---------------- MAIN FLOW ---------------- #
     async def fetch_and_save_sharepoint_files(
         self,
         access_token: str,
@@ -423,113 +377,70 @@ class SharepointService:
         from_date: str,
         to_date: str,
     ):
-        headers = {"Authorization": f"Bearer {access_token}"}
-        saved_files = []
-        failed_files = []
+        saved, failed = [], []
 
-        try:
-            site_id = await self.get_site_id(access_token)
-            drive_id = await self.get_drive_id(access_token, site_id)
+        site_id = await self.get_site_id(access_token)
+        drive_id = await self.get_drive_id(access_token, site_id)
+        keywords = await self.sp_repo.fetch_keywords()
 
-            keywords = await self.sp_repo.fetch_keywords()
-            folders_to_process = folders or [""]
+        async with aiohttp.ClientSession(
+            headers={"Authorization": f"Bearer {access_token}"}
+        ) as session:
 
-            async with aiohttp.ClientSession(headers=headers) as session:
+            for folder in folders or [""]:
+                files = await self.fetch_drive_files(
+                    access_token, drive_id, folder, from_date, to_date
+                )
 
-                for folder_path in folders_to_process:
-                    files = await self.fetch_drive_files(
-                        access_token, drive_id, folder_path, from_date, to_date
-                    )
+                for f in files:
+                    try:
+                        url = f.get("@microsoft.graph.downloadUrl")
+                        if not url:
+                            continue
 
-                    for f in files:
-                        file_name = f.get("name")
-                        mime_type = f.get("file", {}).get("mimeType", "")
-                        download_url = f.get("@microsoft.graph.downloadUrl")
+                        async with session.get(url) as r:
+                            data = await r.read()
 
-                        try:
-                            if not download_url:
-                                continue
+                        h = await self.generate_file_hash(data)
+                        if await self.sp_repo.file_exists(user_id, h):
+                            continue
 
-                            # -------- Download file --------
-                            async with session.get(download_url) as resp:
-                                if resp.status != 200:
-                                    raise Exception("Download failed")
-                                file_bytes = await resp.read()
+                        text = self.extract_text_from_bytes(
+                            data, f["name"], f["file"]["mimeType"]
+                        )
+                        if not text:
+                            continue
 
-                            # -------- Hash & duplicate check --------
-                            file_hash = await self.generate_file_hash(file_bytes)
+                        kw, _ = await self.detect_keywords(text, keywords)
+                        if not kw:
+                            continue
 
-                            if await self.sp_repo.file_exists(user_id, file_hash):
-                                continue
+                        await self.sp_repo.save_sharepoint_file(
+                            user_id=user_id,
+                            file_name=f["name"],
+                            file_type=f["file"]["mimeType"],
+                            file_path=f["webUrl"],
+                            file_size=f.get("size", 0),
+                            folder_name=f.get("parentReference", {}).get("path", ""),
+                            uploaded_on=self.graph_datetime_to_mysql(f["createdDateTime"]),
+                            file_hash=h,
+                            created_by=user_id,
+                        )
 
-                            # -------- Extract text --------
-                            extracted_text = self.extract_text_from_bytes(file_bytes, file_name, mime_type)
-                            if not extracted_text:
-                                continue
-
-                            # -------- Keyword check --------
-                            matched_keywords, _ = await self.detect_keywords(extracted_text, keywords)
-                            if not matched_keywords:
-                                continue
-
-                            parent_path = f.get("parentReference", {}).get("path", "")
-
-                            # Remove everything before root:/
-                            if "/root:/" in parent_path:
-                                actual_folder = parent_path.split("/root:/", 1)[1]
-                            else:
-                                actual_folder = ""
-
-                            # Remove leading slash if exists
-                            actual_folder = actual_folder.lstrip("/")
-
-                            # -------- Save SharePoint file --------
-                            await self.sp_repo.save_sharepoint_file(
-                                user_id=user_id,
-                                file_name=file_name,
-                                file_type=mime_type,
-                                file_path=f.get("webUrl"),
-                                file_size=f.get("size", 0),
-                                folder_name=actual_folder,
-                                uploaded_on=self.graph_datetime_to_mysql(f.get("createdDateTime")),
-                                file_hash=file_hash,
-                                created_by=user_id,
+                        po = await self.extract_po_fields(text)
+                        if any(po.values()):
+                            await self.sp_repo.insert_po_details_from_sharepoint(
+                                user_id=user_id, po_data=po, folder_name=folder
                             )
 
-                            # -------- PO extraction --------
-                            normalized_text = SharepointService.normalize_attachment_text(extracted_text)
-                            po_header = await SharepointService.extract_po_header(normalized_text)
+                        saved.append(f["name"])
 
-                            if any(po_header.values()):
-                                items = SharepointService.extract_po_items(normalized_text)
+                    except Exception as e:
+                        failed.append({"file": f.get("name"), "error": str(e)})
 
-                                if not items:
-                                    await self.sp_repo.insert_po_details_from_sharepoint(
-                                        user_id=user_id,
-                                        po_data=po_header,
-                                        folder_name=folder_path,
-                                    )
-                                else:
-                                    for item in items:
-                                        merged = po_header | item
-                                        await self.sp_repo.insert_po_details_from_sharepoint(
-                                            user_id=user_id,
-                                            po_data=merged,
-                                            folder_name=folder_path,
-                                        )
-
-                            saved_files.append(file_name)
-
-                        except Exception as e:
-                            failed_files.append({"file": file_name, "reason": str(e)})
-
-            return {
-                "saved_count": len(saved_files),
-                "failed_count": len(failed_files),
-                "saved_files": saved_files,
-                "failed_files": failed_files,
-            }
-
-        except Exception as e:
-            logger.exception("SharePoint sync failed")
-            raise Exception("SharePoint sync failed") from e
+        return {
+            "saved_count": len(saved),
+            "failed_count": len(failed),
+            "saved_files": saved,
+            "failed_files": failed,
+        }

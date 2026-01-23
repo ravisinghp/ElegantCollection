@@ -461,18 +461,14 @@ PO_REGEX_PATTERNS = {
 
     # ---------------- QUANTITY ----------------
     "quantity": [
-        r"(?:delivery\s*date|delivery|expected\s*delivery)\s*[:\-]?\s*(\d{4}-\d{1,2}-\d{1,2})",
-        r"delivery_date\s*:\s*(\d{4}-\d{2}-\d{2})",
-        # --------- allow inline in item row ----------
-        r"\b(\d{4}-\d{2}-\d{2})\b"
+        r"(?:qty|quantity|pcs|pieces)\s*[:\-]?\s*(\d+)",
+        r"\b(\d+)\s*(?:pcs|pieces|nos)\b"
     ],
 
     # ---------------- GOLD KARAT ----------------
     "gold_karat": [
         r"(?:gold\s*karat|karat|kt|gold\s*purity)\s*[:\-]?\s*(\d{1,2})(?:\s*K)?",
-        r"gold_karat\s*:\s*(\d{1,2}K?)",
-        # --------- capture inline in item row ----------
-        r"\b(1[68]|22)K\b"
+        r"\b(24|22|18|14|10)\s*K?\b"
     ],
 
     # ---------------- COLOR ----------------
@@ -1645,60 +1641,181 @@ async def fetch_and_save_past_events_google(access_token: str, user_id: int, org
     return results
 
 #--------------------------data comparison logic start--------------------------#
-def normalize(value: str) -> str:
-    if not value:
+# -------------------------- NORMALIZATION -------------------------- #
+def normalize(value, field=None):
+    if value is None:
         return ""
-    return "".join(c for c in str(value).lower() if c.isalnum())
 
+    text = str(value).strip().lower()
+    field = (field or "").strip().lower()
+
+    # ------------------ GOLD KARAT / GOLD LOCK / KT ------------------ #
+    if field in ("gold_karat", "gold_lock", "kt"):
+        # unify 24, 24k, 24 kt, 24ct, 24 carat
+        text = re.sub(r"[^\d]", "", text)  # remove letters, spaces
+        return text
+
+    # ------------------ QUANTITY ------------------ #
+    if field == "quantity":
+        nums = re.findall(r"\d+", text)
+        return nums[0] if nums else ""
+
+    # ------------------ DATE FIELDS ------------------ #
+    if field in ("po_date", "delivery_date", "cancel_date"):
+        if isinstance(value, (date, datetime)):
+            return value.strftime("%Y-%m-%d")
+        text = re.sub(r"[/.]", "-", text)
+        m = re.search(r"\d{4}-\d{1,2}-\d{1,2}", text)
+        if m:
+            y, mth, d = m.group().split("-")
+            return f"{int(y):04d}-{int(mth):02d}-{int(d):02d}"
+        return ""
+
+    # ------------------ TEXT FIELDS ------------------ #
+    text = re.sub(r"[^\w\s]", " ", text)
+    text = re.sub(r"\s+", " ", text)
+
+    # handle common abbreviations
+    replacements = {
+        "pvt": "private",
+        "ltd": "limited",
+        "co": "company",
+        "corp": "corporation",
+    }
+    for k, v in replacements.items():
+        text = re.sub(rf"\b{k}\b", v, text)
+
+    return text.strip()
+
+
+# -------------------------- CUSTOMER NAME CLEANER -------------------------- #
+def clean_customer_name(name):
+    text = normalize(name, "customer_name")
+    # Remove common suffixes to avoid mismatch
+    text = re.sub(r"\b(private limited|private|limited|ltd|co|corporation)\b", "", text)
+    text = re.sub(r"\s+", " ", text)
+    return text.strip()
+
+
+# -------------------------- PO KEY -------------------------- #
 def build_po_key(po: dict) -> tuple:
     return (
-        normalize(po.get("customer_name")),
-        normalize(po.get("po_number")),
+        clean_customer_name(po.get("customer_name")),
+        normalize(po.get("po_number"), "po_number"),
     )
 
+
+# -------------------------- JSON SAFE -------------------------- #
 def make_json_safe(obj):
     if isinstance(obj, (date, datetime)):
         return obj.isoformat()
-
     if isinstance(obj, Decimal):
         return float(obj)
-
     if isinstance(obj, bytes):
-        # safest readable form for LLM
         try:
             return obj.decode("utf-8")
         except UnicodeDecodeError:
             return base64.b64encode(obj).decode("utf-8")
-
     return obj
 
+
+# -------------------------- CANDIDATE SYSTEM PO SEARCH -------------------------- #
 def candidate_system_pos(scanned, system_pos):
-    scanned_cust = normalize(scanned.get("customer_name"))
-    scanned_po = normalize(scanned.get("po_number"))
+    scanned_cust = clean_customer_name(scanned.get("customer_name"))
+    scanned_po = normalize(scanned.get("po_number"), "po_number")
 
     candidates = []
-
     for sys in system_pos:
         if not sys.get("customer_name") or not sys.get("po_number"):
             continue
 
-        cust_sim = fuzz.partial_ratio(
-            scanned_cust,
-            normalize(sys["customer_name"])
-        )
-
-        po_sim = fuzz.partial_ratio(
-            scanned_po,
-            normalize(sys["po_number"])
-        )
+        cust_sim = fuzz.partial_ratio(scanned_cust, clean_customer_name(sys["customer_name"]))
+        po_sim = fuzz.partial_ratio(scanned_po, normalize(sys["po_number"], "po_number"))
 
         if po_sim >= 70 or cust_sim >= 80:
             candidates.append(sys)
-
     return candidates[:5]
 
-async def generate_missing_po_report_service(repo, user_id: int):
 
+# -------------------------- FIELDS TO COMPARE -------------------------- #
+FIELDS_TO_COMPARE = [
+    "customer_name", "vendor_number", "po_date", "po_number",
+    "delivery_date", "cancel_date", "gold_lock", "ec_style_number",
+    "customer_style_number", "kt", "color", "quantity", "description"
+]
+
+
+def compare_po_fields(scanned, system):
+    mismatches = []
+    for field in FIELDS_TO_COMPARE:
+        s_val = scanned.get(field)
+        sys_val = system.get(field)
+        # ------------------ SPECIAL HANDLING ------------------ #
+        if field == "customer_name":
+            s_val = clean_customer_name(s_val)
+            sys_val = clean_customer_name(sys_val)
+        elif field in ("gold_karat", "gold_lock", "kt"):
+            s_val = normalize(s_val, "gold_karat")
+            sys_val = normalize(sys_val, "gold_karat")
+        else:
+            s_val = normalize(s_val, field)
+            sys_val = normalize(sys_val, field)
+
+        if s_val != sys_val:
+            mismatches.append({
+                "field": field,
+                "scanned": scanned.get(field),
+                "system": system.get(field)
+            })
+
+    return mismatches
+
+# -------------------------- LLM FALLBACK -------------------------- #
+async def llm_fallback_match(scanned_po, candidates):
+    safe_scanned = {k: make_json_safe(v) for k, v in scanned_po.items()}
+    safe_candidates = [{k: make_json_safe(v) for k, v in c.items()} for c in candidates]
+
+    prompt = f"""
+You are a PO reconciliation engine.
+
+Task: Match a scanned PO to one of the system POs.
+
+Rules:
+1. PO Number is strongest signal.
+2. Customer Name: handle abbreviations, typos, word order.
+3. Gold Karat / Gold Lock / Kt differences are ignored.
+4. Quantity units may differ.
+5. Date fields normalized to YYYY-MM-DD.
+6. Color & Description: ignore word order, minor typos.
+7. Respond ONLY in JSON:
+{{ "matched_index": number | null, "confidence": 0.0-1.0 }}
+
+Scanned PO:
+{json.dumps(safe_scanned, indent=2)}
+
+System PO Candidates:
+{json.dumps(safe_candidates, indent=2)}
+"""
+    resp = openai_client.chat.completions.create(
+        model="gpt-4.1-mini",
+        temperature=0,
+        messages=[{"role": "user", "content": prompt}]
+    )
+
+    raw = resp.choices[0].message.content.strip()
+    raw = re.sub(r"^```json|```$", "", raw, flags=re.IGNORECASE).strip()
+    match = re.search(r"\{.*\}", raw, re.DOTALL)
+    if not match:
+        return None
+    result = json.loads(match.group())
+    if result.get("matched_index") is None or result.get("confidence", 0) < 0.85:
+        return None
+    idx = result["matched_index"]
+    return candidates[idx] if 0 <= idx < len(candidates) else None
+
+
+# -------------------------- MAIN SERVICE -------------------------- #
+async def generate_missing_po_report_service(repo, user_id: int):
     scanned_pos = await repo.get_all_po_details()
     system_pos = await repo.get_all_system_po_details()
 
@@ -1717,27 +1834,26 @@ async def generate_missing_po_report_service(repo, user_id: int):
     llm_cache = {}
 
     for scanned in scanned_pos:
-
         if not scanned.get("customer_name") or not scanned.get("po_number"):
             continue
 
         scanned_key = build_po_key(scanned)
         system_po = system_map.get(scanned_key)
 
+        # ------------------ USE FUZZY / LLM MATCH ------------------ #
         if not system_po:
-            if scanned_key in llm_cache:
-                system_po = llm_cache[scanned_key]
-            else:
+            if scanned_key not in llm_cache:
                 candidates = candidate_system_pos(scanned, system_pos)
-                system_po = None
+                # Call LLM fallback if needed
                 if candidates:
                     system_po = await llm_fallback_match(scanned, candidates)
                 llm_cache[scanned_key] = system_po
+            else:
+                system_po = llm_cache[scanned_key]
 
+        # ------------------ MARK PO AS MISSING ------------------ #
         if not system_po:
-            exists = await repo.get_existing_po_missing(
-                po_det_id=scanned["po_det_id"]
-            )
+            exists = await repo.get_existing_po_missing(po_det_id=scanned["po_det_id"])
             if not exists:
                 await repo.insert_po_missing(
                     po_det_id=scanned["po_det_id"],
@@ -1746,19 +1862,18 @@ async def generate_missing_po_report_service(repo, user_id: int):
                     attribute="po_missing",
                     system_value="",
                     scanned_value=scanned.get("po_number"),
-                    comment="PO not found (rule + LLM)"
+                    comment="PO not found"
                 )
             continue
 
+        # ------------------ COMPARE FIELDS ------------------ #
         mismatches = compare_po_fields(scanned, system_po)
-
-        for mismatch in mismatches:
+        for m in mismatches:
             key = (
                 scanned["po_det_id"],
                 system_po["system_po_id"],
-                mismatch["field"]
+                m["field"]
             )
-
             if key in existing_keys:
                 continue
 
@@ -1766,141 +1881,15 @@ async def generate_missing_po_report_service(repo, user_id: int):
                 po_det_id=scanned["po_det_id"],
                 user_id=user_id,
                 system_po_id=system_po["system_po_id"],
-                field=mismatch["field"],
-                system_value=str(mismatch["system"]),
-                scanned_value=str(mismatch["scanned"]),
-                comment=f"{mismatch['field']} mismatch"
+                field=m["field"],
+                system_value=str(m["system"]),
+                scanned_value=str(m["scanned"]),
+                comment=f"{m['field']} mismatch"
             )
-
             existing_keys.add(key)
 
     return {
         "status": "success",
         "message": "PO missing & mismatch report generated successfully"
     }
-
-
-async def llm_fallback_match(scanned_po, candidates):
-
-    safe_candidates = [
-        {k: make_json_safe(v) for k, v in c.items()}
-        for c in candidates
-    ]
-
-    prompt = f"""
-Match scanned PO to ONE of the following system POs.
-
-Scanned:
-PO Number: {scanned_po.get("po_number")}
-Customer Name: {scanned_po.get("customer_name")}
-
-System Candidates:
-{json.dumps(safe_candidates, indent=2)}
-
-Respond ONLY with valid JSON. No explanation. No markdown.
-
-JSON format:
-{{ "matched_index": number | null, "confidence": 0.0-1.0 }}
-"""
-
-    resp = openai_client.chat.completions.create(
-        model="gpt-4.1-mini",
-        temperature=0,
-        messages=[{"role": "user", "content": prompt}]
-    )
-
-    raw = resp.choices[0].message.content.strip()
-
-    if not raw:
-        return None
-
-    # ---- CLEAN COMMON LLM FORMATTING ----
-    # remove ```json ``` wrappers
-    raw = re.sub(r"^```json|```$", "", raw, flags=re.IGNORECASE).strip()
-
-    # extract first JSON object if text is mixed
-    match = re.search(r"\{.*\}", raw, re.DOTALL)
-    if not match:
-        return None
-
-    try:
-        result = json.loads(match.group())
-    except json.JSONDecodeError:
-        return None
-
-    if (
-        result.get("matched_index") is not None
-        and isinstance(result.get("confidence"), (int, float))
-        and result["confidence"] >= 0.85
-    ):
-        idx = result["matched_index"]
-        if 0 <= idx < len(candidates):
-            return candidates[idx]
-
-    return None
-
-
-async def llm_po_match(scanned, system):
-
-    prompt = f"""
-Determine if these two POs refer to the SAME purchase order.
-
-Scanned:
-PO Number: {scanned.get("po_number")}
-Customer Name: {scanned.get("customer_name")}
-
-System:
-PO Number: {system.get("po_number")}
-Customer Name: {system.get("customer_name")}
-
-Rules:
-- Ignore case, punctuation, spacing
-- Allow abbreviations & short forms
-- PO number is strongest signal
-
-Respond ONLY in JSON:
-{{ "match": true/false, "confidence": 0.0-1.0 }}
-"""
-
-    response = openai_client.chat.completions.create(
-        model="gpt-4.1-mini",
-        temperature=0,
-        messages=[
-            {"role": "system", "content": "You are a PO reconciliation engine."},
-            {"role": "user", "content": prompt}
-        ]
-    )
-
-    return json.loads(response.choices[0].message.content)
-
-
-FIELDS_TO_COMPARE = [
-    "vendor_number",
-    "po_date",
-    "delivery_date",
-    "cancel_date",
-    "ec_style_number",
-    "customer_style_number",
-    "quantity",
-    "gold_karat",
-    "color",
-    "description"
-]
-
-def compare_po_fields(scanned, system):
-
-    mismatches = []
-
-    for field in FIELDS_TO_COMPARE:
-        scanned_val = scanned.get(field)
-        system_val = system.get(field)
-
-        if normalize(scanned_val) != normalize(system_val):
-            mismatches.append({
-                "field": field,
-                "scanned": scanned_val,
-                "system": system_val
-            })
-
-    return mismatches
 # --------------------------data comparison logic end--------------------------#

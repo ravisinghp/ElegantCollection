@@ -428,8 +428,8 @@ class SharepointRepo(BaseRepository):
                 ON sf.user_id = pd.user_id
             LEFT JOIN users_master u
                 ON u.user_id = md.user_id
-            WHERE pm.po_det_id IS NULL
-            AND mm.po_det_id IS NULL
+            WHERE pm.sharepoint_po_det_id IS NULL
+            AND mm.sharepoint_po_det_id IS NULL
         """
 
         params = []
@@ -564,3 +564,127 @@ class SharepointRepo(BaseRepository):
 
         except Exception as e:
             return []
+        
+        
+    #Adding and Update comment for po missing  from UI
+    async def save_sharepoint_po_missing_comment(
+        sharepoint_po_missing_id: int,
+        comment: str,
+        request: Request
+    ) -> bool:
+
+        query = """
+            UPDATE sharepoint_po_missing_report
+            SET comment = %s
+            WHERE sharepoint_po_missing_id = %s
+            AND active = 1
+        """
+
+        async with request.app.state.pool.acquire() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute(query, (comment, sharepoint_po_missing_id))
+                await conn.commit()
+                return cursor.rowcount > 0
+
+
+    #Adding and Update comment for po mismatch from UI
+    async def save_sharepoint_po_mismatch_comment(
+        sharepoint_po_mismatch_id: int,
+        comment: str,
+        request: Request
+    ) -> bool:
+
+        query = """
+            UPDATE sharepoint_po_mismatch_report
+            SET comment = %s
+            WHERE sharepoint_po_mismatch_id = %s
+            AND active = 1
+        """
+
+        async with request.app.state.pool.acquire() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute(query, (comment, sharepoint_po_mismatch_id))
+                await conn.commit()
+                return cursor.rowcount > 0
+
+
+
+    #For Fetching the missing PO comment ON UI 
+    async def fetch_sharepoint_missing_po_comment(
+            sharepoint_po_missing_id: int,
+            request: Request
+        ) -> str | None:
+
+            query = """
+                SELECT comment
+                FROM sharepoint_po_missing_report
+                WHERE sharepoint_po_missing_id = %s
+                AND active = 1
+            """
+
+            async with request.app.state.pool.acquire() as conn:
+                async with conn.cursor() as cursor:
+                    await cursor.execute(query, (sharepoint_po_missing_id,))
+                    row = await cursor.fetchone()
+                    return row[0] if row else None  
+                
+
+
+    #For Fetching the Mismatch PO comment ON UI 
+    async def fetch_sharepoint_mismatch_po_comment(
+            sharepoint_po_mismatch_id: int,
+            request: Request
+        ) -> str | None:
+
+            query = """
+                SELECT comment
+                FROM sharepoint_po_mismatch_report
+                WHERE sharepoint_po_mismatch_id = %s
+                AND active = 1
+            """
+
+            async with request.app.state.pool.acquire() as conn:
+                async with conn.cursor() as cursor:
+                    await cursor.execute(query, (sharepoint_po_mismatch_id,))
+                    row = await cursor.fetchone()
+                    return row[0] if row else None
+
+
+    #For Ignoring the Missing PO in Next Sync On UI
+    async def ignore_sharepoint_missing_po(
+            sharepoint_po_missing_id: int,
+            request: Request
+        ) -> bool:
+
+            query = """
+                UPDATE sharepoint_po_missing_report
+                SET active = 0
+                WHERE sharepoint_po_missing_id = %s
+                AND active = 1
+            """
+
+            async with request.app.state.pool.acquire() as conn:
+                async with conn.cursor() as cursor:
+                    await cursor.execute(query, (sharepoint_po_missing_id,))
+                    await conn.commit()
+                    return cursor.rowcount > 0
+                
+    
+    #For Ignoring the Mismatch PO in Next Sync On UI         
+    async def ignore_sharepoint_mismatch_po(
+            sharepoint_po_mismatch_id: int,
+            request: Request
+        ) -> bool:
+
+            query = """
+                UPDATE sharepoint_po_mismatch_report
+                SET active = 0
+                WHERE sharepoint_po_mismatch_id = %s
+                AND active = 1
+            """
+
+            async with request.app.state.pool.acquire() as conn:
+                async with conn.cursor() as cursor:
+                    await cursor.execute(query, (sharepoint_po_mismatch_id,))
+                    await conn.commit()
+                    return cursor.rowcount > 0

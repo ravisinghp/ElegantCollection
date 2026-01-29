@@ -40,6 +40,11 @@ class UpdatePoCommentRequest(BaseModel):
     po_missing_id: Optional[int] = None
     po_mismatch_id: Optional[int] = None
     comment: str
+    
+class UpdateSharepointPoCommentRequest(BaseModel):
+    sharepoint_po_missing_id: Optional[int] = None
+    sharepoint_po_mismatch_id: Optional[int] = None
+    comment: str
 
 #Scheduler Information from frontend it coming
 class SchedulerRequest(BaseModel):

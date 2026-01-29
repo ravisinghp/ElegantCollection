@@ -11,7 +11,7 @@ from pptx import Presentation
 from rapidfuzz import fuzz
 from openai import OpenAI
 from decimal import Decimal
-from datetime import date, datetime
+from datetime import date, datetime,timedelta,timezone
 from fastapi import APIRouter, HTTPException,Query,Request
 import pandas as pd
 # Load env
@@ -185,16 +185,45 @@ class SharepointService:
 
         # ---------- DATE FILTER ----------
         if from_date or to_date:
-            from_dt = datetime.fromisoformat(from_date) if from_date else None
-            to_dt = datetime.fromisoformat(to_date) if to_date else None
+            # from_dt = datetime.fromisoformat(from_date) if from_date else None
+            # to_dt = datetime.fromisoformat(to_date) if to_date else None
+            from_dt = (
+                datetime.fromisoformat(from_date).replace(tzinfo=timezone.utc)
+                if from_date else None
+            )
+
+            to_dt = (
+                datetime.fromisoformat(to_date)
+                .replace(tzinfo=timezone.utc)
+                + timedelta(days=1)
+                if to_date else None
+            )
 
             filtered = []
             for f in collected_files:
-                created_dt = datetime.fromisoformat(f["createdDateTime"][:19])
+                created_str = f.get("createdDateTime")
+
+                if not created_str:
+                    logger.warning("File missing createdDateTime: %s", f.get("id"))
+                    continue
+
+                try:
+                    created_dt = datetime.fromisoformat(
+                        created_str.replace("Z", "+00:00")
+                    )
+                except Exception as e:
+                    logger.warning(
+                        "Invalid createdDateTime (%s) for file %s",
+                        created_str,
+                        f.get("id"),
+                    )
+                    continue
+
                 if from_dt and created_dt < from_dt:
                     continue
-                if to_dt and created_dt > to_dt:
+                if to_dt and created_dt >= to_dt:  # >= is intentional
                     continue
+
                 filtered.append(f)
 
             collected_files = filtered
@@ -318,7 +347,8 @@ class SharepointService:
             r"\b(PO[\s\-_:]*[0-9]{1,}[A-Z0-9\/_.\-]*)",
             r"(?:po\s*number|po\s*no|po#|p\.o\.|purchase\s*order)\s*[:\-]?\s*(PO[\- ]?[A-Z0-9\/_.\-]+)",
             # --------- allow any prefix like JPO, SPO, etc. ----------
-            r"(?:po\s*number|po\s*no|po#|p\.o\.|purchase\s*order)\s*[:\-]?\s*([A-Z]{1,5}-\d{4,}-\d+)"
+            r"(?:po\s*number|po\s*no|po#|p\.o\.|purchase\s*order)\s*[:\-]?\s*([A-Z]{1,5}-\d{4,}-\d+)",
+            r"(?:p\.o\.\s*number|po\s*number|purchase\s*order)\s*[:\-]?\s*([A-Z]{1,6}-PO-\d{4}-\d+)"
         ],
 
         # ---------------- CUSTOMER NAME ----------------
@@ -631,8 +661,8 @@ class SharepointService:
                         async with session.get(url) as r:
                             data = await r.read()
 
-                        h = await self.generate_file_hash(data)
-                        if await self.sp_repo.file_exists(user_id, h):
+                        file_hash = await self.generate_file_hash(data)
+                        if await self.sp_repo.file_exists(user_id, file_hash):
                             continue
 
                         text = self.extract_text_from_bytes(
@@ -641,14 +671,15 @@ class SharepointService:
                         if not text:
                             continue
 
-                        kw, _ = await self.detect_keywords(text, keywords)
-                        if not kw:
+                        matched_keywords, _ = await self.detect_keywords(text, keywords)
+                        if not matched_keywords:
                             continue
-                        
+
                         parent_path = f.get("parentReference", {}).get("path", "")
                         folder_name = self.extract_relative_folder_path(parent_path)
 
-                        await self.sp_repo.save_sharepoint_file(
+                        # ---------------- Save SharePoint File ----------------
+                        file_id = await self.sp_repo.save_sharepoint_file(
                             user_id=user_id,
                             file_name=f["name"],
                             file_type=f["file"]["mimeType"],
@@ -656,33 +687,73 @@ class SharepointService:
                             file_size=f.get("size", 0),
                             folder_name=folder_name,
                             uploaded_on=self.graph_datetime_to_mysql(f["createdDateTime"]),
-                            file_hash=h,
+                            file_hash=file_hash,
                             created_by=user_id,
                         )
 
-                        po = await self.extract_po_fields(text)
-                        if any(po.values()):
-                            await self.sp_repo.insert_sharepoint_po_details(
-                                user_id=user_id,
-                                po_number=po.get("po_number"),
-                                customer_name=po.get("customer_name"),
-                                vendor_number=po.get("vendor_number"),
-                                po_date=self.normalize_po_date_ddmmyyyy(po.get("po_date")),
-                                delivery_date=po.get("delivery_date"),
-                                cancel_date=self.normalize_po_date_ddmmyyyy(po.get("cancel_date")),
-                                gold_karat=po.get("gold_karat"),
-                                ec_style_number=po.get("ec_style_number"),
-                                customer_style_number=po.get("customer_style_number"),
-                                color=po.get("color"),
-                                quantity=po.get("quantity"),
-                                description=po.get("description"),
-                                created_by=user_id,
-                            )
+                        # ---------------- PO Extraction ----------------
+                        header = await self.extract_po_fields(text)
+                        items = self.extract_po_items(text)
+
+                        # ---------- HEADER ONLY (Fallback) ----------
+                        if not items:
+                            if any(header.values()):
+                                await self.sp_repo.insert_sharepoint_po_details(
+                                    user_id=user_id,
+                                    po_number=header.get("po_number"),
+                                    customer_name=header.get("customer_name"),
+                                    vendor_number=header.get("vendor_number"),
+                                    po_date=self.normalize_po_date_ddmmyyyy(
+                                        header.get("po_date")
+                                    ),
+                                    delivery_date=header.get("delivery_date"),
+                                    cancel_date=self.normalize_po_date_ddmmyyyy(
+                                        header.get("cancel_date")
+                                    ),
+                                    gold_karat=header.get("gold_karat"),
+                                    ec_style_number=header.get("ec_style_number"),
+                                    customer_style_number=header.get("customer_style_number"),
+                                    color=header.get("color"),
+                                    quantity=header.get("quantity"),
+                                    description=header.get("description"),
+                                    created_by=user_id,
+                                )
+
+                        # ---------- MULTIPLE ITEM ROWS ----------
+                        else:
+                            for item in items:
+                                await self.sp_repo.insert_sharepoint_po_details(
+                                    user_id=user_id,
+                                    po_number=header.get("po_number"),
+                                    customer_name=header.get("customer_name"),
+                                    vendor_number=header.get("vendor_number"),
+                                    po_date=self.normalize_po_date_ddmmyyyy(
+                                        header.get("po_date")
+                                    ),
+                                    delivery_date=item.get("delivery_date"),
+                                    cancel_date=self.normalize_po_date_ddmmyyyy(
+                                        header.get("cancel_date")
+                                    ),
+                                    gold_karat=item.get("gold_karat"),
+                                    ec_style_number=header.get("ec_style_number"),
+                                    customer_style_number=header.get(
+                                        "customer_style_number"
+                                    ),
+                                    color=header.get("color"),
+                                    quantity=item.get("quantity"),
+                                    description=item.get("description"),
+                                    created_by=user_id,
+                                )
 
                         saved.append(f["name"])
 
                     except Exception as e:
-                        failed.append({"file": f.get("name"), "error": str(e)})
+                        failed.append(
+                            {
+                                "file": f.get("name"),
+                                "error": str(e),
+                            }
+                        )
 
         return {
             "saved_count": len(saved),
@@ -1032,3 +1103,63 @@ class SharepointService:
             return last_sync_data
         except Exception as e:
             raise Exception(f"Error fetching last sync data: {str(e)}")   
+        
+    #Adding and Update comment for po missing and po mismatch from UI
+    async def save_sharepoint_po_comment(
+        report_type: str,
+        record_id: int,
+        comment: str,
+        request: Request
+    ):
+        if report_type == "missing":
+            return await SharepointRepo.save_sharepoint_po_missing_comment(
+                record_id, comment, request
+            )
+
+        elif report_type == "mismatch":
+            return await SharepointRepo.save_sharepoint_po_mismatch_comment(
+                record_id, comment, request
+            )
+
+
+    #For Fetching the PO comment ON UI 
+    async def fetch_sharepoint_po_comment(
+            report_type: str,
+            record_id: int,
+            request: Request
+        ) -> str | None:
+
+            if report_type == "missing":
+                return await SharepointRepo.fetch_sharepoint_missing_po_comment(
+                    record_id, request
+                )
+
+            elif report_type == "mismatch":
+                return await SharepointRepo.fetch_sharepoint_mismatch_po_comment(
+                    record_id, request
+                )
+
+            else:
+                raise ValueError("Invalid report type")
+
+
+    #For Ignoring the PO in Next Sync On UI
+    async def ignore_sharepoint_po(
+            report_type: str,
+            record_id: int,
+            request: Request
+        ) -> bool:
+
+            if report_type == "missing":
+                return await SharepointRepo.ignore_sharepoint_missing_po(
+                    record_id, request
+                )
+
+            elif report_type == "mismatch":
+                return await SharepointRepo.ignore_sharepoint_mismatch_po(
+                    record_id, request
+                )
+
+            else:
+                raise ValueError("Invalid report type")
+            

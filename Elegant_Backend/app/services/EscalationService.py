@@ -69,61 +69,7 @@ class EscalationService:
     #         body=body
     #     )
 
-    # for dynamic email send ------------------------------------- all data is sending to all
-    #  # FIXED
-    # async def _send_emails(self, missing, mismatch):
-    #     EMPLOYEE_DAYS = 3
-    #     has_valid_data = False
-    #     user_ids = set()
-
-    #     body = "ESCALATION REPORT\n\n"
-
-    #     if missing:
-    #         body += "MISSING PO\n"
-    #         for r in missing:
-    #             if r.get("working_days") != EMPLOYEE_DAYS:
-    #                 continue
-
-    #             has_valid_data = True
-    #             user_ids.add(r["user_id"])
-
-    #             body += (
-    #                 f"User ID: {r['user_id']} | "
-    #                 f"Level: {r['escalation_level']} | "
-    #                 f"Working Days: {r['working_days']}\n"
-    #             )
-
-    #     if mismatch:
-    #         body += "\nMISMATCH PO\n"
-    #         for r in mismatch:
-    #             if r.get("working_days") != EMPLOYEE_DAYS:
-    #                 continue
-
-    #             has_valid_data = True
-    #             user_ids.add(r["user_id"])
-
-    #             body += (
-    #                 f"User ID: {r['user_id']} | "
-    #                 f"Level: {r['escalation_level']} | "
-    #                 f"Working Days: {r['working_days']}\n"
-    #             )
-
-    #     # No valid escalation → no email
-    #     if not has_valid_data:
-    #         return
-
-    #     # Fetch emails from DB
-    #     recipients = await self.repo.get_user_emails(list(user_ids))
-
-    #     if not recipients:
-    #         return
-
-    #     send_employee_email(
-    #         subject="PO Escalation Alert",
-    #         body=body,
-    #         recipients=recipients
-    #     )
-
+   
 
 # fixed the email are send group by  this is working proper
 # ----------------------------------------------------------------------

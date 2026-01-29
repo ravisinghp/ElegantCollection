@@ -44,6 +44,7 @@ async def download_missing_po_report(
             request=request,
             user_id =payload.user_id,
             role_id=payload.role_id,
+            selected_ids=payload.selected_ids,
             format=format
         )
 
@@ -68,11 +69,13 @@ async def download_mismatch_po_report(
 ):
     try:
         file_stream, filename, media_type = await UserService.download_mismatch_po_report(
-            request,
+            request=request,
             user_id=payload.user_id,
             role_id=payload.role_id,
+            selected_ids=payload.selected_ids,
             format=format
         )
+
 
         return StreamingResponse(
             file_stream,

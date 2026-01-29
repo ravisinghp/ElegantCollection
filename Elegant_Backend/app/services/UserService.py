@@ -2,7 +2,7 @@
 from starlette.requests import Request
 from fastapi import HTTPException
 from app.db.repositories import UserRepo
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from collections import Counter
 import io
 import pandas as pd
@@ -37,9 +37,11 @@ async def download_missing_po_report(
     request: Request,
     user_id: int,
     role_id: int,
-    format: str
+    format: str,
+    selected_ids: Optional[List[int]] = None
 ):
-    data = await UserRepo.download_missing_po_report(request, user_id, role_id)
+    selected_ids = selected_ids or []
+    data = await UserRepo.download_missing_po_report(request, user_id, role_id, selected_ids)
 
     if not data:
         raise HTTPException(status_code=404, detail="No missing PO data available")
@@ -71,9 +73,11 @@ async def download_mismatch_po_report(
     request: Request,
     user_id: int,
     role_id: int,
-    format: str
+    format: str,
+    selected_ids: Optional[List[int]] = None
 ):
-    data = await UserRepo.download_mismatch_po_report(request, user_id, role_id)
+    selected_ids = selected_ids or []
+    data = await UserRepo.download_mismatch_po_report(request, user_id, role_id, selected_ids)
 
     if not data:
         raise HTTPException(status_code=404, detail="No mismatch PO data available")

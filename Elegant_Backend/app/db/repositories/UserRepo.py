@@ -55,29 +55,41 @@ WHERE
         
         
 #For Downloading the PO Missing Report     
-async def download_missing_po_report(request: Request, user_id: int, role_id: int):
-    base_query  = """
+async def download_missing_po_report(
+    request: Request,
+    user_id: int,
+    role_id: int,
+    selected_ids: List[int]
+):
+    base_query = """
         SELECT
             COALESCE(pd.po_number, s.po_number) AS po_number,
             COALESCE(pd.po_date, s.po_date) AS po_date,
             COALESCE(pd.vendor_number, s.vendor_number) AS vendor_code,
-            COALESCE(pd.customer_name, s.customer_name) AS customer_name
+            COALESCE(pd.customer_name, s.customer_name) AS customer_name,
+            pm.po_missing_id
         FROM
             po_missing_report pm
-        LEFT JOIN po_details pd ON
-            pd.po_det_id = pm.po_det_id
-        LEFT JOIN system_po_details s ON
-            s.system_po_id = pm.system_po_id
+        LEFT JOIN po_details pd
+            ON pd.po_det_id = pm.po_det_id
+        LEFT JOIN system_po_details s
+            ON s.system_po_id = pm.system_po_id
         WHERE
             pm.active = 1
     """
-    
+
     params = []
-    
+
     if role_id == 1:
         base_query += " AND pm.user_id = %s"
         params.append(user_id)
-        
+
+    #  Safe IN clause
+    if selected_ids:
+        placeholders = ",".join(["%s"] * len(selected_ids))
+        base_query += f" AND pm.po_missing_id IN ({placeholders})"
+        params.extend(selected_ids)
+
     base_query += " ORDER BY pm.po_missing_id DESC"
 
     async with request.app.state.pool.acquire() as conn:
@@ -91,7 +103,7 @@ async def download_missing_po_report(request: Request, user_id: int, role_id: in
 
 
    #For Doanloading the PO Mismatch Report   
-async def download_mismatch_po_report(request: Request, user_id: int, role_id: int):
+async def download_mismatch_po_report(request: Request, user_id: int, role_id: int, selected_ids: List[int]):
     base_query  = """
         SELECT
             pd.po_number,
@@ -109,7 +121,8 @@ async def download_mismatch_po_report(request: Request, user_id: int, role_id: i
             mm.mismatch_attribute,
             mm.scanned_value,
             mm.system_value,
-            mm.comment
+            mm.comment,
+            mm.po_mismatch_id
         FROM po_mismatch_report mm
         JOIN po_details pd ON pd.po_det_id = mm.po_det_id
         WHERE mm.active = 1
@@ -120,6 +133,12 @@ async def download_mismatch_po_report(request: Request, user_id: int, role_id: i
     if role_id == 1:
         base_query += " AND mm.user_id = %s"
         params.append(user_id)
+
+    #  ADD THIS
+    if selected_ids:
+        placeholders = ",".join(["%s"] * len(selected_ids))
+        base_query += f" AND mm.po_mismatch_id IN ({placeholders})"
+        params.extend(selected_ids)
         
     base_query += " ORDER BY mm.po_mismatch_id DESC"
     

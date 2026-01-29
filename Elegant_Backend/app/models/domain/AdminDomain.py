@@ -3,6 +3,8 @@ from datetime import datetime
 from pydantic import BaseModel, Field, ConfigDict
 from typing import Optional, List, Dict
 from datetime import date
+from typing import List, Optional
+
 
 
 class UserInDB(BaseModel):
@@ -49,9 +51,13 @@ class SchedulerRequest(BaseModel):
 
 
 class DownloadMissingMismatchRequest(BaseModel):
+    user_id: int
+    role_id: int
+    selected_ids: Optional[List[int]] = None
+
+class DownloadSharepointMissingMismatchRequest(BaseModel):
     user_id : int
     role_id : int
-
 class GenerateMissingPoReport(BaseModel):
     user_id : int
     
@@ -59,7 +65,9 @@ class FetchMissingMismatchReport(BaseModel):
     user_id : int
     role_id:int
    
-  
+class SharepointFetchMissingMismatchReport(BaseModel):
+    user_id : int
+    role_id:int
 class FolderMappingRequest(BaseModel):
     user_id: int
     folder_name: str

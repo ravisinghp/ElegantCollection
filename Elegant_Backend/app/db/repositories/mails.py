@@ -570,7 +570,67 @@ class MailsRepository(BaseRepository):
 
         return int(last_id)
 
-    
-    
+    # -----------------Checking existence of missing and mismatched POs-------------------- #
+    async def mismatch_exists(
+        self,
+        user_id: int,
+        po_det_id: int,
+        system_po_id: int,
+        mismatch_attribute: str,
+        scanned_value: str,
+        system_value: str
+    ):
+        await self._log_and_execute(
+            """
+            SELECT 1
+            FROM po_mismatch_report
+            WHERE user_id = %s
+            AND po_det_id = %s
+            AND system_po_id = %s
+            AND mismatch_attribute = %s
+            AND scanned_value = %s
+            AND system_value = %s
+            LIMIT 1
+            """,
+            [
+                user_id,
+                po_det_id,
+                system_po_id,
+                mismatch_attribute,
+                scanned_value,
+                system_value
+            ]
+        )
+        return await self._cur.fetchone()
 
-        
+    async def po_missing_exists(
+        self,
+        user_id: int,
+        po_det_id: int | None,
+        system_po_id: int | None,
+        mismatch_attribute: str,
+        scanned_value: str,
+        system_value: str
+    ):
+        await self._log_and_execute(
+            """
+            SELECT 1
+            FROM po_missing_report
+            WHERE user_id = %s
+            AND po_det_id <=> %s
+            AND system_po_id <=> %s
+            AND mismatch_attribute = %s
+            AND scanned_value = %s
+            AND system_value = %s
+            LIMIT 1
+            """,
+            [
+                user_id,
+                po_det_id,
+                system_po_id,
+                mismatch_attribute,
+                scanned_value,
+                system_value
+            ]
+        )
+        return await self._cur.fetchone()

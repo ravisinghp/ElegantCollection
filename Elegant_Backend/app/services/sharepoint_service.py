@@ -415,13 +415,24 @@ class SharepointService:
                         if not kw:
                             continue
 
+                        parent_path = f.get("parentReference", {}).get("path", "")
+
+                        # Remove everything before root:/
+                        if "/root:/" in parent_path:
+                            actual_folder = parent_path.split("/root:/", 1)[1]
+                        else:
+                            actual_folder = ""
+
+                        # Remove leading slash if exists
+                        actual_folder = actual_folder.lstrip("/")
+
                         await self.sp_repo.save_sharepoint_file(
                             user_id=user_id,
                             file_name=f["name"],
                             file_type=f["file"]["mimeType"],
                             file_path=f["webUrl"],
                             file_size=f.get("size", 0),
-                            folder_name=f.get("parentReference", {}).get("path", ""),
+                            folder_name=actual_folder,
                             uploaded_on=self.graph_datetime_to_mysql(f["createdDateTime"]),
                             file_hash=h,
                             created_by=user_id,

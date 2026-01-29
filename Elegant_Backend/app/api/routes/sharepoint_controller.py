@@ -78,22 +78,62 @@ async def sync_sharepoint_files(
     sp_repo: SharepointRepo = Depends(get_repository(SharepointRepo)),
     mail_repo: MailsRepository = Depends(get_repository(MailsRepository)),
 ):
-    body = await request.json()
-    user_id = body.get("user_id")
-    folders = body.get("folders", [])  # list of folder paths
-    from_date = body.get("from_date")
-    to_date = body.get("to_date")
+    try:
+        body = await request.json()
 
-    if not all([user_id, from_date, to_date, folders]):
-        raise HTTPException(status_code=HTTP_400_BAD_REQUEST, detail="Missing required fields")
+        user_id = body.get("user_id")
+        folders = body.get("folders", [])  # list of folder paths
+        from_date = body.get("from_date")
+        to_date = body.get("to_date")
 
-    access_token = await get_valid_outlook_token(user_id, mail_repo)
-    service = SharepointService(sp_repo)
+        # -------- Validation --------
+        if not user_id:
+            raise HTTPException(
+                status_code=HTTP_400_BAD_REQUEST,
+                detail="user_id is required",
+            )
 
-    return await service.fetch_and_save_sharepoint_files(
-        access_token=access_token,
-        user_id=user_id,
-        folders=folders,
-        from_date=from_date,
-        to_date=to_date,
-    )
+        if not from_date or not to_date:
+            raise HTTPException(
+                status_code=HTTP_400_BAD_REQUEST,
+                detail="from_date and to_date are required",
+            )
+
+        if not folders:
+            raise HTTPException(
+                status_code=HTTP_400_BAD_REQUEST,
+                detail="folders list cannot be empty",
+            )
+
+        # -------- Token --------
+        access_token = await get_valid_outlook_token(user_id, mail_repo)
+        if not access_token:
+            raise HTTPException(
+                status_code=401,
+                detail="Unable to fetch valid access token",
+            )
+
+        service = SharepointService(sp_repo)
+
+        return await service.fetch_and_save_sharepoint_files(
+            access_token=access_token,
+            user_id=user_id,
+            folders=folders,
+            from_date=from_date,
+            to_date=to_date,
+        )
+
+    except HTTPException as e:
+        raise e
+
+    except ValueError:
+        raise HTTPException(
+            status_code=HTTP_400_BAD_REQUEST,
+            detail="Invalid JSON body",
+        )
+    except Exception as e:
+        logger.exception("Error while syncing SharePoint files")
+        raise HTTPException(
+            status_code=500,
+            detail="Internal server error while syncing SharePoint files",
+        )

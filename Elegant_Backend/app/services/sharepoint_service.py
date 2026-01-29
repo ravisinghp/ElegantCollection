@@ -644,6 +644,9 @@ class SharepointService:
                         kw, _ = await self.detect_keywords(text, keywords)
                         if not kw:
                             continue
+                        
+                        parent_path = f.get("parentReference", {}).get("path", "")
+                        folder_name = self.extract_relative_folder_path(parent_path)
 
                         await self.sp_repo.save_sharepoint_file(
                             user_id=user_id,
@@ -652,7 +655,6 @@ class SharepointService:
                             file_path=f["webUrl"],
                             file_size=f.get("size", 0),
                             folder_name=folder_name,
-                            folder_name=actual_folder,
                             uploaded_on=self.graph_datetime_to_mysql(f["createdDateTime"]),
                             file_hash=h,
                             created_by=user_id,
@@ -1029,7 +1031,4 @@ class SharepointService:
             last_sync_data = await SharepointRepo.get_last_sync_by_user_id(user_id,role_id,request)
             return last_sync_data
         except Exception as e:
-            raise Exception(f"Error fetching last sync data: {str(e)}")
-
-
-   
+            raise Exception(f"Error fetching last sync data: {str(e)}")   

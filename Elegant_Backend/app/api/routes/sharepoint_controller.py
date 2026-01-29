@@ -139,6 +139,20 @@ async def sync_sharepoint_files(
             from_date=from_date,
             to_date=to_date,
         )
+    except HTTPException as e:
+        raise e
+
+    except ValueError:
+        raise HTTPException(
+            status_code=HTTP_400_BAD_REQUEST,
+            detail="Invalid JSON body",
+        )
+    except Exception as e:
+        logger.exception("Error while syncing SharePoint files")
+        raise HTTPException(
+            status_code=500,
+            detail="Internal server error while syncing SharePoint files",
+        )
     
 # CONTROLLER ENDPOINT (IN SAME FILE)
 # ---------------------------------------------------------------------
@@ -243,21 +257,3 @@ async def get_last_sync_by_user_id(user_id: int,role_id: int,request: Request):
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
-
-
-
-    except HTTPException as e:
-        raise e
-
-    except ValueError:
-        raise HTTPException(
-            status_code=HTTP_400_BAD_REQUEST,
-            detail="Invalid JSON body",
-        )
-    except Exception as e:
-        logger.exception("Error while syncing SharePoint files")
-        raise HTTPException(
-            status_code=500,
-            detail="Internal server error while syncing SharePoint files",
-        )

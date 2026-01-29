@@ -7,6 +7,10 @@ from app.api.dependencies.database import get_repository
 from app.services.usersmailservice import get_valid_outlook_token
 import logging
 from app.models.schemas.sharepoint_schema import FolderRequestParams
+from fastapi.responses import JSONResponse
+from fastapi.encoders import jsonable_encoder
+from fastapi.responses import StreamingResponse
+from app.models.domain.AdminDomain import GenerateMissingPoReport,SharepointFetchMissingMismatchReport,DownloadSharepointMissingMismatchRequest
 
 
 router = APIRouter()
@@ -14,6 +18,19 @@ router = APIRouter()
 # Setup logger
 logger = logging.getLogger("sharepoint")
 logger.setLevel(logging.INFO)
+
+@router.get("/sharepoint_dashboard_card_data")
+async def get_sharepoint_dashboard_stats(request: Request,userId:int):
+    user_id = userId
+    if not user_id:
+        raise HTTPException(status_code=401, detail="User not authenticated")
+    try:
+        documents_analyzed = await SharepointService.get_documents_analyzed_by_user_id(user_id, request)
+        return {
+        "documents_analyzed": documents_analyzed,
+        }
+    except Exception as e :
+        return None
 
 
 @router.post("/sharepoint_all_folders")
@@ -97,3 +114,110 @@ async def sync_sharepoint_files(
         from_date=from_date,
         to_date=to_date,
     )
+    
+# CONTROLLER ENDPOINT (IN SAME FILE)
+# ---------------------------------------------------------------------
+@router.post("/generate_sharepoint_missing_po_report")
+async def generate_missing_po_report(
+    request : GenerateMissingPoReport,
+    sp_repo: SharepointRepo = Depends(get_repository(SharepointRepo))
+):
+    service = SharepointService(sp_repo)
+    result = await service.generate_sharepoint_missing_po_report_service(request.user_id)
+    return JSONResponse(content=jsonable_encoder(result))
+
+#----------------------Sharepoint Table Data-------------------------
+@router.post("/sharepoint_missing_po")
+async def missing_po_data_fetch(request: Request, frontendRequest: SharepointFetchMissingMismatchReport):
+    try:
+        data = await SharepointService.missing_po_data_fetch(request, frontendRequest)
+        # Convert dates to strings and return
+        return jsonable_encoder(data)
+    except Exception as e:
+        print(f"Error fetching Missing POs: {e}")
+        return []
+
+@router.post("/sharepoint_mismatch_po")
+async def mismatch_po_data_fetch(request: Request, frontendRequest: SharepointFetchMissingMismatchReport):
+    try:
+        data = await SharepointService.mismatch_po_data_fetch(request, frontendRequest)
+        return jsonable_encoder(data)
+    except Exception as e:
+        print(f"Error fetching Mismatch POs: {e}")
+        return []
+
+@router.post("/sharepoint_matched_po")
+async def matched_po_data_fetch(request: Request, frontendRequest: SharepointFetchMissingMismatchReport):
+    try:
+        data = await SharepointService.matched_po_data_fetch(request, frontendRequest)
+        return jsonable_encoder(data)
+    except Exception as e:
+        print(f"Error fetching Matched POs: {e}")
+        return []
+    
+    
+ #Donwload Missing Report and Missmatch Report 
+@router.post("/download_sharepoint_missing_po_report")
+async def download_sharepoint_missing_po_report(
+    request: Request,
+    payload: DownloadSharepointMissingMismatchRequest,
+    format: str = Query("excel", regex="^(excel|pdf)$")
+):
+    try:
+        file_stream, filename, media_type = await SharepointService.download_sharepoint_missing_po_report(
+            request=request,
+            user_id =payload.user_id,
+            role_id=payload.role_id,
+            format=format
+        )
+
+        return StreamingResponse(
+            file_stream,
+            media_type=media_type,
+            headers={
+                "Content-Disposition": f"attachment; filename={filename}"
+            }
+        )
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+#Donwload Missing Report and Missmatch Report 
+@router.post("/download_sharepoint_mismatch_po_report")
+async def download_sharepoint_mismatch_po_report(
+    request: Request,
+    payload: DownloadSharepointMissingMismatchRequest,
+    format: str = Query("excel", regex="^(excel|pdf)$")
+):
+    try:
+        file_stream, filename, media_type = await SharepointService.download_sharepoint_mismatch_po_report(
+            request,
+            user_id=payload.user_id,
+            role_id=payload.role_id,
+            format=format
+        )
+
+        return StreamingResponse(
+            file_stream,
+            media_type=media_type,
+            headers={
+                "Content-Disposition": f"attachment; filename={filename}"
+            }
+        )
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    
+    
+# #Last Sync On User Dashboard        
+@router.get("/sharepoint_dashboard_last_sync")
+async def get_last_sync_by_user_id(user_id: int,role_id: int,request: Request):
+    try: 
+        result = await SharepointService.get_last_sync_by_user_id(user_id,role_id,request)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+

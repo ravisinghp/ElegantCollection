@@ -43,7 +43,7 @@ WHERE active = 1
 GET_EXISTING_SHAREPOINT_PO_MISSING_BY_SYSTEM_PO = """
 SELECT 1
 FROM sharepoint_po_missing_report
-WHERE system_po_id = %s
+WHERE sharepoint_po_det_id = %s
   AND mismatch_attribute = 'po_missing'
 LIMIT 1
 """
@@ -309,10 +309,10 @@ class SharepointRepo(BaseRepository):
         await self._log_and_execute(GET_ALL_SHAREPOINT_MISMATCHES)
         return await self._cur.fetchall()
     
-    async def get_existing_sharepoint_po_missing(self, system_po_id: int):
+    async def get_existing_sharepoint_po_missing(self, sharepoint_po_det_id: int):
         await self._log_and_execute(
             GET_EXISTING_SHAREPOINT_PO_MISSING_BY_SYSTEM_PO,
-        [system_po_id],
+        [sharepoint_po_det_id],
     )
         return await self._cur.fetchone()
     
@@ -427,7 +427,7 @@ class SharepointRepo(BaseRepository):
             LEFT JOIN sharepoint_files sf
                 ON sf.user_id = pd.user_id
             LEFT JOIN users_master u
-                ON u.user_id = md.user_id
+                ON u.user_id = pd.user_id
             WHERE pm.sharepoint_po_det_id IS NULL
             AND mm.sharepoint_po_det_id IS NULL
         """

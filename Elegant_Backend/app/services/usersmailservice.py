@@ -402,16 +402,24 @@ PO_REGEX_PATTERNS = {
 
     # ---------------- PO NUMBER ----------------
     "po_number": [
+        # ----- OLD WORKING -----
         r"(?:po_number|po_no)\s*:\s*(PO[\w\-_/]+)",
-        r"(?:po\s*number|po\s*no|po#|p\.o\.|purchase\s*order|po)\s*[:\-]?\s*(PO[\w\-_/]+)",
+        r"(?:po\s*number|po\s*no|po#|po\s*#|p\.o\.|purchase\s*order|po)\s*[:\-]?\s*(PO[\w\-_/]+)",
         r"\b(PO[\s\-_:]*[0-9]{1,}[A-Z0-9\/_.\-]*)",
         r"(?:po\s*number|po\s*no|po#|p\.o\.|purchase\s*order)\s*[:\-]?\s*(PO[\- ]?[A-Z0-9\/_.\-]+)",
-        # --------- allow any prefix like JPO, SPO, etc. ----------
+        # ----- NEW FORMATS -----
         r"(?:po\s*number|po\s*no|po#|p\.o\.|purchase\s*order)\s*[:\-]?\s*([A-Z]{1,5}-\d{4,}-\d+)"
     ],
 
     # ---------------- CUSTOMER NAME ----------------
     "customer_name": [
+        # ----- NEW PATTERNS -----
+        r"(?i)ship\s+([A-Za-z][A-Za-z0-9 &.,\-]{2,50})\s*(?:\n|\r)",
+        r"Ship\s+To:\s*\n\s*([A-Za-z0-9 &.,\-]+(?:\n\s*[A-Za-z0-9 &.,\-]+){1,4})",
+        r"ship\s*to\s*:\s*\n\s*([A-Za-z0-9 &.,\-]+)",
+        r"(?:ship\s*to|deliver\s*to|ship\s|bill\s*to|delivery\s*address)\s*[:\-]?\s*([A-Za-z0-9&.,\-\s]+)",
+        r"(?:customer\s*name|buyer)\s*[:\-]?\s*([A-Za-z0-9&.,\-\s]+)",
+        # ----- OLD WORKING -----
         r"(?:customer\s*name|customer|buyer|client)\s*[:\-]?\s*([A-Za-z][A-Za-z\s&\.]+?)"
         r"(?=\s+(?:vendor|vendor_no|vendor_number|supplier|po|delivery|cancel|date|quantity|gold|color|description)\b|$)",
         r"customer_name\s*:\s*([A-Za-z][A-Za-z\s&\.]+?)"
@@ -420,57 +428,98 @@ PO_REGEX_PATTERNS = {
 
     # ---------------- VENDOR NUMBER ----------------
     "vendor_number": [
-        r"(?:vendor_number|vendor_no)\s*:\s*([A-Za-z0-9\-_]+)",
-        r"(?:vendor\s*number|vendor\s*no|supplier\s*code)\s*[:\-]?\s*([A-Za-z0-9\-_]+)",
-        r"\bvendor\b\s*[:\-]?\s*([A-Za-z0-9\-_]+)"
-    ],
+        r"Vendor\s*ID[\s\S]{0,80}\b(V\d{4,})\b",
+        # Vendor Number / ID on SAME LINE
+        r"(?:vendor[_\s]*(?:number|no|id)|supplier[_\s]*(?:number|no|code))\s*[:\-#]?\s*([A-Za-z0-9\-_./]+)",
+
+        # Vendor ID on NEXT LINE (VERY IMPORTANT FOR YOUR FILE)
+        r"(?:vendor\s*id|vendor\s*number)\s*[:\-]?\s*\n\s*([A-Za-z0-9\-_./]+)",
+
+        # Simple "Vendor: XYZ"
+        r"\bvendor\b\s*[:\-]?\s*([A-Za-z0-9\-_./]+)",
+
+        # V-ID / VNo formats
+        r"\b(?:Vendor\s*ID|VNo|V-ID)\s*[:#\-\s]?\s*([A-Za-z0-9\-_./]+)",
+
+        # Fallback supplier code
+        r"(?:supplier\s*(?:no|number|code))\s*[:\-]?\s*([A-Za-z0-9\-_./]+)",
+    ],                                                              
 
     # ---------------- PO DATE ----------------
     "po_date": [
+        # ----- OLD WORKING -----
         r"(?:po\s*date|order\s*date|date)\s*[:\-]?\s*(\d{4}-\d{1,2}-\d{1,2})",
         r"po_date\s*:\s*(\d{4}-\d{2}-\d{2})",
-        # --------- allow 'Date:' label ----------
-        r"date\s*[:\-]?\s*(\d{4}-\d{2}-\d{2})"
+        r"date\s*[:\-]?\s*(\d{4}-\d{2}-\d{2})",
+        # ----- NEW FORMATS -----
+        r"(?:Purchase\s+Order\s+Date|P\.O\.\s*Date)\s*[:\-]?\s*(\d{1,2}/\d{1,2}/\d{2})",
+        r"P\.?\s*O\.?\s*Date\s*[:\-]?\s*(\d{1,2}-[A-Za-z]{3}-\d{4})",
+        r"(?:purchase\s*order\s*date)\s*\n\s*(\d{1,2}/\d{1,2}/\d{2})",
+        r"(?:purchase\s*order\s*date)\s*[:\-]?\s*(\d{1,2}-[A-Za-z]{3}-\d{4})",
+        r"(?:po\s*date|order\s*date|date)\s*[:\-]?\s*([0-9]{1,2}-[A-Za-z]{3}-[0-9]{4})",
+        r"P\.O\.\s+Date\s*:\s*(\d{2}-[A-Za-z]{3}-\d{4})",
+        r"P\.O\.\s*Date\s*[:\-]?\s*(\d{1,2}-[A-Za-z]{3}-\d{4})",
+        r"(?:po\s*date|order\s*date|date)\s*[:\-]?\s*(\d{4}-\d{1,2}-\d{1,2})",
+        r"\b(\d{1,2}/\d{1,2}/\d{2})\b",
     ],
 
-    # ---------------- DELIVERY DATE ----------------
+    #---------------- DELIVERY DATE ----------------
     "delivery_date": [
-        r"(?:delivery\s*date|expected\s*delivery)\s*[:\-]?\s*(\d{4}-\d{2}-\d{2})",
-        r"delivery_date\s*:\s*(\d{4}-\d{2}-\d{2})",
-        # --------- allow inline in item row ----------
-        r"\b(\d{4}-\d{2}-\d{2})\b"
-    ],
+        # PDF table FIRST
+        r"\b(?:DELIVERY\s*DATE|DUE\s*DATE)\b[\s\S]{0,50}\b(\d{4}-\d{2}-\d{2})\b",
+        r"\b(?:DELIVERY\s*DATE|DUE\s*DATE)\b[\s\S]{0,50}\b(\d{2}-\d{2}-\d{4})\b",
+        r"\b(?:DELIVERY\s*DATE|DUE\s*DATE)\b[\s\S]{0,50}\b(\d{2}-[A-Za-z]{3}-\d{4})\b",
 
+        # Inline / email
+        r"(?:delivery\s*date|expected\s*delivery|due\s*date)\s*[:\-]?\s*(\d{4}-\d{2}-\d{2})",
+        r"(?:delivery\s*date|expected\s*delivery|due\s*date)\s*[:\-]?\s*(\d{2}-[A-Za-z]{3}-\d{4})",
+    ], 
+ 
     # ---------------- CANCEL DATE ----------------
     "cancel_date": [
         r"(?:cancel\s*date|cancellation\s*date)\s*[:\-]?\s*(\d{4}-\d{1,2}-\d{1,2})",
         r"cancel_date\s*:\s*(\d{4}-\d{2}-\d{2})"
     ],
-
+ 
     # ---------------- EC STYLE NUMBER ----------------
     "ec_style_number": [
         r"(?:ec\s*style\s*number|ec\s*style|ec\s*no)\s*[:\-]?\s*([A-Z0-9\-]+)",
         r"(?:ec_style_number|ec_style_no)\s*:\s*([A-Z0-9\-]+)"
     ],
-
+ 
     # ---------------- CUSTOMER STYLE NUMBER ----------------
     "customer_style_number": [
         r"(?:customer\s*style\s*number|customer\s*style|cust\s*style)\s*[:\-]?\s*([A-Z0-9\-]+)",
         r"(?:customer_style_number|customer_style_no)\s*:\s*([A-Z0-9\-]+)"
     ],
-
+ 
     # ---------------- QUANTITY ----------------
     "quantity": [
-        r"(?:qty|quantity|pcs|pieces)\s*[:\-]?\s*(\d+)",
-        r"\b(\d+)\s*(?:pcs|pieces|nos)\b"
-    ],
+        # Table style (PDF)
+        r"\bQuantity\b[\s\S]{0,30}\b(\d+)\b",
 
+        # EA / PCS rows
+        r"\n\s*(\d+)\s+(?:EA|PCS|PC)\b",
+
+        # Inline
+        r"(?:qty|quantity|pcs|pieces)\s*[:\-]?\s*(\d+)",
+
+        # Fallback (keep last!)
+        r"\b(\d+)\s*(?:pcs|pieces|nos)\b",
+    ],
+ 
     # ---------------- GOLD KARAT ----------------
     "gold_karat": [
-        r"(?:gold\s*karat|karat|kt|gold\s*purity)\s*[:\-]?\s*(\d{1,2})(?:\s*K)?",
-        r"\b(24|22|18|14|10)\s*K?\b"
-    ],
+        # PDF table
+        r"\bMETAL\b[\s\S]{0,40}\b(24K|22K|18K|14K|10K)\b",
 
+        # Inline
+        r"(?:gold\s*karat|karat|gold_carat|gold_karat|kt|gold\s*purity)\s*[:\-]?\s*(\d{1,2})\s*K?",
+
+        # Last fallback
+        r"\b(24|22|18|14|10)\s*K\b"
+    ],
+ 
     # ---------------- COLOR ----------------
     "color": [
         r"(?:color|colour)\s*[:\-]?\s*([A-Za-z]+(?:\s+[A-Za-z]+)*)"
@@ -478,13 +527,18 @@ PO_REGEX_PATTERNS = {
         r"color\s*:\s*([A-Za-z\s]+)"
     ],
 
-    # ---------------- DESCRIPTION ----------------
+    #---------------- DESCRIPTION ----------------
     "description": [
-        r"(?:description|remarks|details|order\s*details)\s*[:\-]?\s*(.+)$",
-        r"description\s*:\s*(.+)$"
-        # --------- capture item description in item rows ----------
-        r"([A-Za-z\s]+)\s*-\s*([A-Za-z\s]+)"
+        # PDF table
+        r"\bDESCRIPTION\b[\s\S]{0,100}\n\s*([A-Za-z0-9 ,\-–\.]{10,})",
+
+        # Structured lines
+        r"(?:item\s*description|description)\s*[:\-]?\s*([A-Za-z][A-Za-z\s\-–]+)",
+
+        # Item row patterns
+        r"[A-Z0-9\-]+\s+\d+KW\s+([A-Za-z ].*?SIZE:\s*[0-9.]+)",
     ]
+
 }
 
 
@@ -688,9 +742,17 @@ def normalize_attachment_text(text: str) -> str:
 
 ITEM_REGEX = re.compile(
     r"""
-    (?P<description>[A-Za-z\s\-]+?)
+    (?P<description>
+        [A-Za-z0-9\s]+      
+        [–\-]?\s*           
+        (?:\n|\r\n?)       
+        [A-Za-z0-9\s]+      
+    )
     \s+
-    (?P<material>\d{2}K\s+Gold(?:\s*\+\s*Diamond)?)
+    (?P<material>
+        \d{2}K\s+Gold
+        (?:\s*\+\s*Diamond)?
+    )
     \s+
     (?P<quantity>\d+)
     \s+
@@ -698,6 +760,7 @@ ITEM_REGEX = re.compile(
     """,
     re.IGNORECASE | re.VERBOSE
 )
+
 
 def extract_po_items(text: str):
     items = []
@@ -727,6 +790,7 @@ async def fetch_and_save_mails_by_folders(
     mails_repo: "MailsRepository"
 ) -> List[Dict[str, Any]]:
 
+    extracted_po_ids: list[int] = []
     headers = {"Authorization": f"Bearer {access_token}"}
     results: List[Dict[str, Any]] = []
 
@@ -935,8 +999,8 @@ async def fetch_and_save_mails_by_folders(
                 
                 # ---------------- Insert PO data from email body ----------------
                 po_data_body = await extract_po_fields(body_clean)
-                if any(po_data_body.values()):
-                    await mails_repo.insert_po_details(
+                if po_data_body.get("po_number") and po_data_body.get("customer_name"):
+                    po_det_id = await mails_repo.insert_po_details(
                         mail_dtl_id=mail_id,
                         user_id=user_id,
                         po_number=po_data_body.get("po_number"),
@@ -954,7 +1018,7 @@ async def fetch_and_save_mails_by_folders(
                         mail_folder=folder_name,
                         created_by=user_id,
                     )
-
+                    extracted_po_ids.append(po_det_id)
                 # ----------------Insert PO data from attachments ----------------
                 for att_text in attachment_texts:
                     normalized_text = normalize_attachment_text(att_text)
@@ -969,7 +1033,7 @@ async def fetch_and_save_mails_by_folders(
 
                     # Fallback: if no items found, insert header-only
                     if not items:
-                        await mails_repo.insert_po_details(
+                        po_det_id = await mails_repo.insert_po_details(
                             mail_dtl_id=mail_id,
                             user_id=user_id,
                             po_number=header.get("po_number"),
@@ -987,10 +1051,11 @@ async def fetch_and_save_mails_by_folders(
                             mail_folder=folder_name,
                             created_by=user_id,
                         )
+                        extracted_po_ids.append(po_det_id)
                     else:
                         # MULTIPLE ROW INSERTS
                         for item in items:
-                            await mails_repo.insert_po_details(
+                            po_det_id = await mails_repo.insert_po_details(
                                 mail_dtl_id=mail_id,
                                 user_id=user_id,
                                 po_number=header.get("po_number"),
@@ -1008,6 +1073,7 @@ async def fetch_and_save_mails_by_folders(
                                 mail_folder=folder_name,
                                 created_by=user_id,
                             )
+                            extracted_po_ids.append(po_det_id)
                 # ---------------- COLLECT RESULT ----------------
                 results.append({
                     "mail_dtl_id": mail_id,
@@ -1020,7 +1086,10 @@ async def fetch_and_save_mails_by_folders(
                     "folder": folder_name,
                 })
 
-    return results
+    return {
+    "results": results,
+    "extracted_po_ids": extracted_po_ids
+    }
 # ------------------Email + Attachment Fetching + LLM logic end ------------------ #
 
 #### This api is used to fetch past event to current date time events and store counts also
@@ -2041,22 +2110,49 @@ def chunk(data, size):
         yield data[i:i + size]
 
 
-async def generate_missing_po_report_service(repo, user_id: int):
+async def generate_missing_po_report_service(
+    user_id: int,
+    po_det_ids: list[int],
+    mails_repo: "MailsRepository"
+):
+    """
+    Logic:
+    1. Fetch scanned POs only for given po_det_ids (multiple emails supported)
+    2. Fetch relevant system POs only (NOT full table)
+    3. LLM match scanned ↔ system
+    4. If matched with high confidence → compare fields → insert mismatches
+    5. If scanned PO not confidently matched → insert missing (scanned side)
+    6. DO NOT mark unrelated system POs as missing
+    """
 
-    scanned_pos = await repo.get_all_po_details()
-    system_pos = await repo.get_all_system_po_details()
+    # -------------------- Fetch data --------------------
+    scanned_pos = await mails_repo.get_po_details_by_ids(po_det_ids)
 
+    if not scanned_pos:
+        return {
+            "status": "success",
+            "message": "No scanned POs found for comparison"
+        }
+
+    # Fetch ONLY relevant system POs (important!)
+    scanned_po_numbers = list({
+        po["po_number"] for po in scanned_pos if po.get("po_number")
+    })
+
+    system_pos = await mails_repo.get_system_pos_by_po_numbers(scanned_po_numbers)
+
+    # JSON safe
     scanned_pos = [{k: make_json_safe(v) for k, v in po.items()} for po in scanned_pos]
     system_pos = [{k: make_json_safe(v) for k, v in po.items()} for po in system_pos]
 
+    # -------------------- Tracking --------------------
     matched_scanned_ids = set()
     matched_system_ids = set()
 
-    # Chunk ONLY scanned POs
+    # -------------------- Matching & comparison --------------------
     for scanned_batch in chunk(scanned_pos, 25):
 
         matches = await llm_batch_match(scanned_batch, system_pos)
-
         matched_pairs = []
 
         for m in matches:
@@ -2064,34 +2160,40 @@ async def generate_missing_po_report_service(repo, user_id: int):
                 (p for p in scanned_batch if p["po_det_id"] == m["scanned_po_det_id"]),
                 None
             )
-
             if not scanned:
                 continue
 
-            if m["system_po_id"] and m["confidence"] >= 0.85:
-                system = next(
-                    (p for p in system_pos if p["system_po_id"] == m["system_po_id"]),
-                    None
-                )
+            # Ignore low confidence matches
+            if not m["system_po_id"] or m["confidence"] < 0.85:
+                continue
 
-                if system:
-                    matched_scanned_ids.add(scanned["po_det_id"])
-                    matched_system_ids.add(system["system_po_id"])
+            # Prevent same system PO matching multiple scanned POs
+            if m["system_po_id"] in matched_system_ids:
+                continue
 
-                    matched_pairs.append({
-                        "po_det_id": scanned["po_det_id"],
-                        "system_po_id": system["system_po_id"],
-                        "scanned": {f: scanned.get(f) for f in FIELDS_TO_COMPARE},
-                        "system": {f: system.get(f) for f in FIELDS_TO_COMPARE}
-                    })
+            system = next(
+                (p for p in system_pos if p["system_po_id"] == m["system_po_id"]),
+                None
+            )
+            if not system:
+                continue
 
-        # Compare ONLY matched pairs
+            matched_scanned_ids.add(scanned["po_det_id"])
+            matched_system_ids.add(system["system_po_id"])
+
+            matched_pairs.append({
+                "po_det_id": scanned["po_det_id"],
+                "system_po_id": system["system_po_id"],
+                "scanned": {f: scanned.get(f) for f in FIELDS_TO_COMPARE},
+                "system": {f: system.get(f) for f in FIELDS_TO_COMPARE}
+            })
+
+        # -------------------- Field mismatch check --------------------
         if matched_pairs:
             mismatches = await llm_batch_compare(matched_pairs)
 
             for mm in mismatches:
-                # Check in DB if mismatch already exists
-                exists = await repo.mismatch_exists(
+                exists = await mails_repo.mismatch_exists(
                     user_id=user_id,
                     po_det_id=mm["po_det_id"],
                     system_po_id=mm["system_po_id"],
@@ -2099,8 +2201,9 @@ async def generate_missing_po_report_service(repo, user_id: int):
                     scanned_value=str(mm["scanned_value"]),
                     system_value=str(mm["system_value"])
                 )
+
                 if not exists:
-                    await repo.insert_mismatch(
+                    await mails_repo.insert_mismatch(
                         po_det_id=mm["po_det_id"],
                         user_id=user_id,
                         system_po_id=mm["system_po_id"],
@@ -2110,11 +2213,11 @@ async def generate_missing_po_report_service(repo, user_id: int):
                         comment=f"{mm['field']} mismatch"
                     )
 
-    # Missing scanned POs (ONCE)
+    # -------------------- Missing scanned POs --------------------
     for po in scanned_pos:
         if po["po_det_id"] not in matched_scanned_ids:
-            # Check if already exists
-            exists = await repo.po_missing_exists(
+
+            exists = await mails_repo.po_missing_exists(
                 user_id=user_id,
                 po_det_id=po["po_det_id"],
                 system_po_id=None,
@@ -2122,41 +2225,19 @@ async def generate_missing_po_report_service(repo, user_id: int):
                 scanned_value=po.get("po_number"),
                 system_value=""
             )
+
             if not exists:
-                await repo.insert_po_missing(
+                await mails_repo.insert_po_missing(
                     po_det_id=po["po_det_id"],
                     user_id=user_id,
                     system_po_id=None,
                     attribute="po_missing",
                     system_value="",
                     scanned_value=po.get("po_number"),
-                    comment="PO not found in system"
-                )
-
-    # Missing system POs (ONCE)
-    for po in system_pos:
-        if po["system_po_id"] not in matched_system_ids:
-            exists = await repo.po_missing_exists(
-                user_id=user_id,
-                po_det_id=None,
-                system_po_id=po["system_po_id"],
-                mismatch_attribute="po_missing",
-                scanned_value="",
-                system_value=po.get("po_number")
-            )
-            if not exists:
-                await repo.insert_po_missing(
-                    po_det_id=None,
-                    user_id=user_id,
-                    system_po_id=po["system_po_id"],
-                    attribute="po_missing",
-                    system_value=po.get("po_number"),
-                    scanned_value="",
-                    comment="PO not found in scanned data"
+                    comment="PO not found in system (or low confidence match)"
                 )
 
     return {
         "status": "success",
-        "message": "LLM-based PO missing & mismatch report generated successfully (duplicate-safe)"
+        "message": "PO comparison completed: missing & mismatches processed successfully"
     }
-# --------------------------data comparison logic end--------------------------#

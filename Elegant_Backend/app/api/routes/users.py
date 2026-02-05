@@ -271,9 +271,18 @@ async def get_emails(
 
         if provider == "outlook":
             # Call your mail fetching function
-            return await fetch_and_save_mails_by_folders(
+            response =  await fetch_and_save_mails_by_folders(
                 token, folders, user_id, from_date, to_date, mails_repo
             )
+            po_det_ids = response.get("extracted_po_ids", [])
+
+            # Call PO comparison ONLY if POs were extracted
+            if po_det_ids:
+                await generate_missing_po_report_service(
+                    user_id=user_id,
+                    po_det_ids=po_det_ids,
+                    mails_repo=mails_repo
+                )
         elif provider == "google":
             return await fetch_and_save_mails_by_labels(
                 token, folders, user_id, org_id, mails_repo
@@ -355,11 +364,11 @@ def health_check():
 # ---------------------------------------------------------------------
 # CONTROLLER ENDPOINT (IN SAME FILE)
 # ---------------------------------------------------------------------
-@router.post("/generate-missing-po-report")
-async def generate_missing_po_report(
-    request : GenerateMissingPoReport,
-    repo: MailsRepository = Depends(get_repository(MailsRepository))
-):
-    result = await generate_missing_po_report_service(repo, request.user_id)
-    return JSONResponse(content=jsonable_encoder(result))
+# @router.post("/generate-missing-po-report")
+# async def generate_missing_po_report(
+#     request : GenerateMissingPoReport,
+#     repo: MailsRepository = Depends(get_repository(MailsRepository))
+# ):
+#     result = await generate_missing_po_report_service(repo, request.user_id, request.po_det_ids)
+#     return JSONResponse(content=jsonable_encoder(result))
 

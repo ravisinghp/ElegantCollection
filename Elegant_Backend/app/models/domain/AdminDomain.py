@@ -65,6 +65,7 @@ class DownloadSharepointMissingMismatchRequest(BaseModel):
     role_id : int
 class GenerateMissingPoReport(BaseModel):
     user_id : int
+    po_det_ids: List[int]
     
 class FetchMissingMismatchReport(BaseModel):
     user_id : int

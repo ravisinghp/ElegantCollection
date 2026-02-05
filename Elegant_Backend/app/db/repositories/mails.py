@@ -69,9 +69,11 @@ INSERT INTO po_details (
 # PO REPOSITORY (SAME FILE - MATCHES MAILSREPOSITORY STYLE)
 # ---------------------------------------------------------------------
 
-GET_ALL_PO_DETAILS = """
-SELECT * FROM po_details WHERE active = 1
-"""
+# GET_ALL_PO_DETAILS = """
+# SELECT *
+# FROM po_details
+# WHERE po_det_id IN (:po_det_ids)
+# """
 
 GET_ALL_SYSTEM_PO_DETAILS = """
 SELECT * FROM system_po_details WHERE active = 1
@@ -455,15 +457,43 @@ class MailsRepository(BaseRepository):
 # ---------------------------------------------------------------------
 # REPOSITORY SECTION (IN SAME FILE)
 # ---------------------------------------------------------------------
-    async def get_all_po_details(self):
-        """Used in your PO mismatch service"""
-        await self._log_and_execute(GET_ALL_PO_DETAILS, [])
-        return await self._cur.fetchall()
+    async def get_po_details_by_ids(self, po_det_ids: list[int]):
+        if not po_det_ids:
+            return []
 
-    async def get_all_system_po_details(self):
-        """Used in your PO mismatch service"""
-        await self._log_and_execute(GET_ALL_SYSTEM_PO_DETAILS, [])
+        # MySQL uses %s placeholders
+        placeholders = ", ".join(["%s"] * len(po_det_ids))
+
+        query = f"""
+            SELECT *
+            FROM po_details
+            WHERE po_det_id IN ({placeholders})
+        """
+
+        await self._log_and_execute(query, po_det_ids)
         return await self._cur.fetchall()
+    
+    
+    async def get_system_pos_by_po_numbers(self, po_numbers: list[str]):
+        if not po_numbers:
+            return []
+
+        placeholders = ", ".join(["%s"] * len(po_numbers))
+
+        query = f"""
+            SELECT *
+            FROM system_po_details
+            WHERE po_number IN ({placeholders})
+        """
+
+        await self._log_and_execute(query, po_numbers)
+        return await self._cur.fetchall()
+    
+
+    # async def get_all_system_po_details(self):
+    #     """Used in your PO mismatch service"""
+    #     await self._log_and_execute(GET_ALL_SYSTEM_PO_DETAILS, [])
+    #     return await self._cur.fetchall()
 
     async def check_po_exists(self, po_number: str) -> bool:
         """Optional helper if you need PO existence checking"""

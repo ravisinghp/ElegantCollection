@@ -256,14 +256,36 @@ class SharepointService:
 
             if ct == "application/pdf" or ext.endswith(".pdf"):
                 reader = PyPDF2.PdfReader(io.BytesIO(content_bytes))
-                return " ".join(p.extract_text() or "" for p in reader.pages)
+                return "\n".join(p.extract_text() or "" for p in reader.pages)
+
 
             if ct in (
                 "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                 "application/msword",
             ) or ext.endswith((".docx", ".doc")):
                 doc = docx.Document(io.BytesIO(content_bytes))
-                return " ".join(p.text for p in doc.paragraphs)
+                if ct in (
+                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    "application/msword",
+                ) or ext.endswith((".docx", ".doc")):
+
+                    doc = docx.Document(io.BytesIO(content_bytes))
+
+                    text_parts = []
+
+                    # ---- paragraphs ----
+                    for p in doc.paragraphs:
+                        if p.text.strip():
+                            text_parts.append(p.text.strip())
+
+                    # ---- tables (CRITICAL FIX) ----
+                    for table in doc.tables:
+                        for row in table.rows:
+                            cells = [cell.text.strip() for cell in row.cells if cell.text.strip()]
+                            if cells:
+                                text_parts.append(" | ".join(cells))
+
+                    return "\n".join(text_parts)
 
             if ct in (
                 "application/vnd.openxmlformats-officedocument.presentationml.presentation",
@@ -342,45 +364,107 @@ class SharepointService:
 
         # ---------------- PO NUMBER ----------------
         "po_number": [
+            r"\b([A-Z]{1,5}-\d{6}-\d{3,})\b",
             r"(?:po_number|po_no)\s*:\s*(PO[\w\-_/]+)",
             r"(?:po\s*number|po\s*no|po#|p\.o\.|purchase\s*order|po)\s*[:\-]?\s*(PO[\w\-_/]+)",
             r"\b(PO[\s\-_:]*[0-9]{1,}[A-Z0-9\/_.\-]*)",
             r"(?:po\s*number|po\s*no|po#|p\.o\.|purchase\s*order)\s*[:\-]?\s*(PO[\- ]?[A-Z0-9\/_.\-]+)",
             # --------- allow any prefix like JPO, SPO, etc. ----------
             r"(?:po\s*number|po\s*no|po#|p\.o\.|purchase\s*order)\s*[:\-]?\s*([A-Z]{1,5}-\d{4,}-\d+)",
-            r"(?:p\.o\.\s*number|po\s*number|purchase\s*order)\s*[:\-]?\s*([A-Z]{1,6}-PO-\d{4}-\d+)"
+            r"(?:p\.o\.\s*number|po\s*number|purchase\s*order)\s*[:\-]?\s*([A-Z]{1,6}-PO-\d{4}-\d+)",
+            r"(?:po\s*number|purchase\s*order)\s*[:\-]?\s*([A-Z]{1,5}-\d{6}-\d+)",
+            r"P\.O\.\s+Number\s*:\s*([A-Z]{2}-[A-Z]{2}-\d{4}-\d{4})",  # JG-PO-2025-0043
+            r"P\.O\.\s+Number\s*:\s*(JG-PO-\d{4}-\d{4})",
+            r"(?:purchase\s*order\s*number)\s*[:\-]?\s*([A-Z]{1,6}-PO-\d{4}-\d{4})",
         ],
 
         # ---------------- CUSTOMER NAME ----------------
         "customer_name": [
+            # Or combine both:
+            r"(?:Ship\s+)?(Ostbye[^A-Za-z0-9]*To\s*:\s*[A-Za-z0-9\s,&.-]+(?:\n\s*[A-Za-z0-9\s,&.-]+){0,2})",
+            # Or simpler version:
+            r"(Ostbye[^\n]*(?:\n\s*[^\n]+){0,2})",
+            # Or even better - capture everything from "Ship Ostbye To:" to next section:
+            r"Ship\s+Ostbye\s+To\s*:\s*([^\n]+(?:\n\s*[^\n]+){0,2})",
+            r"Ship\s+Ostbye\s+To\s*:\s*([^\n]+)",  # For Ostbye format
+            r"(?:ship\s*to:|deliver\s*to:|ship\s+ostbye\s+to:)\s*([^\n]+)",
+            r"Ship\s*To\s*:\s*([A-Za-z0-9 &.,\-]+)(?=\n\s*(?:FOB|Terms|Vendor|Contact|Phone|$))",
+            r"Ship\s+To:\s*\n\s*([A-Za-z0-9 &.,\-]+(?:\n\s*[A-Za-z0-9 &.,\-]+){1,4})",
+            r"Ship\s+To:\s*\n\s*([A-Za-z0-9 &.,\-]+(?:\n\s*[A-Za-z0-9 &.,\-]+){1,3})",
+            r"ship\s*to\s*:\s*\n\s*([A-Za-z0-9 &.,\-]+)",
             r"(?:customer\s*name|customer|buyer|client)\s*[:\-]?\s*([A-Za-z][A-Za-z\s&\.]+?)"
             r"(?=\s+(?:vendor|vendor_no|vendor_number|supplier|po|delivery|cancel|date|quantity|gold|color|description)\b|$)",
-            r"customer_name\s*:\s*([A-Za-z][A-Za-z\s&\.]+?)"
+            r"customer_name\s*:\s*([A-Za-z][A-Za-z\s&\.]+?)",
+            # ---------------- CUSTOMER (SHIP TO FULL BLOCK) ----------------
+            r"ship\s*to\s*:\s*\n\s*([A-Za-z0-9 &.,\-]+(?:\n\s*[A-Za-z0-9 &.,\-]+){1,4})",
+
+            # Ship To full customer block (name + address lines)
+            r"ship\s*to\s*:\s*\n\s*([A-Za-z0-9 &.,\-]+(?:\n\s*[A-Za-z0-9 &.,\-]+){1,3})",
+            # Priority 1: Ship To
+            r"(?:ship\s*to|ship\s*to|deliver\s*to|delivery\s*address)\s*[:\-]?\s*([A-Za-z0-9&.,\-\s]+)",
+
+            # Priority 2: Customer Name (if present)
+            r"(?:customer\s*name|buyer)\s*[:\-]?\s*([A-Za-z0-9&.,\-\s]+)",
             r"(?=\s+(?:vendor|vendor_no|vendor_number|supplier|po|delivery|cancel|date|quantity|gold|color|description)\b|$)"
         ],
 
         # ---------------- VENDOR NUMBER ----------------
         "vendor_number": [
+            r"Vendor\s*ID[\s\S]{0,80}\b(V\d{4,})\b",
+            r"Vendor\s+ID\s*\n\s*([A-Za-z0-9\-]+)"
+            r"\bVendor\s+Item\s+No\.?\s*[:\-]?\s*([A-Z0-9\-]+)",
             r"(?:vendor_number|vendor_no)\s*:\s*([A-Za-z0-9\-_]+)",
             r"(?:vendor\s*number|vendor\s*no|supplier\s*code)\s*[:\-]?\s*([A-Za-z0-9\-_]+)",
-            r"\bvendor\b\s*[:\-]?\s*([A-Za-z0-9\-_]+)"
+            r"Vendor\s*:\s*(.+?)(?=\s+Ship\s+To:)",  # Extract vendor info before "Ship To"
+            r"(?:vendor\s*item\s*(?:no|number))\s*[:\-]?\s*([A-Za-z0-9\-_]+)",
+            r"(?:vendor\s*item\s*(?:no|number))\s*[:\-]?\s*([A-Za-z0-9\-\/]+)",
+            r"\b([A-Z]{2}\d{4}[A-Z]?-[A-Z0-9]+)\b", 
+            r"Vendor\s*Item\s*(?:No|Number)\s*[:\-]?\s*([A-Z0-9\-]+)",
+            r"\bVendor\s+Item\s+No\.?\s*[:\-]?\s*([A-Z0-9\-]+)",
         ],
 
         # ---------------- PO DATE ----------------
         "po_date": [
+            r"P\.O\.\s*Date\s*:\s*(\d{2}-[A-Z]{3}-\d{4})",  # For 11-Jul-2025
+            r"(\d{2}-[A-Za-z]{3}-\d{4})",  # General pattern for dd-MMM-yyyy
+            r"P\.?\s*O\.?\s*Date\s*:\s*(\d{1,2}-[A-Za-z]{3}-\d{4})",
+            r"P\.O\.\s*Date\s*:\s*(\d{1,2}-[A-Za-z]{3}-\d{4})",
+            r"(?:Purchase\s+Order\s+Date|P\.O\.\s*Date)\s*[:\-]?\s*(\d{1,2}/\d{1,2}/\d{2})",
+            r"P\.?\s*O\.?\s*Date\s*[:\-]?\s*(\d{1,2}-[A-Za-z]{3}-\d{4})",
+            r"(?:purchase\s*order\s*date)\s*\n\s*(\d{1,2}/\d{1,2}/\d{2})",
+            r"(?:purchase\s*order\s*date)\s*[:\-]?\s*(\d{1,2}-[A-Za-z]{3}-\d{4})",
+            r"(?:po\s*date|order\s*date|date)\s*[:\-]?\s*([0-9]{1,2}-[A-Za-z]{3}-[0-9]{4})",
             r"(?:po\s*date|order\s*date|date)\s*[:\-]?\s*(\d{4}-\d{1,2}-\d{1,2})",
-            r"po_date\s*:\s*(\d{4}-\d{2}-\d{2})",
+            r"P\.O\.\s*Date\s*[:\-]?\s*(\d{1,2}-[A-Za-z]{3}-\d{4})",
             # --------- allow 'Date:' label ----------
-            r"date\s*[:\-]?\s*(\d{4}-\d{2}-\d{2})"
+            r"date\s*[:\-]?\s*(\d{4}-\d{2}-\d{2})",
+            r"P\.O\.\s+Date\s*:\s*(\d{2}-[A-Za-z]{3}-\d{4})",  # 11-Jul-2025
+            # 11-Jul-2025
+            r"P\.O\.\s*Date\s*[:\-]?\s*(\d{1,2}-[A-Za-z]{3}-\d{4})",
+            # PO Date: 11-Jul-2025
+            r"(?:po\s*date|order\s*date|date)\s*[:\-]?\s*(\d{1,2}-[A-Za-z]{3}-\d{4})",
+            # 2025-07-11
+            r"(?:po\s*date|order\s*date|date)\s*[:\-]?\s*(\d{4}-\d{1,2}-\d{1,2})",
+            # fallback strict ISO
+            r"po_date\s*:\s*(\d{4}-\d{2}-\d{2})",
+            r"P\.O\.?\s*Date\s*[:\-]?\s*(\d{1,2}-[A-Za-z]{3}-\d{4})",
+            r"\b(\d{1,2}/\d{1,2}/\d{2})\b",
+            r"po_date\s*:\s*(\d{4}-\d{2}-\d{2})",
         ],
 
-        # ---------------- DELIVERY DATE ----------------
+        #---------------- DELIVERY DATE ----------------
         "delivery_date": [
+            r"\bEA\s+(\d{1,2}/\d{1,2}/\d{2})\b",
+            r"\bDue\s*Date\s*[:\-]?\s*(\d{1,2}/\d{1,2}/\d{2})",
             r"(?:delivery\s*date|expected\s*delivery)\s*[:\-]?\s*(\d{4}-\d{2}-\d{2})",
             r"delivery_date\s*:\s*(\d{4}-\d{2}-\d{2})",
             # --------- allow inline in item row ----------
-            r"\b(\d{4}-\d{2}-\d{2})\b"
+            # r"\b(\d{4}-\d{2}-\d{2})\b"
+            r"(?:expected\s*delivery)\s*[:\-]?\s*(\d{4}-\d{1,2}-\d{1,2})",
+            r"(?:delivery\s*date|expected\s*delivery|due\s*date)\s*[:\-]?\s*(\d{4}-\d{1,2}-\d{1,2})",
+            r"\b(\d{1,2}/\d{1,2}/\d{2})\b",
         ],
+        
 
         # ---------------- CANCEL DATE ----------------
         "cancel_date": [
@@ -402,8 +486,17 @@ class SharepointService:
 
         # ---------------- QUANTITY ----------------
         "quantity": [
+            r"(?:^|\n)\s*(\d+)\s*(?:OF|EA|PC|PCS)\s+[A-Z0-9/.-]",  
+            r"^\s*(\d+)\s*OF\b",  # For "1 OF" pattern
+            r"Quantity[^0-9]*(\d+)\s*OF",  # Match quantity after "Quantity" before "OF"
+            r"\b(\d+)\s*(?:OF|EA|PCS|PC)\s+[A-Z0-9]",  # Number followed by OF/EA then alphanumeric
+            
+            # Fix: Don't match decimal numbers or sizes
+            r"(?<!\.)\b(\d+)\b(?!\.\d)",  # Whole numbers not part of decimal
+            r"^\s*(\d+)\s+(?:OF|EA|PCS)",  # For "1 OF" or "1 EA"
+            r"\bQuantity\b[^0-9]*(\d+)\b",  # More specific quantity extraction
             r"(?:qty|quantity|pcs|pieces)\s*[:\-]?\s*(\d+)",
-            r"\b(\d+)\s*(?:pcs|pieces|nos)\b"
+            r"\b(\d+)\s*(?:pcs|pieces|nos)\b",
         ],
 
         # ---------------- GOLD KARAT ----------------
@@ -419,13 +512,16 @@ class SharepointService:
             r"color\s*:\s*([A-Za-z\s]+)"
         ],
 
-        # ---------------- DESCRIPTION ----------------
+        #---------------- DESCRIPTION ----------------
         "description": [
-            r"(?:description|remarks|details|order\s*details)\s*[:\-]?\s*(.+)$",
-            r"description\s*:\s*(.+)$"
-            # --------- capture item description in item rows ----------
-            r"([A-Za-z\s]+)\s*-\s*([A-Za-z\s]+)"
-        ]
+            r"\b\d{2}KW\s+([A-Za-z ].*?SIZE:\s*[0-9.]+)",
+            r"(?:item\s*description|description)\s*[:\-]?\s*([A-Za-z][A-Za-z\s\-–]+)",
+            r"[A-Z0-9\-]+(?:\s+\d+KW)?\s+([A-Za-z ].*?SIZE:\s*[0-9.]+)",
+            r"[A-Z0-9\-]+\s+\d+KW\s+([A-Za-z ].*?SIZE:\s*[0-9.]+)",
+        ],
+
+                
+       
     }
     
     EMPTY_PO = {
@@ -446,8 +542,24 @@ class SharepointService:
 
     @staticmethod
     def normalize_text(text: str) -> str:
-        text = re.sub(r"\s+", " ", text.replace("\n", " "))
+        # First, join multiline customer addresses - FIXED
+        text = re.sub(r'Ship\s+Ostbye\s+To\s*:\s*\n\s*', 'Ship Ostbye To: ', text)
+        text = re.sub(r'Ostbye\s+To\s*:\s*\n\s*', 'Ostbye To: ', text)
+        # preserve newlines, normalize spaces only
+        text = re.sub(r"[ \t]+", " ", text)
         return text.strip()
+    
+    def strip_table_headers(self, text: str) -> str:
+        HEADER_PATTERNS = [
+            r"item\s+description\s+material\s+quantity\s+expected\s+delivery",
+            r"no\s+part\s+no\s+description\s+qty\s+unit\s+price\s+total",
+            r"description\s+material\s+quantity\s+expected\s+delivery",
+        ]
+
+        for pat in HEADER_PATTERNS:
+            text = re.sub(pat, "", text, flags=re.IGNORECASE)
+
+        return text
 
     # ---------------- PO FIELD EXTRACTION ---------------- #
     @staticmethod
@@ -457,7 +569,7 @@ class SharepointService:
 
         for field, patterns in SharepointService.PO_REGEX_PATTERNS.items():
             for pat in patterns:
-                m = re.search(pat, text, re.IGNORECASE)
+                m = re.search(pat, text, re.IGNORECASE | re.MULTILINE | re.DOTALL)
                 if m:
                     out[field] = m.group(1) if m.groups() else m.group(0)
                     break
@@ -465,23 +577,66 @@ class SharepointService:
         return out
     
     MANDATORY_FIELDS = ["po_number", "customer_name"]
+    
+    # def strip_item_sections(self, text: str) -> str:
+    #     # Remove ONLY table header line
+    #     text = re.sub(
+    #         r"Item\s+Description\s+Material\s+Quantity\s+Expected\s+Delivery",
+    #         "",
+    #         text,
+    #         flags=re.IGNORECASE
+    #     )
+    #     return text
+    
+    ITEM_ONLY_FIELDS = {
+    "quantity",
+    "gold_karat",
+    "description"
+}
+    
+    ITEM_REPEAT_KV_REGEX = re.compile(
+            r"""
+            Description\s*:\s*(?P<description>.+?)\s*
+            Qty\s*:\s*(?P<quantity>\d+)
+            """,
+            re.IGNORECASE | re.DOTALL | re.VERBOSE
+        )
+    
+    def extract_karat(self, description: str) -> Optional[str]:
+        """Extract gold karat from description."""
+        if not description:
+            return None
+        
+        # Look for patterns like 22K, 24K, etc.
+        karat_match = re.search(r'(\d{2})K', description, re.IGNORECASE)
+        if karat_match:
+            return karat_match.group(1)
+        
+        return None
+
 
     async def extract_po_fields(self, text: str) -> dict:
         regex_data = self.extract_po_fields_regex(text)
-        # Check if mandatory fields are present
+
+        # 🛡️ PROTECT ITEM FIELDS
+        for f in self.ITEM_ONLY_FIELDS:
+            if f not in regex_data or regex_data[f] is None:
+                regex_data[f] = None
+
         if all(regex_data.get(f) for f in self.MANDATORY_FIELDS):
             return regex_data
 
-        # Otherwise call LLM
         llm_data = await self.extract_po_fields_from_llm(text)
 
-        # Merge: REGEX ALWAYS WINS
         final = regex_data.copy()
         for k, v in llm_data.items():
+            if k in self.ITEM_ONLY_FIELDS:
+                continue
             if final.get(k) is None and v:
                 final[k] = v
 
         return final if any(final.values()) else self.EMPTY_PO
+
     
     
     async def extract_po_fields_from_llm(self, text: str) -> dict:
@@ -537,7 +692,9 @@ class SharepointService:
 
         date_str = date_str.strip()
 
-        for fmt in ("%Y-%m-%d", "%m/%d/%y", "%d/%m/%y", "%d-%m-%Y", "%m-%d-%Y", "%y-%m-%d"):
+        for fmt in ("%d-%b-%Y", "%d-%B-%Y", "%d-%b-%y", "%d-%B-%y",  # For 11-Jul-2025
+                "%Y-%m-%d", "%m/%d/%y", "%d/%m/%y", "%d-%m-%Y", 
+                "%m-%d-%Y", "%y-%m-%d"):
             try:
                 dt = datetime.strptime(date_str, fmt)
                 return dt.strftime("%Y-%m-%d")
@@ -562,8 +719,8 @@ class SharepointService:
             # fix broken multiline item descriptions
             text = re.sub(r"([A-Za-z])\s*-\s*\n\s*([A-Za-z])", r"\1 - \2", text)
 
-            # CRITICAL: flatten remaining newlines
-            text = re.sub(r"\n", " ", text)
+            # preserve KV structure
+            text = re.sub(r"\n{2,}", "\n", text)
 
             # normalize dates like 2025-07-06
             text = re.sub(
@@ -581,36 +738,389 @@ class SharepointService:
             return text.strip()
 
 
-    ITEM_REGEX = re.compile(
+    # ITEM_REGEX = re.compile(
+    #         r"""
+    #         (?P<description>[A-Za-z\s\-]+?)
+    #         \s+
+    #         (?P<material>\d{2}K\s+Gold(?:\s*\+\s*Diamond)?)
+    #         \s+
+    #         (?P<quantity>\d+)
+    #         \s+
+    #         (?P<delivery_date>\d{4}-\d{2}-\d{2})
+    #         """,
+    #         re.IGNORECASE | re.VERBOSE
+    #     )
+    
+    ITEM_ROW_REGEX = re.compile(
             r"""
-            (?P<description>[A-Za-z\s\-]+?)
-            \s+
-            (?P<material>\d{2}K\s+Gold(?:\s*\+\s*Diamond)?)
-            \s+
+            ^\s*
+            (?P<row_no>\d+)\s+
+            (?P<part_no>[A-Z0-9\-]+)\s+
+            (?P<description>.+?)\s+
+            (?P<quantity>\d+)\s+
+            (?P<unit_price>\d+(?:\.\d+)?)\s+
+            (?P<total>\d+(?:\.\d+)?)
+            \s*$
+            """,
+            re.IGNORECASE | re.MULTILINE | re.VERBOSE
+        )
+    
+    
+    PO_REPEAT_BLOCK_REGEX = re.compile(
+            r"""
+            P\.?O\.?\s*Number\s*:\s*(?P<po_number>[A-Z0-9\-]+)\s*
+            P\.?O\.?\s*Date\s*:\s*(?P<po_date>[0-9]{2}-[A-Za-z]{3}-[0-9]{4})\s*
+            Vendor\s*:\s*(?P<vendor>.+?)\s*
+            Description\s*:\s*(?P<description>.+?)\s*
+            Qty\s*:\s*(?P<quantity>\d+)
+            """,
+            re.IGNORECASE | re.VERBOSE | re.DOTALL
+        )
+    
+    ITEM_BLOCK_REGEX = re.compile(
+            r"""
+            Expected\s*Delivery\s*:\s*(?P<delivery_date>\d{4}-\d{2}-\d{2})
+            .*?
+            Item\s*Description\s*:\s*(?P<description>.+?)
+            .*?
+            Material\s*:\s*(?P<material>.+?)
+            .*?
+            Quantity\s*:\s*(?P<quantity>\d+)
+            """,
+            re.IGNORECASE | re.DOTALL | re.VERBOSE
+        )
+    
+    ITEM_TABLE_REGEX = re.compile(
+            r"""
+            (?P<sku>[A-Z0-9]{3,})\s+
+            (?P<description>[A-Za-z\s\-]+?)\s+
+            (?P<gold_karat>\d{2})K\s+
             (?P<quantity>\d+)
-            \s+
+            """,
+            re.IGNORECASE | re.VERBOSE
+        )
+    
+    ITEM_COLUMN_REGEX = re.compile(
+            r"""
+            (?P<description>(?!expected\s+delivery)[A-Za-z][A-Za-z\s\-–]+?)\s+
+            (?P<material>\d{2}K\s*Gold(?:\s*\+\s*Diamond)?)\s+
+            (?P<quantity>\d+)\s+
             (?P<delivery_date>\d{4}-\d{2}-\d{2})
             """,
             re.IGNORECASE | re.VERBOSE
         )
+    
+    ITEM_PIPE_TABLE_REGEX = re.compile(
+            r"""
+            (?P<description>[^|]+)\s*\|\s*
+            (?P<material>\d{2}K\s*Gold(?:\s*\+\s*Diamond)?)\s*\|\s*
+            (?P<quantity>\d+)\s*\|\s*
+            (?P<delivery_date>\d{4}-\d{2}-\d{2})
+            """,
+            re.IGNORECASE | re.VERBOSE
+        )
+    
+    PO_BLOCK_REGEX = re.compile(
+            r"""
+            P\.?O\.?\s*Number\s*:\s*(?P<po_number>[^\n]+)
+            .*?
+            P\.?O\.?\s*Date\s*:\s*(?P<po_date>[^\n]+)
+            .*?
+            Vendor\s*:\s*(?P<vendor>[^\n]+)
+            .*?
+            Description\s*:\s*(?P<description>[^\n]+)
+            .*?
+            Qty\s*:\s*(?P<quantity>\d+)
+            """,
+            re.IGNORECASE | re.DOTALL | re.VERBOSE
+        )
 
-    def extract_po_items(self,text: str):
-            items = []
+    
+    def strip_item_sections(self, text: str) -> str:
+        return re.sub(
+            r"Item\s+Description\s+Material\s+Quantity\s+Expected\s+Delivery",
+            "",
+            text,
+            flags=re.IGNORECASE
+        )
+        
+        
+    def extract_purchase_order_table(self, text: str):
+        """Extract data from purchase order table format like in your example."""
+        results = []
+        
+        # Extract common header data
+        po_number_match = re.search(r'P\.O\.\s*Number\s*:\s*(JG-PO-2025-0043)', text, re.IGNORECASE)
+        po_date_match = re.search(r'P\.O\.\s*Date\s*:\s*(11-Jul-2025)', text, re.IGNORECASE)
+        vendor_match = re.search(r'Vendor\s*:\s*(.+?)(?=\s+Ship\s+To:)', text, re.IGNORECASE)
+        
+        po_number = po_number_match.group(1).strip() if po_number_match else None
+        po_date = po_date_match.group(1).strip() if po_date_match else None
+        vendor = vendor_match.group(1).strip() if vendor_match else None
+        
+        # Look for the table in the text
+        lines = text.split('\n')
+        in_table = False
+        
+        for line in lines:
+            line = line.strip()
+            
+            # Look for table header
+            if 'NoPart No Description Qty Unit Price Total' in line:
+                in_table = True
+                continue
+            
+            if in_table:
+                # Stop when we hit totals
+                if 'Sub-Total' in line or 'Total' in line or 'Tax' in line:
+                    break
+                
+                # Try to parse table row
+                # Your text shows: "1JWL001 22K Gold Necklace - Antique Finish 10 75000.00 750000.00"
+                
+                # Pattern 1: Look for JWL codes
+                if 'JWL' in line:
+                    # Split by spaces and try to find quantity
+                    parts = line.split()
+                    
+                    # Look for quantity - it's a number followed by price pattern
+                    for i, part in enumerate(parts):
+                        if part.isdigit() and i + 1 < len(parts) and '.' in parts[i + 1]:
+                            quantity = int(part)
+                            # Reconstruct description
+                            description_parts = []
+                            
+                            # Start from position 1 (skip row number + JWL code)
+                            # Find where the JWL code is
+                            for j in range(len(parts)):
+                                if 'JWL' in parts[j]:
+                                    # Start description after JWL code
+                                    k = j + 1
+                                    while k < i:  # Until we reach quantity
+                                        description_parts.append(parts[k])
+                                        k += 1
+                                    break
+                            
+                            description = ' '.join(description_parts)
+                            
+                            if description:
+                                results.append({
+                                    "po_number": po_number,
+                                    "po_date": po_date,
+                                    "vendor": vendor,
+                                    "description": description,
+                                    "quantity": quantity
+                                })
+                            break
+        
+        return results
+    
+    
+    ITEM_INLINE_REGEX = re.compile(
+        r"""
+        (?P<description>[A-Za-z0-9\s\-:.]+?)
+        \s+
+        (?P<quantity>\d+(?:\.\d+)?)
+        \s+EA
+        """,
+        re.IGNORECASE | re.VERBOSE
+    )
+        
+    def extract_common_header(self, text: str):
+        m = self.PO_BLOCK_REGEX.search(text)
+        if not m:
+            return {
+                "po_number": None,
+                "po_date": None,
+                "vendor_number": None
+            }
 
-            for m in self.ITEM_REGEX.finditer(text):
-                items.append({
-                    "description": m.group("description").strip(),
-                    "gold_karat": re.search(r"\d{2}", m.group("material")).group(),
-                    "quantity": int(m.group("quantity")),
-                    "delivery_date": m.group("delivery_date")
-                })
+        return {
+            "po_number": m.group("po_number").strip(),
+            "po_date": m.group("po_date").strip(),
+            "vendor_number": None  # name present, number not present
+        }
+        
+    @staticmethod  
+    def clean_item_description(desc: str) -> str:
+        desc = re.sub(r"^[A-Z0-9.\-/]+\s+", "", desc)
+        desc = re.sub(r"\b\d{2}K[W]?\b", "", desc)
+        return re.sub(r"\s+", " ", desc).strip()
+            
 
+    def extract_po_items(self, text: str):
+        items = []
+        if not text:
             return items
+
+        cleaned = self.normalize_attachment_text(text)
+        
+        for m in self.ITEM_INLINE_REGEX.finditer(cleaned):
+
+        # Quantity
+            qty = int(float(m.group("quantity")))
+            if qty > 100:   # filter address / garbage numbers
+                continue
+
+            # Delivery date
+            date_match = re.search(r"\b\d{1,2}/\d{1,2}/\d{2}\b", m.group(0))
+            delivery_date = date_match.group() if date_match else None
+
+            # Description
+            description = self.clean_item_description(m.group("description"))
+
+            # Append item
+            items.append({
+                "description": description,
+                "quantity": qty,
+                "gold_karat": self.extract_karat(description),
+                "delivery_date": delivery_date,
+            })
+        if items:
+            return items
+        
+        
+        for m in self.PO_REPEAT_BLOCK_REGEX.finditer(text):
+            items.append({
+                "description": m.group("description").strip(),
+                "quantity": int(m.group("quantity")),
+                "gold_karat": self.extract_karat(m.group("description")),
+                "delivery_date": None
+            })
+
+        if items:
+            return items
+        
+        for m in self.ITEM_ROW_REGEX.finditer(cleaned):
+            karat = re.search(r"\b(\d{2})K\b", m.group("description"), re.IGNORECASE)
+
+            items.append({
+                "description": m.group("description").strip(),
+                "quantity": int(m.group("quantity")),
+                "gold_karat": karat.group(1) if karat else None,
+                "delivery_date": None,   # not present in this layout
+            })
+
+        if items:
+            return items
+
+        # ===============================
+        # 0️⃣ REPEATED PO BLOCKS (NEW FIX)
+        # ===============================
+        for m in self.PO_BLOCK_REGEX.finditer(text):
+            items.append({
+                "description": m.group("description").strip(),
+                "quantity": int(m.group("quantity")),
+                "gold_karat": self.extract_karat(m.group("description")),
+                "delivery_date": None
+            })
+            if items:
+                return items
+
+        # ===============================
+        # 1️⃣ REPEATED DESCRIPTION / QTY BLOCKS
+        # ===============================
+        for m in self.ITEM_REPEAT_KV_REGEX.finditer(cleaned):
+            items.append({
+                "description": m.group("description").strip(),
+                "quantity": int(m.group("quantity")),
+                "gold_karat": None,
+                "delivery_date": None,
+            })
+
+        if items:
+            return items
+
+        # ===============================
+        # 2️⃣ PIPE TABLE (DOCX)
+        # ===============================
+        cleaned = self.normalize_pdf_tables(cleaned)
+
+        for m in self.ITEM_PIPE_TABLE_REGEX.finditer(cleaned):
+            karat = re.search(r"\d{2}", m.group("material"))
+            items.append({
+                "description": m.group("description").strip(),
+                "gold_karat": karat.group() if karat else None,
+                "quantity": int(m.group("quantity")),
+                "delivery_date": m.group("delivery_date"),
+            })
+
+        if items:
+            return items
+
+        # ===============================
+        # 3️⃣ COLUMN STYLE (PDF TABLE)
+        # ===============================
+        lines = [l.strip() for l in cleaned.split("\n") if l.strip()]
+        buffer = []
+
+        for line in lines:
+            buffer.append(line)
+            if re.search(r"\d{4}-\d{2}-\d{2}", line):
+                block = " ".join(buffer)
+                buffer = []
+
+                m = self.ITEM_COLUMN_REGEX.search(block)
+                if m:
+                    karat = re.search(r"\d{2}", m.group("material"))
+                    items.append({
+                        "description": m.group("description").strip(),
+                        "gold_karat": karat.group() if karat else None,
+                        "quantity": int(m.group("quantity")),
+                        "delivery_date": m.group("delivery_date"),
+                    })
+
+        if items:
+            return items
+
+        # ===============================
+        # 4️⃣ SIMPLE INLINE SKU TABLE
+        # ===============================
+        for m in self.ITEM_TABLE_REGEX.finditer(cleaned):
+            items.append({
+                "description": m.group("description").strip(),
+                "gold_karat": m.group("gold_karat"),
+                "quantity": int(m.group("quantity")),
+                "delivery_date": None,
+            })
+
+        return items
+
 
 
     async def extract_po_header(self,text: str):
         return await self.extract_po_fields(text)
     
+    def remove_footer_noise(self, text: str) -> str:
+        FOOTER_PATTERNS = [
+            r"^total\s+estimated\s+cost.*$",
+            r"^qty\s+unit\s+price\s+total.*$",
+            r"^duty\s+price.*$",
+        ]
+
+        for pat in FOOTER_PATTERNS:
+            text = re.sub(pat, "", text, flags=re.IGNORECASE | re.MULTILINE)
+
+        return text
+    
+    def normalize_pdf_tables(self, text: str) -> str:
+        lines = [l.strip() for l in text.split("\n") if l.strip()]
+        out = []
+        buffer = []
+
+        for line in lines:
+            # row starts with number + part no
+            if re.match(r"^\d+\s+[A-Z0-9\-]+$", line) and buffer:
+                out.append(" ".join(buffer))
+                buffer = [line]
+            else:
+                buffer.append(line)
+
+        if buffer:
+            out.append(" ".join(buffer))
+
+        return "\n".join(out)
+
     
     def extract_relative_folder_path(self, graph_path: str) -> str:
         """
@@ -692,53 +1202,78 @@ class SharepointService:
                         )
 
                         # ---------------- PO Extraction ----------------
-                        header = await self.extract_po_fields(text)
-                        items = self.extract_po_items(text)
+                        # ---------------- PO Extraction ----------------
+                        raw_text = text                     # keep original
+                        clean_text = self.remove_footer_noise(text)
+
+                        # First try to extract using the specific table format
+                        table_items = self.extract_purchase_order_table(raw_text)
+
+                        if table_items:
+                            # Extract common header from the first item
+                            first_item = table_items[0] if table_items else {}
+                            
+                            # Use existing header extraction for other fields
+                            header_text = clean_text
+                            header = await self.extract_po_fields(header_text)
+                            
+                            # For table items, we already have po_number, po_date, vendor from extract_purchase_order_table
+                            items = []
+                            for table_item in table_items:
+                                items.append({
+                                    "description": table_item.get("description"),
+                                    "quantity": table_item.get("quantity"),
+                                    "gold_karat": self.extract_karat(table_item.get("description")),
+                                    "delivery_date": None,
+                                    "po_number": table_item.get("po_number"),
+                                    "po_date": table_item.get("po_date"),
+                                    "vendor": table_item.get("vendor")
+                                })
+                        else:
+                            # Fall back to existing methods
+                            header_text = clean_text
+                            header = await self.extract_po_fields(header_text)
+                            items = self.extract_po_items(raw_text)
 
                         # ---------- HEADER ONLY (Fallback) ----------
                         if not items:
-                            if any(header.values()):
+                            if header.get("po_number") and header.get("customer_name"):
                                 await self.sp_repo.insert_sharepoint_po_details(
                                     user_id=user_id,
                                     po_number=header.get("po_number"),
                                     customer_name=header.get("customer_name"),
                                     vendor_number=header.get("vendor_number"),
-                                    po_date=self.normalize_po_date_ddmmyyyy(
-                                        header.get("po_date")
-                                    ),
+                                    po_date=self.normalize_po_date_ddmmyyyy(header.get("po_date")),
                                     delivery_date=header.get("delivery_date"),
-                                    cancel_date=self.normalize_po_date_ddmmyyyy(
-                                        header.get("cancel_date")
-                                    ),
+                                    cancel_date=self.normalize_po_date_ddmmyyyy(header.get("cancel_date")),
                                     gold_karat=header.get("gold_karat"),
                                     ec_style_number=header.get("ec_style_number"),
                                     customer_style_number=header.get("customer_style_number"),
                                     color=header.get("color"),
                                     quantity=header.get("quantity"),
-                                    description=header.get("description"),
+                                    description=header.get("description"), 
                                     created_by=user_id,
                                 )
 
                         # ---------- MULTIPLE ITEM ROWS ----------
                         else:
                             for item in items:
+                                # For table items, use item-specific po_number/po_date/vendor if available
+                                po_number = item.get("po_number") or header.get("po_number")
+                                po_date = item.get("po_date") or header.get("po_date")
+                                vendor = item.get("vendor") or header.get("vendor_number")
+                                
                                 await self.sp_repo.insert_sharepoint_po_details(
                                     user_id=user_id,
-                                    po_number=header.get("po_number"),
-                                    customer_name=header.get("customer_name"),
-                                    vendor_number=header.get("vendor_number"),
-                                    po_date=self.normalize_po_date_ddmmyyyy(
-                                        header.get("po_date")
-                                    ),
-                                    delivery_date=item.get("delivery_date"),
-                                    cancel_date=self.normalize_po_date_ddmmyyyy(
-                                        header.get("cancel_date")
-                                    ),
+                                    po_number=po_number,
+                                    customer_name=header.get("customer_name"),  # From your PDF
+                                    vendor_number=vendor,
+                                    po_date=self.normalize_po_date_ddmmyyyy(po_date),
+                                    delivery_date=self.normalize_po_date_ddmmyyyy(item.get("delivery_date")) or self.normalize_po_date_ddmmyyyy(header.get("delivery_date")),
+                                    cancel_date=self.normalize_po_date_ddmmyyyy(header.get("cancel_date")),
                                     gold_karat=item.get("gold_karat"),
                                     ec_style_number=header.get("ec_style_number"),
-                                    customer_style_number=header.get(
-                                        "customer_style_number"
-                                    ),
+                                    customer_style_number=header.get("customer_style_number"),
                                     color=header.get("color"),
                                     quantity=item.get("quantity"),
                                     description=item.get("description"),
@@ -795,7 +1330,8 @@ class SharepointService:
 
         # ------------------ TEXT FIELDS ------------------ #
         text = re.sub(r"[^\w\s]", " ", text)
-        text = re.sub(r"\s+", " ", text)
+        text = re.sub(r"[ \t]+", " ", text)
+
 
         # handle common abbreviations
         replacements = {
@@ -828,6 +1364,7 @@ class SharepointService:
 
 
     # -------------------------- JSON SAFE -------------------------- #
+    @staticmethod
     def make_json_safe(obj):
         if isinstance(obj, (date, datetime)):
             return obj.isoformat()

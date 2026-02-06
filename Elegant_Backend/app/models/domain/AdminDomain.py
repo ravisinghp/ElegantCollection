@@ -67,6 +67,9 @@ class GenerateMissingPoReport(BaseModel):
     user_id : int
     po_det_ids: List[int]
     
+class GenerateMissingSharepointPoReport(BaseModel):
+    user_id : int
+    
 class FetchMissingMismatchReport(BaseModel):
     user_id : int
     role_id:int

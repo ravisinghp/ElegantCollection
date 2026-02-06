@@ -243,6 +243,30 @@ class SharepointService:
     @staticmethod
     async def generate_file_hash(file_bytes: bytes) -> str:
         return hashlib.sha256(file_bytes).hexdigest()
+    
+    
+    
+    @staticmethod
+    def strip_item_column_noise(desc: str) -> str:
+        if not desc:
+            return desc
+
+        BAD_PREFIXES = [
+            "expected delivery",
+            "delivery date",
+            "qty",
+            "quantity",
+            "item description",
+            "description",
+        ]
+
+        d = desc.strip()
+
+        for p in BAD_PREFIXES:
+            if d.lower().startswith(p):
+                d = d[len(p):].strip()
+
+        return d
 
     # ---------------- TEXT EXTRACTION ---------------- #
     @staticmethod
@@ -381,11 +405,7 @@ class SharepointService:
         # ---------------- CUSTOMER NAME ----------------
         "customer_name": [
             # Or combine both:
-            r"(?:Ship\s+)?(Ostbye[^A-Za-z0-9]*To\s*:\s*[A-Za-z0-9\s,&.-]+(?:\n\s*[A-Za-z0-9\s,&.-]+){0,2})",
-            # Or simpler version:
-            r"(Ostbye[^\n]*(?:\n\s*[^\n]+){0,2})",
-            # Or even better - capture everything from "Ship Ostbye To:" to next section:
-            r"Ship\s+Ostbye\s+To\s*:\s*([^\n]+(?:\n\s*[^\n]+){0,2})",
+            r"(Ostbye[^A-Za-z0-9]*[A-Za-z0-9\s,&.-]+(?:\n\s*[A-Za-z0-9\s,&.-]+){0,2})",
             r"Ship\s+Ostbye\s+To\s*:\s*([^\n]+)",  # For Ostbye format
             r"(?:ship\s*to:|deliver\s*to:|ship\s+ostbye\s+to:)\s*([^\n]+)",
             r"Ship\s*To\s*:\s*([A-Za-z0-9 &.,\-]+)(?=\n\s*(?:FOB|Terms|Vendor|Contact|Phone|$))",
@@ -542,9 +562,8 @@ class SharepointService:
 
     @staticmethod
     def normalize_text(text: str) -> str:
-        # First, join multiline customer addresses - FIXED
-        text = re.sub(r'Ship\s+Ostbye\s+To\s*:\s*\n\s*', 'Ship Ostbye To: ', text)
-        text = re.sub(r'Ostbye\s+To\s*:\s*\n\s*', 'Ostbye To: ', text)
+        # First, join multiline customer addresses
+        text = re.sub(r'Ship\s+Ostbye\s+To\s*:\s*\n', 'Ship Ostbye To: ', text)
         # preserve newlines, normalize spaces only
         text = re.sub(r"[ \t]+", " ", text)
         return text.strip()

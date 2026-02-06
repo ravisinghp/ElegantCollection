@@ -10,7 +10,7 @@ from app.models.schemas.sharepoint_schema import FolderRequestParams
 from fastapi.responses import JSONResponse
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import StreamingResponse
-from app.models.domain.AdminDomain import GenerateMissingPoReport,SharepointFetchMissingMismatchReport,DownloadSharepointMissingMismatchRequest,UpdateSharepointPoCommentRequest
+from app.models.domain.AdminDomain import GenerateMissingSharepointPoReport,SharepointFetchMissingMismatchReport,DownloadSharepointMissingMismatchRequest,UpdateSharepointPoCommentRequest
 
 
 router = APIRouter()
@@ -158,7 +158,7 @@ async def sync_sharepoint_files(
 # ---------------------------------------------------------------------
 @router.post("/generate_sharepoint_missing_po_report")
 async def generate_missing_po_report(
-    request : GenerateMissingPoReport,
+    request : GenerateMissingSharepointPoReport,
     sp_repo: SharepointRepo = Depends(get_repository(SharepointRepo))
 ):
     service = SharepointService(sp_repo)

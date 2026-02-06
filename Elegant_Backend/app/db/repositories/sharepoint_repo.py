@@ -178,12 +178,12 @@ class SharepointRepo(BaseRepository):
     
     
     #---------------Insert PO Missing Data---------------#
-    async def insert_sharepoint_po_missing(
+    async def insert_po_missing(
         self,
         *,
         sharepoint_po_det_id: int,
-        user_id:int,
-        system_po_id: Optional[int],
+        user_id: int,
+        system_po_id: int | None,
         attribute: str,
         system_value: str,
         scanned_value: str,
@@ -192,7 +192,7 @@ class SharepointRepo(BaseRepository):
 
         await self._log_and_execute(
             INSERT_SHAREPOINT_PO_MISSING,
-            [
+            (
                 sharepoint_po_det_id,
                 user_id,
                 system_po_id,
@@ -200,7 +200,7 @@ class SharepointRepo(BaseRepository):
                 system_value,
                 scanned_value,
                 comment,
-            ],
+            ),
         )
 
         last_id = self._cur.lastrowid
@@ -210,24 +210,24 @@ class SharepointRepo(BaseRepository):
             raise RuntimeError("Failed to insert PO missing report")
 
         return int(last_id)
+
     
     #---------------Insert PO Mismatch Data---------------#
-    async def insert_sharepoint_mismatch(
+    async def insert_mismatch(
         self,
         *,
-        sharepoint_po_det_id: Optional[int],
-        user_id,
-        system_po_id: Optional[int],
+        sharepoint_po_det_id: int,
+        user_id: int,
+        system_po_id: int,
         field: str,
         system_value: str,
         scanned_value: str,
         comment: str,
     ) -> int:
-        """Inserts a mismatch into po_mismatch_report"""
 
         await self._log_and_execute(
             INSERT_SHAREPOINT_MISMATCH,
-            [
+            (
                 sharepoint_po_det_id,
                 user_id,
                 system_po_id,
@@ -235,7 +235,7 @@ class SharepointRepo(BaseRepository):
                 system_value,
                 scanned_value,
                 comment,
-            ],
+            ),
         )
 
         last_id = self._cur.lastrowid
@@ -295,26 +295,143 @@ class SharepointRepo(BaseRepository):
         return int(last_id)
     
     
-    async def get_all_sharepoint_po_details(self):
-        """Used in your PO mismatch service"""
-        await self._log_and_execute(GET_ALL_SHAREPOINT_PO_DETAILS, [])
-        return await self._cur.fetchall()
+    
+    async def get_po_details_by_ids(
+        self,
+        sharepoint_po_det_ids: list[int],
+    ):
+        if not sharepoint_po_det_ids:
+            return []
 
-    async def get_all_system_po_details(self):
-        """Used in your PO mismatch service"""
-        await self._log_and_execute(GET_ALL_SYSTEM_PO_DETAILS, [])
+        placeholders = ",".join(["%s"] * len(sharepoint_po_det_ids))
+
+        query = f"""
+            SELECT *
+            FROM sharepoint_po_details
+            WHERE active = 1
+            AND sharepoint_po_det_id IN ({placeholders})
+        """
+
+        await self._log_and_execute(query, tuple(sharepoint_po_det_ids))
         return await self._cur.fetchall()
     
-    async def get_all_sharepoint_mismatches(self):
-        await self._log_and_execute(GET_ALL_SHAREPOINT_MISMATCHES)
+    
+    async def get_system_pos_by_po_numbers(
+        self,
+        po_numbers: list[str],
+    ):
+        if not po_numbers:
+            return []
+
+        placeholders = ",".join(["%s"] * len(po_numbers))
+
+        query = f"""
+            SELECT *
+            FROM system_po_details
+            WHERE active = 1
+            AND po_number IN ({placeholders})
+        """
+
+        await self._log_and_execute(query, tuple(po_numbers))
         return await self._cur.fetchall()
     
-    async def get_existing_sharepoint_po_missing(self, sharepoint_po_det_id: int):
+    
+    async def po_missing_exists(
+        self,
+        *,
+        user_id: int,
+        sharepoint_po_det_id: int,
+        system_po_id: int | None,
+        mismatch_attribute: str,
+        scanned_value: str,
+        system_value: str,
+    ) -> bool:
+
+        query = """
+            SELECT 1
+            FROM sharepoint_po_missing_report
+            WHERE active = 1
+            AND user_id = %s
+            AND sharepoint_po_det_id = %s
+            AND mismatch_attribute = %s
+            AND scanned_value = %s
+            AND system_value = %s
+            LIMIT 1
+        """
+
         await self._log_and_execute(
-            GET_EXISTING_SHAREPOINT_PO_MISSING_BY_SYSTEM_PO,
-        [sharepoint_po_det_id],
-    )
-        return await self._cur.fetchone()
+            query,
+            (
+                user_id,
+                sharepoint_po_det_id,
+                mismatch_attribute,
+                scanned_value,
+                system_value,
+            ),
+        )
+
+        return await self._cur.fetchone() is not None
+    
+    
+    async def mismatch_exists(
+        self,
+        *,
+        user_id: int,
+        sharepoint_po_det_id: int,
+        system_po_id: int,
+        mismatch_attribute: str,
+        scanned_value: str,
+        system_value: str,
+    ) -> bool:
+
+        query = """
+            SELECT 1
+            FROM sharepoint_po_mismatch_report
+            WHERE active = 1
+            AND user_id = %s
+            AND sharepoint_po_det_id = %s
+            AND system_po_id = %s
+            AND mismatch_attribute = %s
+            AND scanned_value = %s
+            AND system_value = %s
+            LIMIT 1
+        """
+
+        await self._log_and_execute(
+            query,
+            (
+                user_id,
+                sharepoint_po_det_id,
+                system_po_id,
+                mismatch_attribute,
+                scanned_value,
+                system_value,
+            ),
+        )
+
+        return await self._cur.fetchone() is not None
+    
+    
+    # async def get_all_sharepoint_po_details(self):
+    #     """Used in your PO mismatch service"""
+    #     await self._log_and_execute(GET_ALL_SHAREPOINT_PO_DETAILS, [])
+    #     return await self._cur.fetchall()
+
+    # async def get_all_system_po_details(self):
+    #     """Used in your PO mismatch service"""
+    #     await self._log_and_execute(GET_ALL_SYSTEM_PO_DETAILS, [])
+    #     return await self._cur.fetchall()
+    
+    # async def get_all_sharepoint_mismatches(self):
+    #     await self._log_and_execute(GET_ALL_SHAREPOINT_MISMATCHES)
+    #     return await self._cur.fetchall()
+    
+    # async def get_existing_sharepoint_po_missing(self, sharepoint_po_det_id: int):
+    #     await self._log_and_execute(
+    #         GET_EXISTING_SHAREPOINT_PO_MISSING_BY_SYSTEM_PO,
+    #     [sharepoint_po_det_id],
+    # )
+    #     return await self._cur.fetchone()
     
     
     #----------------------Table Data On Sharepoint Dashboard-----------------

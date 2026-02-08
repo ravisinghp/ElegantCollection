@@ -447,6 +447,7 @@ class SharepointRepo(BaseRepository):
                 COALESCE(pd.po_date, sp.po_date) AS po_date,
                 COALESCE(pd.vendor_number, sp.vendor_number) AS vendor_code,
                 COALESCE(pd.customer_name, sp.customer_name) AS customer_name,
+                COALESCE(pd.created_on, sp.created_on) AS created_on,
                 um.user_name AS username,
 
                 pm.comment,
@@ -498,6 +499,7 @@ class SharepointRepo(BaseRepository):
                 mm.mismatch_attribute,
                 mm.scanned_value,
                 mm.system_value,
+                mm.created_on,
             
 
                 'MISMATCH' AS po_status

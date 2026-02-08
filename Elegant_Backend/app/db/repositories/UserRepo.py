@@ -59,7 +59,7 @@ async def download_missing_po_report(
     request: Request,
     user_id: int,
     role_id: int,
-    selected_ids: List[int]
+    #selected_ids: List[int]
 ):
     base_query = """
         SELECT
@@ -85,10 +85,10 @@ async def download_missing_po_report(
         params.append(user_id)
 
     #  Safe IN clause
-    if selected_ids:
-        placeholders = ",".join(["%s"] * len(selected_ids))
-        base_query += f" AND pm.po_missing_id IN ({placeholders})"
-        params.extend(selected_ids)
+    # if selected_ids:
+    #     placeholders = ",".join(["%s"] * len(selected_ids))
+    #     base_query += f" AND pm.po_missing_id IN ({placeholders})"
+    #     params.extend(selected_ids)
 
     base_query += " ORDER BY pm.po_missing_id DESC"
 
@@ -103,7 +103,7 @@ async def download_missing_po_report(
 
 
    #For Doanloading the PO Mismatch Report   
-async def download_mismatch_po_report(request: Request, user_id: int, role_id: int, selected_ids: List[int]):
+async def download_mismatch_po_report(request: Request, user_id: int, role_id: int):
     base_query  = """
         SELECT
             pd.po_number,
@@ -135,10 +135,10 @@ async def download_mismatch_po_report(request: Request, user_id: int, role_id: i
         params.append(user_id)
 
     #  ADD THIS
-    if selected_ids:
-        placeholders = ",".join(["%s"] * len(selected_ids))
-        base_query += f" AND mm.po_mismatch_id IN ({placeholders})"
-        params.extend(selected_ids)
+    # if selected_ids:
+    #     placeholders = ",".join(["%s"] * len(selected_ids))
+    #     base_query += f" AND mm.po_mismatch_id IN ({placeholders})"
+    #     params.extend(selected_ids)
         
     base_query += " ORDER BY mm.po_mismatch_id DESC"
     
@@ -150,161 +150,195 @@ async def download_mismatch_po_report(request: Request, user_id: int, role_id: i
             rows = await cursor.fetchall()
 
             return [dict(zip(columns, row)) for row in rows]
-        
-        
-#Download email and sharepoint both missing pos
-async def download_combined_missing_po_report(
-    request: Request,
-    user_id: int,
-    role_id: int,
-    system_selected_ids: List[int],
-    sharepoint_selected_ids: List[int]
-):
-    params = []
-    queries = []
-
-    #SYSTEM Missing
-    if system_selected_ids:
-        system_query = """
+             
+#For Business admin Dashboard download all missing pos 
+async def download_all_missing_po_report(request: Request):
+    try:
+        query = """
             SELECT
+                'EMAIL' AS source,
                 pd.po_number,
                 pd.po_date,
                 pd.vendor_number AS vendor_code,
-                pd.customer_name,
-                'SYSTEM' AS source
+                pd.customer_name
             FROM po_missing_report pm
-            LEFT JOIN po_details pd
-                ON pd.po_det_id = pm.po_det_id
+            JOIN po_details pd ON pd.po_det_id = pm.po_det_id
             WHERE pm.active = 1
-        """
 
-        if role_id == 1:
-            system_query += " AND pm.user_id = %s"
-            params.append(user_id)
+            UNION ALL
 
-        placeholders = ",".join(["%s"] * len(system_selected_ids))
-        system_query += f" AND pm.po_missing_id IN ({placeholders})"
-        params.extend(system_selected_ids)
-
-        queries.append(system_query)
-
-    # SHAREPOINT Missing
-    if sharepoint_selected_ids:
-        sharepoint_query = """
             SELECT
+                'SHAREPOINT' AS source,
                 sp.po_number,
                 sp.po_date,
                 sp.vendor_number AS vendor_code,
-                sp.customer_name,
-                'SHAREPOINT' AS source
+                sp.customer_name
             FROM sharepoint_po_missing_report spm
-            LEFT JOIN sharepoint_po_details sp
+            JOIN sharepoint_po_details sp
                 ON sp.sharepoint_po_det_id = spm.sharepoint_po_det_id
             WHERE spm.active = 1
+
+            ORDER BY po_date DESC
         """
 
-        if role_id == 1:
-            sharepoint_query += " AND spm.user_id = %s"
-            params.append(user_id)
+        async with request.app.state.pool.acquire() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute(query)
+                columns = [col[0] for col in cursor.description]
+                rows = await cursor.fetchall()
+                return [dict(zip(columns, row)) for row in rows]
 
-        placeholders = ",".join(["%s"] * len(sharepoint_selected_ids))
-        sharepoint_query += f" AND spm.sharepoint_po_missing_id IN ({placeholders})"
-        params.extend(sharepoint_selected_ids)
-
-        queries.append(sharepoint_query)
-
-    if not queries:
-        return []
-
-    final_query = " UNION ALL ".join(queries)
-
-    async with request.app.state.pool.acquire() as conn:
-        async with conn.cursor() as cursor:
-            await cursor.execute(final_query, tuple(params))
-
-            columns = [col[0] for col in cursor.description]
-            rows = await cursor.fetchall()
-
-            return [dict(zip(columns, row)) for row in rows]
-        
-
-#Download email and sharepoint both mismatch pos
-async def download_combined_mismatch_po_report(
-    request: Request,
-    user_id: int,
-    role_id: int,
-    system_ids: list[int],
-    sharepoint_ids: list[int]
-):
-    queries = []
-    params = []
-
-    # ---------------- SYSTEM MISMATCH ----------------
-    if system_ids:
-        system_query = """
+    except Exception as e:
+        raise e
+    
+    
+#For Business admin Dashboard download all mismatch pos     
+async def download_all_mismatch_po_report(request: Request):
+    try:
+        query = """
             SELECT
+                'EMAIL' AS source,
                 pd.po_number,
-                pd.po_date,
-                pd.vendor_number AS vendor_code,
-                pd.customer_name,
-                pm.po_mismatch_id,
-                'system' AS source
-            FROM po_mismatch_report pm
-            LEFT JOIN po_details pd
-                ON pd.po_det_id = pm.po_det_id
-            WHERE pm.active = 1
-        """
+                pd.vendor_number,
+                mm.mismatch_attribute,
+                mm.scanned_value,
+                mm.system_value,
+                mm.comment
+            FROM po_mismatch_report mm
+            JOIN po_details pd ON pd.po_det_id = mm.po_det_id
+            WHERE mm.active = 1
 
-        if role_id == 1:
-            system_query += " AND pm.user_id = %s"
-            params.append(user_id)
+            UNION ALL
 
-        placeholders = ",".join(["%s"] * len(system_ids))
-        system_query += f" AND pm.po_mismatch_id IN ({placeholders})"
-        params.extend(system_ids)
-
-        queries.append(system_query)
-
-    # ---------------- SHAREPOINT MISMATCH ----------------
-    if sharepoint_ids:
-        sp_query = """
             SELECT
-                pd.po_number,
-                pd.po_date,
-                pd.vendor_number AS vendor_code,
-                pd.customer_name,
-                spm.sharepoint_po_mismatch_id AS po_mismatch_id,
-                'sharepoint' AS source
-            FROM sharepoint_po_mismatch_report spm
-            LEFT JOIN sharepoint_po_details pd
-                ON pd.sharepoint_po_det_id = spm.sharepoint_po_det_id
-            WHERE spm.active = 1
+                'SHAREPOINT' AS source,
+                sp.po_number,
+                sp.vendor_number,
+                sm.mismatch_attribute,
+                sm.scanned_value,
+                sm.system_value,
+                sm.comment
+            FROM sharepoint_po_mismatch_report sm
+            JOIN sharepoint_po_details sp
+                ON sp.sharepoint_po_det_id = sm.sharepoint_po_det_id
+            WHERE sm.active = 1
         """
 
-        if role_id == 1:
-            sp_query += " AND pd.user_id = %s"
-            params.append(user_id)
+        async with request.app.state.pool.acquire() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute(query)
+                columns = [col[0] for col in cursor.description]
+                rows = await cursor.fetchall()
+                return [dict(zip(columns, row)) for row in rows]
 
-        placeholders = ",".join(["%s"] * len(sharepoint_ids))
-        sp_query += f" AND spm.sharepoint_po_mismatch_id IN ({placeholders})"
-        params.extend(sharepoint_ids)
+    except Exception as e:
+        raise e
 
-        queries.append(sp_query)
 
-    if not queries:
-        return []
+ 
 
-    final_query = " UNION ALL ".join(queries) + " ORDER BY po_mismatch_id DESC"
+async def download_combined_all_po_report(
+        request: Request,
+        user_id: int,
+        role_id: int,
+        email_missing_ids: list[int],
+        email_mismatch_ids: list[int],
+        sharepoint_missing_ids: list[int],
+        sharepoint_mismatch_ids: list[int]
+    ):
+        try:
+            queries = []
+            params = []
 
-    async with request.app.state.pool.acquire() as conn:
-        async with conn.cursor() as cursor:
-            await cursor.execute(final_query, tuple(params))
-            columns = [col[0] for col in cursor.description]
-            rows = await cursor.fetchall()
+            # EMAIL MISSING
+            if email_missing_ids:
+                placeholders = ",".join(["%s"] * len(email_missing_ids))
+                queries.append(f"""
+                    SELECT
+                        'EMAIL' AS source,
+                        'MISSING' AS record_type,
+                        pd.po_number,
+                        pd.po_date,
+                        pd.vendor_number AS vendor_code,
+                        pd.customer_name
+                    FROM po_missing_report pm
+                    JOIN po_details pd ON pd.po_det_id = pm.po_det_id
+                    WHERE pm.active = 1
+                      AND pm.po_missing_id IN ({placeholders})
+                """)
+                params.extend(email_missing_ids)
 
-            return [dict(zip(columns, row)) for row in rows]
+            # EMAIL MISMATCH
+            if email_mismatch_ids:
+                placeholders = ",".join(["%s"] * len(email_mismatch_ids))
+                queries.append(f"""
+                    SELECT
+                        'EMAIL' AS source,
+                        'MISMATCH' AS record_type,
+                        pd.po_number,
+                        pd.po_date,
+                        pd.vendor_number AS vendor_code,
+                        pd.customer_name
+                    FROM po_mismatch_report mm
+                    JOIN po_details pd ON pd.po_det_id = mm.po_det_id
+                    WHERE mm.active = 1
+                      AND mm.po_mismatch_id IN ({placeholders})
+                """)
+                params.extend(email_mismatch_ids)
 
-        
+            # SHAREPOINT MISSING
+            if sharepoint_missing_ids:
+                placeholders = ",".join(["%s"] * len(sharepoint_missing_ids))
+                queries.append(f"""
+                    SELECT
+                        'SHAREPOINT' AS source,
+                        'MISSING' AS record_type,
+                        sp.po_number,
+                        sp.po_date,
+                        sp.vendor_number AS vendor_code,
+                        sp.customer_name
+                    FROM sharepoint_po_missing_report spm
+                    JOIN sharepoint_po_details sp
+                      ON sp.sharepoint_po_det_id = spm.sharepoint_po_det_id
+                    WHERE spm.active = 1
+                      AND spm.sharepoint_po_missing_id IN ({placeholders})
+                """)
+                params.extend(sharepoint_missing_ids)
+
+            # SHAREPOINT MISMATCH
+            if sharepoint_mismatch_ids:
+                placeholders = ",".join(["%s"] * len(sharepoint_mismatch_ids))
+                queries.append(f"""
+                    SELECT
+                        'SHAREPOINT' AS source,
+                        'MISMATCH' AS record_type,
+                        sp.po_number,
+                        sp.po_date,
+                        sp.vendor_number AS vendor_code,
+                        sp.customer_name
+                    FROM sharepoint_po_mismatch_report spm
+                    JOIN sharepoint_po_details sp
+                      ON sp.sharepoint_po_det_id = spm.sharepoint_po_det_id
+                    WHERE spm.active = 1
+                      AND spm.sharepoint_po_mismatch_id IN ({placeholders})
+                """)
+                params.extend(sharepoint_mismatch_ids)
+
+            if not queries:
+                return []
+
+            final_query = " UNION ALL ".join(queries) + " ORDER BY po_date DESC"
+
+            async with request.app.state.pool.acquire() as conn:
+                async with conn.cursor() as cursor:
+                    await cursor.execute(final_query, tuple(params))
+                    columns = [col[0] for col in cursor.description]
+                    rows = await cursor.fetchall()
+
+                    return [dict(zip(columns, row)) for row in rows]
+
+        except Exception as e:
+            raise e       
         
         
         

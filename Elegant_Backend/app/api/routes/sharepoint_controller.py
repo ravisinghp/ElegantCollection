@@ -10,7 +10,7 @@ from app.models.schemas.sharepoint_schema import FolderRequestParams
 from fastapi.responses import JSONResponse
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import StreamingResponse
-from app.models.domain.AdminDomain import GenerateMissingSharepointPoReport,SharepointFetchMissingMismatchReport,DownloadSharepointMissingMismatchRequest,UpdateSharepointPoCommentRequest
+from app.models.domain.AdminDomain import GenerateMissingSharepointPoReport,SharepointFetchMissingMismatchReport,DownloadSharepointMissingMismatchRequest,UpdateSharepointPoCommentRequest,DownloadAllSelectedSharepointPORequest
 
 
 router = APIRouter()
@@ -243,6 +243,34 @@ async def download_sharepoint_mismatch_po_report(
             user_id=payload.user_id,
             role_id=payload.role_id,
             selected_ids=payload.selected_ids,
+            format=format
+        )
+
+        return StreamingResponse(
+            file_stream,
+            media_type=media_type,
+            headers={
+                "Content-Disposition": f"attachment; filename={filename}"
+            }
+        )
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    
+
+@router.post("/download_all_selected_po_report")
+async def download_all_selected_po_report(
+    request: Request,
+    payload: DownloadAllSelectedSharepointPORequest,
+    format: str = Query("excel", regex="^(excel|pdf)$")
+):
+    try:
+        file_stream, filename, media_type = await SharepointService.download_selected_po_report(
+            request=request,
+            user_id=payload.user_id,
+            role_id=payload.role_id,
+            sharepoint_missing_ids=payload.sharepoint_missing_ids,
+            sharepoint_mismatch_ids=payload.sharepoint_mismatch_ids,
             format=format
         )
 

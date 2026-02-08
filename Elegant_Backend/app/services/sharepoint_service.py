@@ -1830,6 +1830,42 @@ class SharepointService:
         else:
             raise HTTPException(status_code=400, detail="Invalid file format")
         
+        
+    async def download_selected_po_report(
+        request: Request,
+        user_id: int,
+        role_id: int,
+        sharepoint_missing_ids: List[int] = None,
+        sharepoint_mismatch_ids: List[int] = None,
+        format: str = "excel"
+    ):
+        data = await SharepointRepo.download_selected_po_report(
+            request, user_id, role_id, sharepoint_missing_ids, sharepoint_mismatch_ids
+        )
+
+        if not data:
+            return None, "no_data.xlsx" if format=="excel" else "no_data.pdf", "application/octet-stream"
+
+        df = pd.DataFrame(data)
+        filename_prefix = "sharepoint_po_report"
+
+        if format == "excel":
+            output = io.BytesIO()
+            df.to_excel(output, index=False)
+            output.seek(0)
+            return (
+                output, 
+                f"{filename_prefix}.xlsx", 
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+            
+        elif format == "pdf":
+            return SharepointService._generate_po_pdf(df, filename_prefix)
+
+        else:
+            raise HTTPException(status_code=400, detail="Invalid file format")
+
+        
     # #Last Sync On Dashboard(Sharepoint)
     async def get_last_sync_by_user_id(user_id: int,role_id: int,request: Request):
         try:

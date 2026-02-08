@@ -38,10 +38,10 @@ async def download_missing_po_report(
     user_id: int,
     role_id: int,
     format: str,
-    selected_ids: Optional[List[int]] = None
+    #selected_ids: Optional[List[int]] = None
 ):
-    selected_ids = selected_ids or []
-    data = await UserRepo.download_missing_po_report(request, user_id, role_id, selected_ids)
+    #selected_ids = selected_ids or []
+    data = await UserRepo.download_missing_po_report(request, user_id, role_id)
 
     if not data:
         raise HTTPException(status_code=404, detail="No missing PO data available")
@@ -74,10 +74,10 @@ async def download_mismatch_po_report(
     user_id: int,
     role_id: int,
     format: str,
-    selected_ids: Optional[List[int]] = None
+    #selected_ids: Optional[List[int]] = None
 ):
-    selected_ids = selected_ids or []
-    data = await UserRepo.download_mismatch_po_report(request, user_id, role_id, selected_ids)
+    #selected_ids = selected_ids or []
+    data = await UserRepo.download_mismatch_po_report(request, user_id, role_id)
 
     if not data:
         raise HTTPException(status_code=404, detail="No mismatch PO data available")
@@ -102,91 +102,122 @@ async def download_mismatch_po_report(
     else:
         raise HTTPException(status_code=400, detail="Invalid file format")
     
-    
-    
- #Download email and sharepoint both missing pos   
-async def download_combined_missing_po_report(
-    request: Request,
-    user_id: int,
-    role_id: int,
-    system_selected_ids: List[int],
-    sharepoint_selected_ids: List[int],
-    format: str
-):
-    system_selected_ids = system_selected_ids or []
-    sharepoint_selected_ids = sharepoint_selected_ids or []
+  
+ #For Business admin Dashboard download all missing pos    
+async def download_all_missing_po_report(
+        request: Request,
+        format: str
+    ):
+        try:
+            data = await UserRepo.download_all_missing_po_report(request)
 
-    data = await UserRepo.download_combined_missing_po_report(
-        request=request,
-        user_id=user_id,
-        role_id=role_id,
-        system_selected_ids=system_selected_ids,
-        sharepoint_selected_ids=sharepoint_selected_ids
-    )
+            if not data:
+                raise HTTPException(status_code=404, detail="No missing PO data available")
 
-    if not data:
-        raise HTTPException(status_code=404, detail="No missing PO data available")
+            df = pd.DataFrame(data)
+            filename = "all_missing_po_report"
 
-    df = pd.DataFrame(data)
-    filename_prefix = "combined_missing_po_report"
+            if format == "excel":
+                output = io.BytesIO()
+                df.to_excel(output, index=False)
+                output.seek(0)
+                return (
+                    output,
+                    f"{filename}.xlsx",
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
 
-    if format == "excel":
-        output = io.BytesIO()
-        df.to_excel(output, index=False)
-        output.seek(0)
+            elif format == "pdf":
+                return _generate_po_pdf(df, filename)
 
-        return (
-            output,
-            f"{filename_prefix}.xlsx",
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
+            else:
+                raise HTTPException(status_code=400, detail="Invalid format")
 
-    elif format == "pdf":
-        return _generate_po_pdf(df, filename_prefix)
+        except Exception as e:
+            raise e
+        
+  #For Business admin Dashboard download all mismatch pos       
+async def download_all_mismatch_po_report(
+        request: Request,
+        format: str
+    ):
+        try:
+            data = await UserRepo.download_all_mismatch_po_report(request)
 
-    else:
-        raise HTTPException(status_code=400, detail="Invalid file format")
-    
- 
- #Download email and sharepoint both mismatch pos   
-async def download_combined_mismatch_po_report(
-    request: Request,
-    user_id: int,
-    role_id: int,
-    system_ids: list[int],
-    sharepoint_ids: list[int],
-    format: str
-):
-    data = await UserRepo.download_combined_mismatch_po_report(
-        request=request,
-        user_id=user_id,
-        role_id=role_id,
-        system_ids=system_ids,
-        sharepoint_ids=sharepoint_ids
-    )
+            if not data:
+                raise HTTPException(status_code=404, detail="No mismatch PO data available")
 
-    if not data:
-        raise HTTPException(status_code=404, detail="No mismatch PO data available")
+            df = pd.DataFrame(data)
+            filename = "all_mismatch_po_report"
 
-    df = pd.DataFrame(data)
-    filename_prefix = "po_mismatch_combined_report"
+            if format == "excel":
+                output = io.BytesIO()
+                df.to_excel(output, index=False)
+                output.seek(0)
+                return (
+                    output,
+                    f"{filename}.xlsx",
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
 
-    if format == "excel":
-        output = io.BytesIO()
-        df.to_excel(output, index=False)
-        output.seek(0)
+            elif format == "pdf":
+                return _generate_po_pdf(df, filename)
 
-        return (
-            output,
-            f"{filename_prefix}.xlsx",
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
+            else:
+                raise HTTPException(status_code=400, detail="Invalid format")
 
-    elif format == "pdf":
-        return _generate_po_pdf(df, filename_prefix)
+        except Exception as e:
+            raise e
+        
+        
+async def download_combined_all_po_report(
+        request: Request,
+        user_id: int,
+        role_id: int,
+        email_missing_ids: list[int],
+        email_mismatch_ids: list[int],
+        sharepoint_missing_ids: list[int],
+        sharepoint_mismatch_ids: list[int],
+        format: str
+    ):
+        try:
+            data = await UserRepo.download_combined_all_po_report(
+                request=request,
+                user_id=user_id,
+                role_id=role_id,
+                email_missing_ids=email_missing_ids,
+                email_mismatch_ids=email_mismatch_ids,
+                sharepoint_missing_ids=sharepoint_missing_ids,
+                sharepoint_mismatch_ids=sharepoint_mismatch_ids
+            )
 
-    else:
-        raise HTTPException(status_code=400, detail="Invalid file format")
+            if not data:
+                raise HTTPException(status_code=404, detail="No PO data found")
+
+            df = pd.DataFrame(data)
+            filename_prefix = "all_selected_purchase_orders"
+
+            if format == "excel":
+                output = io.BytesIO()
+                df.to_excel(output, index=False)
+                output.seek(0)
+
+                return (
+                    output,
+                    f"{filename_prefix}.xlsx",
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
+
+            elif format == "pdf":
+                return _generate_po_pdf(df, filename_prefix)
+
+            else:
+                raise HTTPException(status_code=400, detail="Invalid format")
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
 
 
 # ===============================

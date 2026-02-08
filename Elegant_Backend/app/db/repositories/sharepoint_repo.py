@@ -653,6 +653,78 @@ class SharepointRepo(BaseRepository):
                 rows = await cursor.fetchall()
 
                 return [dict(zip(columns, row)) for row in rows]
+            
+    
+    async def download_selected_po_report(
+        request: Request,
+        user_id: int,
+        role_id: int,
+        sharepoint_missing_ids: List[int] = None,
+        sharepoint_mismatch_ids: List[int] = None
+    ) -> List[Dict]:
+        sharepoint_missing_ids = sharepoint_missing_ids or []
+        sharepoint_mismatch_ids = sharepoint_mismatch_ids or []
+
+        queries = []
+        params = []
+
+        # SHAREPOINT MISSING
+        if sharepoint_missing_ids:
+            placeholders = ",".join(["%s"] * len(sharepoint_missing_ids))
+            q = f"""
+                SELECT
+                    pd.po_number,
+                    pd.po_date,
+                    pd.vendor_number AS vendor_code,
+                    pd.customer_name,
+                    'MISSING' AS record_type
+                FROM sharepoint_po_missing_report sm
+                JOIN sharepoint_po_details pd ON pd.sharepoint_po_det_id = sm.sharepoint_po_det_id
+                WHERE sm.active = 1
+            """
+            if role_id == 1:
+                q += " AND sm.user_id = %s"
+                params.append(user_id)
+            q += f" AND sm.sharepoint_po_missing_id IN ({placeholders})"
+            params.extend(sharepoint_missing_ids)
+            queries.append(q)
+
+        # SHAREPOINT MISMATCH
+        if sharepoint_mismatch_ids:
+            placeholders = ",".join(["%s"] * len(sharepoint_mismatch_ids))
+            q = f"""
+                SELECT
+                    pd.po_number,
+                    pd.po_date,
+                    pd.vendor_number AS vendor_code,
+                    pd.customer_name,
+                    mm.mismatch_attribute,
+                    mm.scanned_value,
+                    mm.system_value,
+                    mm.comment,
+                    'MISMATCH' AS record_type
+                FROM sharepoint_po_mismatch_report mm
+                JOIN sharepoint_po_details pd ON pd.sharepoint_po_det_id = mm.sharepoint_po_det_id
+                WHERE mm.active = 1
+            """
+            if role_id == 1:
+                q += " AND mm.user_id = %s"
+                params.append(user_id)
+            q += f" AND mm.sharepoint_po_mismatch_id IN ({placeholders})"
+            params.extend(sharepoint_mismatch_ids)
+            queries.append(q)
+
+        if not queries:
+            return []
+
+        final_query = " UNION ALL ".join(queries) + " ORDER BY po_date DESC"
+
+        async with request.app.state.pool.acquire() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute(final_query, tuple(params))
+                columns = [col[0] for col in cursor.description]
+                rows = await cursor.fetchall()
+                return [dict(zip(columns, row)) for row in rows]
      
      #------------------Last On Dashboard----------------------       
     async def get_last_sync_by_user_id(

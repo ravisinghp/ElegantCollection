@@ -58,12 +58,30 @@ class SchedulerRequest(BaseModel):
 class DownloadMissingMismatchRequest(BaseModel):
     user_id: int
     role_id: int
-    selected_ids: Optional[List[int]] = None
+    #selected_ids: Optional[List[int]] = None
+    
+class DownloadCombinedAllPORequest(BaseModel):
+    user_id: int
+    role_id: int
+    email_missing_ids: list[int] = []
+    email_mismatch_ids: list[int] = []
+    sharepoint_missing_ids: list[int] = []
+    sharepoint_mismatch_ids: list[int] = []
+    
+class DownloadAllMissingMismatchRequest(BaseModel):
+    user_id: int
+    role_id: int
 
 class DownloadSharepointMissingMismatchRequest(BaseModel):
     user_id : int
     role_id : int
     selected_ids: Optional[List[int]] = None
+    
+class DownloadAllSelectedSharepointPORequest(BaseModel):
+    user_id: int
+    role_id: int
+    sharepoint_missing_ids: Optional[List[int]] = []
+    sharepoint_mismatch_ids: Optional[List[int]] = []
     
     
 class DownloadCombinedMissingMismatchRequest(BaseModel):

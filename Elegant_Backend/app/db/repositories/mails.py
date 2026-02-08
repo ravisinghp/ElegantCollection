@@ -61,8 +61,9 @@ INSERT INTO po_details (
     quantity,
     description,
     mail_folder,
-    created_by
-) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+    created_by,
+    gold_lock
+) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
 """
 
 
@@ -379,6 +380,7 @@ class MailsRepository(BaseRepository):
         description: Optional[str],
         mail_folder: Optional[str],
         created_by: Optional[int],
+        gold_lock: Optional[str] ,
     ) -> int:
         
         await self._log_and_execute(
@@ -400,6 +402,7 @@ class MailsRepository(BaseRepository):
                 description,
                 mail_folder,
                 created_by,
+                gold_lock,
             ),
         )
 

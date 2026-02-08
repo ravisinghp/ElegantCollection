@@ -23,6 +23,7 @@ from app.core.config import ALLOWED_HOSTS, PROJECT_NAME, VERSION, DEBUG
 from app.api.errors.http_error import http_error_handler
 from app.api.errors.validation_error import http422_error_handler
 from app.core.events import create_start_app_handler, create_stop_app_handler
+from app.db.mssql import connect_to_mssql, close_mssql_connection
  
  
 def get_application() -> FastAPI:
@@ -34,6 +35,7 @@ def get_application() -> FastAPI:
     origins = [
         # "http://172.105.34.172:5000",  # server
         "http://localhost:5173",  # Vite / React (Your current app)
+        "http://192.168.1.81:5173",  # Local network access (if needed)
         "http://localhost:3000",  # Create React App (Standard backup)
         "http://localhost:8080",  # The Backend itself
         "http://127.0.0.1:5173",  # Localhost via IP
@@ -91,3 +93,12 @@ async def startup_event():
     SchedulerService.app = app
     SchedulerService.loop = asyncio.get_running_loop()
     await SchedulerService.configure()
+
+# Ensure async functions run properly on startup/shutdown
+@app.on_event("startup")
+async def startup_mssql():
+    await connect_to_mssql(app)
+
+@app.on_event("shutdown")
+async def shutdown_mssql():
+    await close_mssql_connection(app)

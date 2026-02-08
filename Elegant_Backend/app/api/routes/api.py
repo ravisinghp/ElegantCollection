@@ -7,6 +7,7 @@ from app.api.routes.UserController import router as user_router
 from app.api.routes.SystemAdminSchedular import router as SystemAdmin_router
 from app.api.routes import category_section
 from app.api.routes.EscalationController import router as Escalation_router
+from app.api.routes.sync_client_po_controller import router as sync_client_po_router
 
 router = APIRouter()
 router.include_router(authentication.router, tags=["authentication"], prefix="/users")
@@ -22,6 +23,7 @@ router.include_router(
 router.include_router(SystemAdmin_router, tags=["SystemAdmin"], prefix="/systemadmin")
 router.include_router(sharepoint_controller.router, tags=["sharepoint"], prefix="/sharepoint")
 router.include_router(Escalation_router, tags=["Escalation"], prefix="/escalation")
+router.include_router(sync_client_po_router, tags=["mssql"], prefix="/mssql")
 
 # Include user router
 # router.include_router(auth.router, prefix="/auth", tags=["auth"])

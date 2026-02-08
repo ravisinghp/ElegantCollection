@@ -28,6 +28,13 @@ USER:str = config("USER",cast=str,default="root")
 PWD:str = config("PWD",cast=str,default="")
 DB:str = config("DB",cast=str,default="")
 
+# ----------------- EMR Database Config start------------------#
+MSSQL_HOST: str = config("MSSQL_HOST", cast=str, default="localhost")
+MSSQL_PORT: int = config("MSSQL_PORT", cast=int, default=1433)
+MSSQL_USER: str = config("MSSQL_USER", cast=str, default="sa")
+MSSQL_PWD: str = config("MSSQL_PWD", cast=str, default="")
+MSSQL_DB: str = config("MSSQL_DB", cast=str, default="")
+
 SECRET_KEY: Secret = config("SECRET_KEY", cast=Secret)
 
 PROJECT_NAME: str = config("PROJECT_NAME", default="FastAPI example application")

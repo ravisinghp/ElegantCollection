@@ -1768,9 +1768,11 @@ class SharepointService:
         request: Request,
         user_id: int,
         role_id: int,
-        format: str
+        format: str,
+        selected_ids: Optional[List[int]] = None
     ):
-        data = await SharepointRepo.download_sharepoint_missing_po_report(request, user_id, role_id)
+        selected_ids = selected_ids or []
+        data = await SharepointRepo.download_sharepoint_missing_po_report(request, user_id, role_id,selected_ids)
 
         if not data:
             raise HTTPException(status_code=404, detail="No missing PO data available")
@@ -1799,9 +1801,11 @@ class SharepointService:
         request: Request,
         user_id: int,
         role_id: int,
-        format: str
+        format: str,
+        selected_ids: Optional[List[int]] = None
     ):
-        data = await SharepointRepo.download_sharepoint_mismatch_po_report(request, user_id, role_id)
+        selected_ids = selected_ids or []
+        data = await SharepointRepo.download_sharepoint_mismatch_po_report(request, user_id, role_id,selected_ids)
 
         if not data:
             raise HTTPException(status_code=404, detail="No mismatch PO data available")

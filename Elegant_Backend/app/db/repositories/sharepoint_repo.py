@@ -530,23 +530,22 @@ class SharepointRepo(BaseRepository):
     async def fetch_matched_po_data(request: Request, frontendRequest):
 
         base_query = """
-        SELECT
-                pd.*,
-                pd.vendor_number AS vendor_code,
-                u.user_name AS username
-            FROM sharepoint_po_details pd
-            LEFT JOIN sharepoint_po_missing_report pm
-                ON pm.sharepoint_po_det_id = pd.sharepoint_po_det_id
-            AND pm.active = 1
-            LEFT JOIN sharepoint_po_mismatch_report mm
-                ON mm.sharepoint_po_det_id = pd.sharepoint_po_det_id
-            AND mm.active = 1
-            LEFT JOIN sharepoint_files sf
-                ON sf.user_id = pd.user_id
-            LEFT JOIN users_master u
-                ON u.user_id = pd.user_id
-            WHERE pm.sharepoint_po_det_id IS NULL
-            AND mm.sharepoint_po_det_id IS NULL
+                SELECT
+                    pd.*,
+                    pd.vendor_number AS vendor_code,
+                    u.user_name AS username
+                FROM sharepoint_po_details pd
+                LEFT JOIN sharepoint_po_missing_report pm
+                    ON pm.sharepoint_po_det_id = pd.sharepoint_po_det_id
+                AND pm.active = 1
+                LEFT JOIN sharepoint_po_mismatch_report mm
+                    ON mm.sharepoint_po_det_id = pd.sharepoint_po_det_id
+                AND mm.active = 1
+                LEFT JOIN users_master u
+                    ON u.user_id = pd.user_id
+                WHERE pd.active = 1
+                AND pm.sharepoint_po_det_id IS NULL
+                AND mm.sharepoint_po_det_id IS NULL
         """
 
         params = []
@@ -565,7 +564,7 @@ class SharepointRepo(BaseRepository):
         return [dict(zip(cols, r)) for r in rows]
     
     #For Downloading the PO Missing Report     
-    async def download_sharepoint_missing_po_report(request: Request, user_id: int, role_id: int):
+    async def download_sharepoint_missing_po_report(request: Request, user_id: int, role_id: int,selected_ids: List[int]):
         base_query  = """
             SELECT
                 COALESCE(pd.po_number, s.po_number) AS po_number,
@@ -588,6 +587,12 @@ class SharepointRepo(BaseRepository):
             base_query += " AND pm.user_id = %s"
             params.append(user_id)
             
+         #  Safe IN clause
+        if selected_ids:
+            placeholders = ",".join(["%s"] * len(selected_ids))
+            base_query += f" AND pm.sharepoint_po_missing_id IN ({placeholders})"
+            params.extend(selected_ids)
+            
         base_query += " ORDER BY pm.sharepoint_po_missing_id DESC"
 
         async with request.app.state.pool.acquire() as conn:
@@ -601,7 +606,7 @@ class SharepointRepo(BaseRepository):
 
 
     #For Doanloading the PO Mismatch Report   
-    async def download_sharepoint_mismatch_po_report(request: Request, user_id: int, role_id: int):
+    async def download_sharepoint_mismatch_po_report(request: Request, user_id: int, role_id: int,selected_ids: List[int]):
         base_query  = """
             SELECT
                 pd.po_number,
@@ -630,6 +635,11 @@ class SharepointRepo(BaseRepository):
         if role_id == 1:
             base_query += " AND mm.user_id = %s"
             params.append(user_id)
+            
+        if selected_ids:
+            placeholders = ",".join(["%s"] * len(selected_ids))
+            base_query += f" AND mm.sharepoint_po_mismatch_id IN ({placeholders})"
+            params.extend(selected_ids)
             
         base_query += " ORDER BY mm.sharepoint_po_mismatch_id DESC"
         
@@ -769,39 +779,84 @@ class SharepointRepo(BaseRepository):
 
     #For Ignoring the Missing PO in Next Sync On UI
     async def ignore_sharepoint_missing_po(
-            sharepoint_po_missing_id: int,
-            request: Request
-        ) -> bool:
+        sharepoint_po_missing_id: int,
+        request: Request
+    ) -> bool:
 
-            query = """
-                UPDATE sharepoint_po_missing_report
-                SET active = 0
-                WHERE sharepoint_po_missing_id = %s
-                AND active = 1
-            """
+        async with request.app.state.pool.acquire() as conn:
+            async with conn.cursor() as cursor:
 
-            async with request.app.state.pool.acquire() as conn:
-                async with conn.cursor() as cursor:
-                    await cursor.execute(query, (sharepoint_po_missing_id,))
-                    await conn.commit()
-                    return cursor.rowcount > 0
+                # Get sharepoint_po_det_id
+                await cursor.execute("""
+                    SELECT sharepoint_po_det_id
+                    FROM sharepoint_po_missing_report
+                    WHERE sharepoint_po_missing_id = %s
+                    AND active = 1
+                """, (sharepoint_po_missing_id,))
+
+                row = await cursor.fetchone()
+                if not row or not row[0]:
+                    return False
+
+                sharepoint_po_det_id = row[0]
+
+                # Update sharepoint_po_missing
+                await cursor.execute("""
+                    UPDATE sharepoint_po_missing_report
+                    SET active = 0
+                    WHERE sharepoint_po_missing_id = %s
+                    AND active = 1
+                """, (sharepoint_po_missing_id,))
+
+                # Update sharepoint_po_details
+                await cursor.execute("""
+                    UPDATE sharepoint_po_details
+                    SET active = 0
+                    WHERE sharepoint_po_det_id = %s
+                    AND active = 1
+                """, (sharepoint_po_det_id,))
+
+                await conn.commit()
+                return True
+
                 
     
     #For Ignoring the Mismatch PO in Next Sync On UI         
     async def ignore_sharepoint_mismatch_po(
-            sharepoint_po_mismatch_id: int,
-            request: Request
-        ) -> bool:
+        sharepoint_po_mismatch_id: int,
+        request: Request
+    ) -> bool:
 
-            query = """
-                UPDATE sharepoint_po_mismatch_report
-                SET active = 0
-                WHERE sharepoint_po_mismatch_id = %s
-                AND active = 1
-            """
+        async with request.app.state.pool.acquire() as conn:
+            async with conn.cursor() as cursor:
 
-            async with request.app.state.pool.acquire() as conn:
-                async with conn.cursor() as cursor:
-                    await cursor.execute(query, (sharepoint_po_mismatch_id,))
-                    await conn.commit()
-                    return cursor.rowcount > 0
+                await cursor.execute("""
+                    SELECT sharepoint_po_det_id
+                    FROM sharepoint_po_mismatch_report
+                    WHERE sharepoint_po_mismatch_id = %s
+                    AND active = 1
+                """, (sharepoint_po_mismatch_id,))
+
+                row = await cursor.fetchone()
+                if not row or not row[0]:
+                    return False
+
+                sharepoint_po_det_id = row[0]
+
+                await cursor.execute("""
+                    UPDATE sharepoint_po_mismatch_report
+                    SET active = 0
+                    WHERE sharepoint_po_mismatch_id = %s
+                    AND active = 1
+                """, (sharepoint_po_mismatch_id,))
+
+                await cursor.execute("""
+                    UPDATE sharepoint_po_details
+                    SET active = 0
+                    WHERE sharepoint_po_det_id = %s
+                    AND active = 1
+                """, (sharepoint_po_det_id,))
+
+                await conn.commit()
+                return True
+

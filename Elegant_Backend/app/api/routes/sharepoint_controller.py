@@ -214,6 +214,7 @@ async def download_sharepoint_missing_po_report(
             request=request,
             user_id =payload.user_id,
             role_id=payload.role_id,
+            selected_ids=payload.selected_ids,
             format=format
         )
 
@@ -241,6 +242,7 @@ async def download_sharepoint_mismatch_po_report(
             request,
             user_id=payload.user_id,
             role_id=payload.role_id,
+            selected_ids=payload.selected_ids,
             format=format
         )
 

@@ -361,6 +361,21 @@ def normalize_text(text: str) -> str:
 
     return text.strip()
 
+PO_FIELD_NAMES = [
+    "po_number",
+    "customer_name",
+    "vendor_number",
+    "po_date",
+    "delivery_date",
+    "cancel_date",
+    "ec_style_number",
+    "customer_style_number",
+    "quantity",
+    "gold_karat",
+    "color",
+    "description",
+    "gold_lock"
+]
 
 def extract_po_fields_regex(text: str) -> dict:
     if not text or len(text) < 30:
@@ -385,7 +400,7 @@ def extract_po_fields_regex(text: str) -> dict:
 
  
 
-MANDATORY_FIELDS = ["po_number", "customer_name"]
+MANDATORY_FIELDS = ["po_number", "customer_name", "vendor_number", "po_date", "delivery_date", "quantity"]
 
 
 async def extract_po_fields(text: str) -> dict:
@@ -435,7 +450,7 @@ PO_REGEX_PATTERNS = {
         r"(?:ship\s*to|deliver\s*to|ship\s|bill\s*to|delivery\s*address)\s*[:\-]?\s*([A-Za-z0-9&.,\-\s]+)",
         r"(?:customer\s*name|buyer)\s*[:\-]?\s*([A-Za-z0-9&.,\-\s]+)",
         # ----- OLD WORKING -----
-        r"(?:customer\s*name|customer|buyer|client)\s*[:\-]?\s*([A-Za-z][A-Za-z\s&\.]+)(?=\n|$)",
+        r"(?:customer\s*name|customer|buyer|client)\s*[:\-]?\s*([A-Za-z][A-Za-z\s&\.]+?)",
         r"(?i)customer_name\s*:\s*(.+?)(?=\s+[a-z_]+?\s*:|$)",
         r"(?i)^customer(?:\s*name)?\s*[:\-]?\s*(.+?)(?=\s+(?:supplier|vendor|po|delivery|cancel|date|quantity|gold|color|description)\s*:|$)",
         r"(?=\s+(?:vendor|vendor_no|vendor_number|supplier|po|delivery|cancel|date|quantity|gold|color|description)\b|$)",
@@ -481,11 +496,11 @@ PO_REGEX_PATTERNS = {
     #---------------- DELIVERY DATE ----------------
     "delivery_date": [
         # PDF table FIRST
-        r"\b(?:DELIVERY\s*DATE|DUE\s*DATE)\b[\s\S]{0,100}?[:\s]*([\dA-Za-z/.-]{4,20})",
+        r"\b(?:DELIVERY\s*DATE|DUE\s*DATE|delivery_date)\b[\s\S]{0,100}?[:\s]*([\dA-Za-z/.-]{4,20})",
 
         # Inline / email
-        r"(?:delivery\s*date|expected\s*delivery|due\s*date)\s*[:\-]?\s*(\d{4}-\d{2}-\d{2})",
-        r"(?:delivery\s*date|expected\s*delivery|due\s*date)\s*[:\-]?\s*(\d{2}-[A-Za-z]{3}-\d{4})",
+        r"(?:delivery\s*date|expected\s*delivery|delivery_date|due\s*date)\s*[:\-]?\s*(\d{4}-\d{2}-\d{2})",
+        r"(?:delivery\s*date|expected\s*delivery|delivery_date|due\s*date)\s*[:\-]?\s*(\d{2}-[A-Za-z]{3}-\d{4})",
     ], 
  
     # ---------------- CANCEL DATE ----------------
@@ -495,9 +510,9 @@ PO_REGEX_PATTERNS = {
     ],
  
     # ---------------- EC STYLE NUMBER ----------------
-    "ec_style_number": [
-        r"(?:ec\s*style\s*number|ec\s*style|ec\s*no)\s*[:\-]?\s*([A-Z0-9\-]+)",
-        r"(?:ec_style_number|ec_style_no)\s*:\s*([A-Z0-9\-]+)",
+   "ec_style_number": [
+    r"(?:ec\s*style\s*number|ec\s*style|ec\s*no)\s*[:\-]?\s*([A-Z0-9.\-]+)",
+    r"(?:ec_style_number|ec_style_no)\s*:\s*([A-Z0-9.\-]+)",
     ],
  
     # ---------------- CUSTOMER STYLE NUMBER ----------------
@@ -526,21 +541,16 @@ PO_REGEX_PATTERNS = {
  
     # ---------------- GOLD KARAT ----------------
     "gold_karat": [
-        # PDF table
-        r"\bMETAL\b[\s\S]{0,100}\b(10K|12K|14K|18K|22K|24K)([A-Z]{0,2})\b",
-
-        # Inline
-        r"(?:gold\s*karat|karat|gold_carat|gold_karat|kt|gold\s*purity)\s*[:\-]?\s*(\d{1,2})\s*K?",
-
-        # Last fallback
-        r"\b(24|22|18|14|10)\s*K\b",
-    ],
+        r"(?i)\bMETAL\b[\s\S]{0,60}?\b([^\s|,\n\r]+)",
+        r"(?i)(?:gold\s*karat|gold_karat|gold\s*purity|karat|metal|kt)\s*[:\-]?\s*([^\n\r]+?)(?=\s+(?:ec\s*style|customer\s*style|quantity|color|description|gold\s*lock)\s*[:\-]|$)",
+        r"(?i)(?:gold\s*karat|gold_karat|karat|metal)\s*[\r\n]+\s*([^\r\n]+)",
+    ],              
  
     # ---------------- COLOR ----------------
-    "color": [
-        r"(?:color|colour)\s*[:\-]?\s*([A-Za-z]+(?:\s+[A-Za-z]+)*)",
-        r"(?=\s+(?:quantity|gold|karat|description|remarks|details)\s*:|$)",
-        r"color\s*:\s*([A-Za-z\s]+)",
+   "color": [
+        r"(?:color|colour)\s*[:\-]?\s*([A-Za-z0-9\s\-]+)",
+        r"(?:color|colour)\s*[:\-]?\s*([A-Za-z0-9\s\-]+?)(?=\s+(?:quantity|gold|karat|description|remarks|details)\s*:|$)",
+        r"color\s*[:\-]?\s*([A-Za-z0-9\s\-]+)"
     ],
 
     #---------------- DESCRIPTION ----------------
@@ -562,6 +572,7 @@ PO_REGEX_PATTERNS = {
         r"(?:gold\s*lock|gold_lock|gold\s*locking|lock\s*value|lock\s*percentage|metal\s*lock|lock)\s{2,}([0-9]+(?:\.[0-9]+)?)",
         r"(?:goldlock|gold_lock|lock)\s*([0-9]+(?:\.[0-9]+)?)"
     ],
+
 }
 
 
@@ -581,68 +592,186 @@ EMPTY_PO = {
     "gold_lock": None,
 }
 
+KEYWORD_REGEX_MAP = {
+    "po_number": [
+        r"\bpo\s*(no|number|#|id)\b",
+        r"\bp\.o\.\s*(no|number|#)?\b",
+        r"\bpurchase\s*order\s*(no|number)?\b"
+    ],
 
-async def detect_keywords(
-    text: str,
-    db_keywords: list[str]
-):
+    "customer_name": [
+        r"\bcustomer\s*name\b",
+        r"\bbuyer\b",
+        r"\bclient\b",
+        r"\bparty\s*name\b"
+    ],
+
+    "vendor_number": [
+        r"\bvendor\s*(no|number|code)\b",
+        r"\bsupplier\s*(no|number|code)\b"
+    ],
+
+    "po_date": [
+        r"\bpo\s*date\b",
+        r"\border\s*date\b",
+        r"\bdate\s*of\s*order\b"
+    ],
+
+    "delivery_date": [
+        r"\bdelivery\s*date\b",
+        r"\bexpected\s*delivery\b",
+        r"\bdispatch\s*date\b"
+    ],
+
+    "cancel_date": [
+        r"\bcancel\s*date\b",
+        r"\bexpiry\s*date\b"
+    ],
+
+    "gold_karat": [
+        r"\b\d{2}\s*K\b",
+        r"\b\d{2}\s*KT\b",
+        r"\bAG\s*\d{3}\b",
+        r"\bgold\s*karat\b",
+        r"\bpurity\b"
+    ],
+
+    "ec_style_number": [
+        r"\bec\s*style\s*(no|number)\b",
+        r"\bec\s*style\b"
+    ],
+
+    "customer_style_number": [
+        r"\bcustomer\s*style\s*(no|number)\b",
+        r"\bdesign\s*(no|number)\b"
+    ],
+
+    "color": [
+        r"\b(yellow|white|rose)\s*gold\b",
+        r"\bcolor\b"
+    ],
+
+    "quantity": [
+        r"\bqty\b",
+        r"\bquantity\b",
+        r"\bpcs\b",
+        r"\bnos\b",
+        r"\bpieces\b"
+    ],
+
+    "description": [
+        r"\bdescription\b",
+        r"\bitem\s*details\b",
+        r"\bproduct\s*details\b"
+    ],
+
+    "gold_lock": [
+        r"\bgold\s*lock\b",
+        r"\blocked\s*gold\b",
+        r"\block\s*status\b"
+    ],
+}
+
+async def detect_keywords(text: str, db_keywords: list[str]):
     if not text or not text.strip():
         return [], None
 
     text_l = text.lower()
-    keywords = [normalize_keyword(k) for k in db_keywords]
+    detected = set()
 
-    # ---------------- 1 EXACT MATCH ----------------
-    for k in keywords:
-        if k in text_l:
-            return [k], "EXACT"
-    
-    # ---------------- 2 CHECK PO FIELDS ----------------
-    matched_fields = [f for f in PO_FIELD_NAMES if f.lower() in text_l]
-    if matched_fields:
-        return matched_fields, "PO_FIELDS"
+    # ---------------- 1. DB keywords (exact-ish) ----------------
+    for kw in db_keywords:
+        if normalize_keyword(kw) in text_l:
+            detected.add(kw)
+
+    # ---------------- 2. Jewellery-aware regex detection ----------------
+    for field, patterns in KEYWORD_REGEX_MAP.items():
+        for pat in patterns:
+            if re.search(pat, text_l, re.IGNORECASE):
+                detected.add(field)
+                break
+
+    if detected:
+        return sorted(detected), "REGEX_MATCH"
 
     return [], None
-
 
 def normalize_keyword(k: str) -> str:
     return re.sub(r"\s+", " ", k.strip().lower())
 
 
 # ------------------- Extraction ------------------- #
-PO_FIELD_NAMES = [
-    "po_number",
-    "customer_name",
-    "vendor_number",
-    "po_date",
-    "delivery_date",
-    "cancel_date",
-    "ec_style_number",
-    "customer_style_number",
-    "quantity",
-    "gold_karat",
-    "color",
-    "description",
-    "gold_lock",
-]
 
 EMPTY_PO = {field: None for field in PO_FIELD_NAMES}
 
-
 async def extract_po_fields_from_llm(text: str) -> dict:
-    if not text or not text.strip():
-        return EMPTY_PO
-
-    # Quick heuristic to skip irrelevant text
-    if not re.search(r"(po|order|\d{3,})", text, re.IGNORECASE):
-        return EMPTY_PO
-
     prompt = f"""
-Extract ONLY explicitly present values.
-Return null if missing.
-Never guess.
+You are a document extraction engine for Jewelry Purchase Orders.
 
-Return JSON with keys:
+RULES (STRICT):
+- Extract ONLY values explicitly present in the text
+- NEVER merge two fields
+- NEVER include field names inside values
+- NEVER guess or infer
+- If a value contains another field label, SPLIT and keep only the correct value
+- Return null if missing
+- Preserve original text formatting
+
+--------------------
+FIELD-SPECIFIC RULES
+--------------------
+PO NUMBER:
+- Extract only if clearly labeled as PO Number, P.O., Purchase Order Number, or similar.
+- Value must look like an actual PO identifier.
+
+CUSTOMER NAME:
+- Extract only if explicitly labeled as:
+  customer, customer name, buyer, sold to
+- Do NOT treat vendor, supplier, ship-from, or company logo name as customer.
+- If label is missing or unclear, return null.
+
+VENDOR NAME:
+- Extract only if explicitly labeled as:
+  vendor, supplier, sold by
+- Do NOT infer from logos or addresses.
+
+PO DATE:
+- Extract only if clearly labeled as PO Date, Order Date, or Purchase Order Date.
+
+DELIVERY DATE:
+- Extract only if clearly labeled as Delivery Date, Due Date, or Expected Delivery.
+
+GOLD KARAT / METAL:
+- Extract only if explicitly labeled as:
+  gold karat, karat, metal, gold purity
+- Return the value EXACTLY as written (example: "14KW", "18K Rose", "22K Yellow", "A W").
+- Do NOT extract karat values from description or item rows.
+- If label is missing, return null.
+
+COLOR:
+- Extract only if explicitly labeled as:
+  color or colour
+- Do NOT extract color from description or product names.
+
+DESCRIPTION:
+- Extract ONLY if explicitly labeled as:
+  description, item description, desc, particulars, product description, item details
+- The value must be the FULL description exactly as written after the label.
+- Preserve original wording and order.
+- Do NOT truncate, summarize, or rewrite.
+- Do NOT extract description from tables, item rows, or free text without a label.
+- If no explicit description label exists, return null.
+
+QUANTITY:
+- Extract only if explicitly labeled as quantity, qty, or pieces.
+
+GOLD LOCK:
+- Extract only if explicitly labeled as gold lock, lock value, or lock percentage.
+
+--------------------
+OUTPUT FORMAT
+--------------------
+Return a valid JSON object with EXACTLY these keys:
 {PO_FIELD_NAMES}
 
 TEXT:
@@ -656,34 +785,27 @@ TEXT:
             messages=[{"role": "user", "content": prompt}]
         )
 
-        raw = resp.choices[0].message.content
+        raw = resp.choices[0].message.content.strip()
 
-        # ----------- CLEAN RAW OUTPUT -----------
-        # Remove markdown/code block if present
-        cleaned = re.sub(r"^```(?:json)?\s*|```$", "", raw.strip(), flags=re.IGNORECASE)
+        # Remove markdown
+        raw = re.sub(r"^```(?:json)?|```$", "", raw, flags=re.I).strip()
 
-        # Find JSON object in text
-        match = re.search(r"\{.*\}", cleaned, re.DOTALL)
+        match = re.search(r"\{.*\}", raw, re.S)
         if not match:
             return EMPTY_PO
 
-        try:
-            data = json.loads(match.group())
-        except json.JSONDecodeError:
-            # Fallback: remove trailing commas or common minor formatting issues
-            cleaned_json = re.sub(r",\s*}", "}", match.group())
-            cleaned_json = re.sub(r",\s*]", "]", cleaned_json)
-            data = json.loads(cleaned_json)
+        data = json.loads(match.group())
 
-        out = EMPTY_PO.copy()
-        for f in PO_FIELD_NAMES:
-            v = data.get(f)
-            out[f] = v if v not in ["", None, "null", "N/A"] else None
+        result = {}
+        for k in PO_FIELD_NAMES:
+            v = data.get(k)
+            result[k] = v if v not in ("", None, "null", "N/A") else None
 
-        return out if any(out.values()) else EMPTY_PO
+        return result
 
     except Exception:
         return EMPTY_PO
+
 
 from datetime import datetime
 from typing import Optional
@@ -758,31 +880,93 @@ def normalize_attachment_text(text: str) -> str:
     return text.strip()
 
 
-ITEM_REGEX = re.compile(
+# ITEM_REGEX = re.compile(
+#     r"""
+#     (?P<description>.+?)         # Capture everything (non-greedy) until material
+#     \s*[-–—]?\s*                 # Optional dash or special dash separator
+#     (?P<material>\d{2}K\s+Gold(?:\s*\+\s*Diamond)?)  # 22K Gold or 18K Gold + Diamond
+#     \s+
+#     (?P<quantity>\d+)             # Quantity
+#     \s+
+#     (?P<delivery_date>\d{4}-\d{2}-\d{2})  # Date in YYYY-MM-DD
+#     """,
+#     re.IGNORECASE | re.VERBOSE | re.DOTALL
+# )
+
+def extract(pattern: str, text: str) -> Optional[str]:
+    match = re.search(pattern, text, re.IGNORECASE)
+    return match.group(1).strip() if match else None
+
+ITEM_BLOCK_REGEX = re.compile(
     r"""
-    (?P<description>.+?)         # Capture everything (non-greedy) until material
-    \s*[-–—]?\s*                 # Optional dash or special dash separator
-    (?P<material>\d{2}K\s+Gold(?:\s*\+\s*Diamond)?)  # 22K Gold or 18K Gold + Diamond
-    \s+
-    (?P<quantity>\d+)             # Quantity
-    \s+
-    (?P<delivery_date>\d{4}-\d{2}-\d{2})  # Date in YYYY-MM-DD
+    (
+        .{0,200}?                                  # Description context
+        (?:\b\d{2}K\b|\b\d{2}KT\b|\bAG\d{3}\b)     # Gold karat
+        .{0,200}?                                  # More context
+        (?:qty|quantity|\b\d+\b)                  # Quantity indicator
+    )
     """,
-    re.IGNORECASE | re.VERBOSE | re.DOTALL
+    re.IGNORECASE | re.DOTALL | re.VERBOSE
 )
 
 def extract_po_items(text: str):
     items = []
 
-    for m in ITEM_REGEX.finditer(text):
-        items.append({
-            "description": m.group("description").strip(),
-            "gold_karat": re.search(r"\d{2}", m.group("material")).group(),
-            "quantity": int(m.group("quantity")),
-            "delivery_date": m.group("delivery_date")
-        })
+    for match in ITEM_BLOCK_REGEX.finditer(text):
+        block = match.group(1)
+
+        item = {
+            "description": extract(
+                r"^(.*?)(?:\b\d{2}K\b|\b\d{2}KT\b|\bAG\d{3}\b)",
+                block
+            ),
+
+            "gold_karat": extract(
+                r"(\d{2}K|\d{2}KT|AG\d{3})",
+                block
+            ),
+
+            "quantity": extract(
+                r"(?:qty|quantity)\s*[:\-]?\s*(\d+)",
+                block
+            ) or extract(r"\b(\d+)\b", block),
+
+            "delivery_date": extract(
+                r"(\d{4}-\d{2}-\d{2})",
+                block
+            ),
+
+            "color": extract(
+                r"\b(yellow|white|rose)\b",
+                block
+            ),
+
+            "gold_lock": extract(
+                r"(gold\s*lock\s*[:\-]?\s*(yes|no|true|false))",
+                block
+            )
+        }
+
+        # Convert quantity safely
+        if item["quantity"]:
+            item["quantity"] = int(item["quantity"])
+
+        items.append(item)
 
     return items
+
+# def extract_po_items(text: str):
+#     items = []
+
+#     for m in ITEM_REGEX.finditer(text):
+#         items.append({
+#             "description": m.group("description").strip(),
+#             "gold_karat": re.search(r"\d{2}", m.group("material")).group(),
+#             "quantity": int(m.group("quantity")),
+#             "delivery_date": m.group("delivery_date")
+#         })
+
+#     return items
 
 
 async def extract_po_header(text: str):
@@ -995,8 +1179,34 @@ async def fetch_and_save_mails_by_folders(
                             f.write(content_bytes)
 
                         # -------- Extract text from attachments --------
+                        # attachment_text = None
+                        # ext = (filename or "").lower()
+                        # ct = (content_type or "").lower()
+                        # try:
+                        #     if ct.startswith("text/") or ext.endswith((".txt", ".md", ".csv", ".log")):
+                        #         attachment_text = content_bytes.decode("utf-8", errors="ignore")
+                        #     elif ct == "application/pdf" or ext.endswith(".pdf"):
+                        #         reader = PyPDF2.PdfReader(io.BytesIO(content_bytes))
+                        #         attachment_text = " ".join((p.extract_text() or "") for p in reader.pages)
+                        #     elif ct in ("application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                        #                 "application/msword") or ext.endswith((".docx", ".doc")):
+                        #         document = docx.Document(io.BytesIO(content_bytes))
+                        #         attachment_text = " ".join(p.text for p in document.paragraphs)
+                        #     elif ct in ("a pplication/vnd.openxmlformats-officedocument.presentationml.presentation",
+                        #                 "application/vnd.ms-powerpoint") or ext.endswith((".pptx", ".ppt")):
+                        #         prs = Presentation(io.BytesIO(content_bytes))
+                        #         attachment_text = " ".join(
+                        #             shape.text
+                        #             for slide in prs.slides
+                        #             for shape in slide.shapes
+                        #             if hasattr(shape, "text")
+                        #         )
+                        #     # elif content_type.startswith("image/") or ext.endswith((".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff")):
+                        #     #     attachment_text = ocr_from_image_bytes(content_bytes)
+                        # except Exception:
+                        #     attachment_text = None
+
                         attachment_text = await extract_text_from_attachment(content_bytes, filename, content_type)
-                       
                         if attachment_text:
                             attachment_texts.append(attachment_text)
                             attach_keywords, match_type = await detect_keywords(attachment_text, keywords)
@@ -1740,7 +1950,8 @@ async def fetch_and_save_past_events_google(access_token: str, user_id: int, org
 
     return results
 
-#--------------------------data comparison logic start--------------------------#
+# -------------------------- data comparison logic start -------------------------- #
+
 FIELDS_TO_COMPARE = [
     "customer_name",
     "vendor_number",
@@ -1754,7 +1965,7 @@ FIELDS_TO_COMPARE = [
     "gold_karat",
     "color",
     "quantity",
-    "description"
+    "description",
 ]
 
 def make_json_safe(obj):
@@ -1817,17 +2028,14 @@ You are an expert PO field comparison engine.
 Compare ONLY the following fields:
 {FIELDS_TO_COMPARE}
 
-Your goal is to detect **real business mismatches**. Do NOT report differences caused by minor spelling mistakes, abbreviations, word order, or formatting.
+Your goal is to detect **real business mismatches**.
+DO NOT report differences caused by minor spelling mistakes, abbreviations, word order, or formatting.
 
-Rules:
-1. Treat minor spelling errors, missing/extra letters, or phonetic variations as SAME.
-2. Treat abbreviations and expansions (e.g., Pvt, Ltd, Private Limited) as SAME.
-3. Ignore punctuation, dots, commas, extra spaces, capitalization.
-4. Ignore word order in names, colors, or descriptions.
-5. Ignore formatting differences in dates (YYYY-MM-DD, DD/MM/YYYY) or numbers/quantities.
-6. Only report a mismatch if the values clearly indicate different meanings or entities.
+IMPORTANT:
+- Missing vs present values are ALREADY handled by backend logic.
+- Compare ONLY when BOTH values are present.
 
-Return ONLY JSON in the following format:
+Return ONLY JSON:
 [
   {{
     "po_det_id": number,
@@ -1838,29 +2046,23 @@ Return ONLY JSON in the following format:
   }}
 ]
 
-Here are the matched PO pairs to compare:
+Matched PO pairs:
 {json.dumps(matched_pairs, indent=2)}
 """
 
-    # Call OpenAI LLM
     resp = openai_client.chat.completions.create(
         model="gpt-4.1-mini",
         temperature=0,
         messages=[{"role": "user", "content": prompt}]
     )
 
-    # Clean up response
     raw = resp.choices[0].message.content.strip()
     raw = re.sub(r"^```json|```$", "", raw, flags=re.IGNORECASE).strip()
 
-    # Parse JSON
     try:
         result = json.loads(raw)
-        if not isinstance(result, list):
-            raise ValueError("LLM response is not a JSON list")
-        return result
+        return result if isinstance(result, list) else []
     except Exception as e:
-        # fallback: return empty list if parsing fails
         print(f"LLM parsing error: {e}")
         return []
 
@@ -1875,41 +2077,26 @@ async def generate_missing_po_report_service(
     po_det_ids: list[int],
     mails_repo: "MailsRepository"
 ):
-    """
-    Logic:
-    1. Fetch scanned POs only for given po_det_ids (multiple emails supported)
-    2. Fetch relevant system POs only (NOT full table)
-    3. LLM match scanned ↔ system
-    4. If matched with high confidence → compare fields → insert mismatches
-    5. If scanned PO not confidently matched → insert missing (scanned side)
-    6. DO NOT mark unrelated system POs as missing
-    """
 
-    # -------------------- Fetch data --------------------
+    # -------------------- Fetch data -------------------- #
     scanned_pos = await mails_repo.get_po_details_by_ids(po_det_ids)
 
     if not scanned_pos:
-        return {
-            "status": "success",
-            "message": "No scanned POs found for comparison"
-        }
+        return {"status": "success", "message": "No scanned POs found for comparison"}
 
-    # Fetch ONLY relevant system POs (important!)
     scanned_po_numbers = list({
         po["po_number"] for po in scanned_pos if po.get("po_number")
     })
 
     system_pos = await mails_repo.get_system_pos_by_po_numbers(scanned_po_numbers)
 
-    # JSON safe
     scanned_pos = [{k: make_json_safe(v) for k, v in po.items()} for po in scanned_pos]
     system_pos = [{k: make_json_safe(v) for k, v in po.items()} for po in system_pos]
 
-    # -------------------- Tracking --------------------
     matched_scanned_ids = set()
     matched_system_ids = set()
 
-    # -------------------- Matching & comparison --------------------
+    # -------------------- Matching & comparison -------------------- #
     for scanned_batch in chunk(scanned_pos, 25):
 
         matches = await llm_batch_match(scanned_batch, system_pos)
@@ -1920,14 +2107,9 @@ async def generate_missing_po_report_service(
                 (p for p in scanned_batch if p["po_det_id"] == m["scanned_po_det_id"]),
                 None
             )
-            if not scanned:
+            if not scanned or not m["system_po_id"] or m["confidence"] < 0.85:
                 continue
 
-            # Ignore low confidence matches
-            if not m["system_po_id"] or m["confidence"] < 0.85:
-                continue
-
-            # Prevent same system PO matching multiple scanned POs
             if m["system_po_id"] in matched_system_ids:
                 continue
 
@@ -1948,7 +2130,37 @@ async def generate_missing_po_report_service(
                 "system": {f: system.get(f) for f in FIELDS_TO_COMPARE}
             })
 
-        # -------------------- Field mismatch check --------------------
+        # ======================================================================
+        # Rule: If PO + customer matched → ALL fields must exist in scanned data
+        # ======================================================================
+        for pair in matched_pairs:
+            for field in FIELDS_TO_COMPARE:
+                scanned_val = pair["scanned"].get(field)
+                system_val = pair["system"].get(field)
+
+                if system_val not in (None, "") and scanned_val in (None, ""):
+                    exists = await mails_repo.mismatch_exists(
+                        user_id=user_id,
+                        po_det_id=pair["po_det_id"],
+                        system_po_id=pair["system_po_id"],
+                        mismatch_attribute=field,
+                        scanned_value="",
+                        system_value=str(system_val)
+                    )
+
+                    if not exists:
+                        await mails_repo.insert_mismatch(
+                            po_det_id=pair["po_det_id"],
+                            user_id=user_id,
+                            system_po_id=pair["system_po_id"],
+                            field=field,
+                            system_value=str(system_val),
+                            scanned_value="",
+                            comment=f"{field} missing in scanned data"
+                        )
+        # ======================================================================
+
+        # -------------------- LLM value comparison (only when both present) -------------------- #
         if matched_pairs:
             mismatches = await llm_batch_compare(matched_pairs)
 
@@ -1973,7 +2185,7 @@ async def generate_missing_po_report_service(
                         comment=f"{mm['field']} mismatch"
                     )
 
-    # -------------------- Missing scanned POs --------------------
+    # -------------------- Missing scanned POs -------------------- #
     for po in scanned_pos:
         if po["po_det_id"] not in matched_scanned_ids:
 

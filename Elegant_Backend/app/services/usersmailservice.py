@@ -435,7 +435,7 @@ PO_REGEX_PATTERNS = {
         r"(?:ship\s*to|deliver\s*to|ship\s|bill\s*to|delivery\s*address)\s*[:\-]?\s*([A-Za-z0-9&.,\-\s]+)",
         r"(?:customer\s*name|buyer)\s*[:\-]?\s*([A-Za-z0-9&.,\-\s]+)",
         # ----- OLD WORKING -----
-        r"(?:customer\s*name|customer|buyer|client)\s*[:\-]?\s*([A-Za-z][A-Za-z\s&\.]+?)",
+        r"(?:customer\s*name|customer|buyer|client)\s*[:\-]?\s*([A-Za-z][A-Za-z\s&\.]+)(?=\n|$)",
         r"(?i)customer_name\s*:\s*(.+?)(?=\s+[a-z_]+?\s*:|$)",
         r"(?i)^customer(?:\s*name)?\s*[:\-]?\s*(.+?)(?=\s+(?:supplier|vendor|po|delivery|cancel|date|quantity|gold|color|description)\s*:|$)",
         r"(?=\s+(?:vendor|vendor_no|vendor_number|supplier|po|delivery|cancel|date|quantity|gold|color|description)\b|$)",
@@ -553,8 +553,15 @@ PO_REGEX_PATTERNS = {
 
         # Item row patterns
         r"[A-Z0-9\-]+\s+\d+KW\s+([A-Za-z ].*?SIZE:\s*[0-9.]+)",
-    ]
+    ],
 
+    # ---------------- GOLD LOCK ----------------
+    "gold_lock": [
+        r"(?:gold\s*lock|gold_lock|gold\s*locking|lock\s*value|lock\s*percentage|metal\s*lock|lock)\s*[:\-]?\s*([0-9]+(?:\.[0-9]+)?)",
+        r"(?:gold\s*lock|gold_lock|gold\s*locking|lock\s*value|lock\s*percentage|metal\s*lock|lock)\s*[:\-]?\s*[\n\r]+?\s*([0-9]+(?:\.[0-9]+)?)",
+        r"(?:gold\s*lock|gold_lock|gold\s*locking|lock\s*value|lock\s*percentage|metal\s*lock|lock)\s{2,}([0-9]+(?:\.[0-9]+)?)",
+        r"(?:goldlock|gold_lock|lock)\s*([0-9]+(?:\.[0-9]+)?)"
+    ],
 }
 
 
@@ -571,6 +578,7 @@ EMPTY_PO = {
     "color": None,
     "quantity": None,
     "description": None,
+    "gold_lock": None,
 }
 
 
@@ -615,6 +623,7 @@ PO_FIELD_NAMES = [
     "gold_karat",
     "color",
     "description",
+    "gold_lock",
 ]
 
 EMPTY_PO = {field: None for field in PO_FIELD_NAMES}
@@ -1036,6 +1045,7 @@ async def fetch_and_save_mails_by_folders(
                         description=po_data_body.get("description"),
                         mail_folder=folder_name,
                         created_by=user_id,
+                        gold_lock=po_data_body.get("gold_lock")
                     )
                     extracted_po_ids.append(po_det_id)
                 # ----------------Insert PO data from attachments ----------------
@@ -1069,6 +1079,7 @@ async def fetch_and_save_mails_by_folders(
                             description=header.get("description"),
                             mail_folder=folder_name,
                             created_by=user_id,
+                            gold_lock=header.get("gold_lock")
                         )
                         extracted_po_ids.append(po_det_id)
                     else:
@@ -1091,6 +1102,7 @@ async def fetch_and_save_mails_by_folders(
                                 description=item.get("description"),
                                 mail_folder=folder_name,
                                 created_by=user_id,
+                                gold_lock=header.get("gold_lock")
                             )
                             extracted_po_ids.append(po_det_id)
                 # ---------------- COLLECT RESULT ----------------

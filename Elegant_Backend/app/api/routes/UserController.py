@@ -5,7 +5,7 @@ from app.services import UserService
 from typing import List, Dict, Any
 # from pydantic import BaseModel
 from fastapi.responses import StreamingResponse
-from app.models.domain.AdminDomain import UpdatePoCommentRequest, GenerateMissingPoReport, DownloadMissingMismatchRequest,FetchMissingMismatchReport,FolderMappingRequest
+from app.models.domain.AdminDomain import UpdatePoCommentRequest, GenerateMissingPoReport, DownloadMissingMismatchRequest,FetchMissingMismatchReport,FolderMappingRequest,DownloadCombinedMissingMismatchRequest
 from fastapi.encoders import jsonable_encoder
 from app.models.schemas.users import BusinessAdminSearchRequest
 
@@ -87,6 +87,67 @@ async def download_mismatch_po_report(
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+    
+ #Download email and sharepoint both missing pos   
+@router.post("/download_combined_missing_po_report")
+async def download_combined_missing_po_report(
+    request: Request,
+    payload: DownloadCombinedMissingMismatchRequest,
+    format: str = Query("excel", regex="^(excel|pdf)$")
+):
+    try:
+        file_stream, filename, media_type = (
+            await UserService.download_combined_missing_po_report(
+                request=request,
+                user_id=payload.user_id,
+                role_id=payload.role_id,
+                system_selected_ids=payload.system_selected_ids,
+                sharepoint_selected_ids=payload.sharepoint_selected_ids,
+                format=format
+            )
+        )
+
+        return StreamingResponse(
+            file_stream,
+            media_type=media_type,
+            headers={
+                "Content-Disposition": f"attachment; filename={filename}"
+            }
+        )
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    
+
+#Download email and sharepoint both mismatch pos
+@router.post("/download_combined_mismatch_po_report")
+async def download_combined_mismatch_po_report(
+    request: Request,
+    payload: DownloadCombinedMissingMismatchRequest,
+    format: str = Query("excel", regex="^(excel|pdf)$")
+):
+    try:
+        file_stream, filename, media_type = await UserService.download_combined_mismatch_po_report(
+            request=request,
+            user_id=payload.user_id,
+            role_id=payload.role_id,
+            system_ids=payload.system_selected_ids,
+            sharepoint_ids=payload.sharepoint_selected_ids,
+            format=format
+        )
+
+        return StreamingResponse(
+            file_stream,
+            media_type=media_type,
+            headers={
+                "Content-Disposition": f"attachment; filename={filename}"
+            }
+        )
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 
 
 #Adding and Update comment for po missing and po mismatch from UI

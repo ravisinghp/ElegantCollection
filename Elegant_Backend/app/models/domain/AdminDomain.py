@@ -63,6 +63,14 @@ class DownloadMissingMismatchRequest(BaseModel):
 class DownloadSharepointMissingMismatchRequest(BaseModel):
     user_id : int
     role_id : int
+    selected_ids: Optional[List[int]] = None
+    
+    
+class DownloadCombinedMissingMismatchRequest(BaseModel):
+    user_id: int
+    role_id: int
+    system_selected_ids: Optional[List[int]] = []
+    sharepoint_selected_ids: Optional[List[int]] = []
 class GenerateMissingPoReport(BaseModel):
     user_id : int
     po_det_ids: List[int]

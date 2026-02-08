@@ -101,6 +101,92 @@ async def download_mismatch_po_report(
 
     else:
         raise HTTPException(status_code=400, detail="Invalid file format")
+    
+    
+    
+ #Download email and sharepoint both missing pos   
+async def download_combined_missing_po_report(
+    request: Request,
+    user_id: int,
+    role_id: int,
+    system_selected_ids: List[int],
+    sharepoint_selected_ids: List[int],
+    format: str
+):
+    system_selected_ids = system_selected_ids or []
+    sharepoint_selected_ids = sharepoint_selected_ids or []
+
+    data = await UserRepo.download_combined_missing_po_report(
+        request=request,
+        user_id=user_id,
+        role_id=role_id,
+        system_selected_ids=system_selected_ids,
+        sharepoint_selected_ids=sharepoint_selected_ids
+    )
+
+    if not data:
+        raise HTTPException(status_code=404, detail="No missing PO data available")
+
+    df = pd.DataFrame(data)
+    filename_prefix = "combined_missing_po_report"
+
+    if format == "excel":
+        output = io.BytesIO()
+        df.to_excel(output, index=False)
+        output.seek(0)
+
+        return (
+            output,
+            f"{filename_prefix}.xlsx",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+
+    elif format == "pdf":
+        return _generate_po_pdf(df, filename_prefix)
+
+    else:
+        raise HTTPException(status_code=400, detail="Invalid file format")
+    
+ 
+ #Download email and sharepoint both mismatch pos   
+async def download_combined_mismatch_po_report(
+    request: Request,
+    user_id: int,
+    role_id: int,
+    system_ids: list[int],
+    sharepoint_ids: list[int],
+    format: str
+):
+    data = await UserRepo.download_combined_mismatch_po_report(
+        request=request,
+        user_id=user_id,
+        role_id=role_id,
+        system_ids=system_ids,
+        sharepoint_ids=sharepoint_ids
+    )
+
+    if not data:
+        raise HTTPException(status_code=404, detail="No mismatch PO data available")
+
+    df = pd.DataFrame(data)
+    filename_prefix = "po_mismatch_combined_report"
+
+    if format == "excel":
+        output = io.BytesIO()
+        df.to_excel(output, index=False)
+        output.seek(0)
+
+        return (
+            output,
+            f"{filename_prefix}.xlsx",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+
+    elif format == "pdf":
+        return _generate_po_pdf(df, filename_prefix)
+
+    else:
+        raise HTTPException(status_code=400, detail="Invalid file format")
 
 
 # ===============================

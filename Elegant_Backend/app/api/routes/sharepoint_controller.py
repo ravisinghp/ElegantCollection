@@ -132,13 +132,20 @@ async def sync_sharepoint_files(
 
         service = SharepointService(sp_repo)
 
-        return await service.fetch_and_save_sharepoint_files(
+        response =await service.fetch_and_save_sharepoint_files(
             access_token=access_token,
             user_id=user_id,
             folders=folders,
             from_date=from_date,
             to_date=to_date,
         )
+        sharepoint_po_det_ids = response.get("extracted_sharepoint_po_ids", [])
+        if sharepoint_po_det_ids:
+                await service.generate_sharepoint_missing_po_report_service(
+                    user_id=user_id,
+                    sharepoint_po_det_ids=sharepoint_po_det_ids,
+                    sp_repo=sp_repo
+                )
     except HTTPException as e:
         raise e
 
@@ -156,14 +163,14 @@ async def sync_sharepoint_files(
     
 # CONTROLLER ENDPOINT (IN SAME FILE)
 # ---------------------------------------------------------------------
-@router.post("/generate_sharepoint_missing_po_report")
-async def generate_missing_po_report(
-    request : GenerateMissingSharepointPoReport,
-    sp_repo: SharepointRepo = Depends(get_repository(SharepointRepo))
-):
-    service = SharepointService(sp_repo)
-    result = await service.generate_sharepoint_missing_po_report_service(request.user_id)
-    return JSONResponse(content=jsonable_encoder(result))
+# @router.post("/generate_sharepoint_missing_po_report")
+# async def generate_missing_po_report(
+#     request : GenerateMissingSharepointPoReport,
+#     sp_repo: SharepointRepo = Depends(get_repository(SharepointRepo))
+# ):
+#     service = SharepointService(sp_repo)
+#     result = await service.generate_sharepoint_missing_po_report_service(request.user_id)
+#     return JSONResponse(content=jsonable_encoder(result))
 
 #----------------------Sharepoint Table Data-------------------------
 @router.post("/sharepoint_missing_po")
@@ -207,6 +214,7 @@ async def download_sharepoint_missing_po_report(
             request=request,
             user_id =payload.user_id,
             role_id=payload.role_id,
+            selected_ids=payload.selected_ids,
             format=format
         )
 
@@ -234,6 +242,7 @@ async def download_sharepoint_mismatch_po_report(
             request,
             user_id=payload.user_id,
             role_id=payload.role_id,
+            selected_ids=payload.selected_ids,
             format=format
         )
 

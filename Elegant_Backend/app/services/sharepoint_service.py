@@ -14,6 +14,7 @@ from decimal import Decimal
 from datetime import date, datetime,timedelta,timezone
 from fastapi import APIRouter, HTTPException,Query,Request
 import pandas as pd
+import asyncio
 # Load env
 load_dotenv()
 GRAPH_API = os.getenv("GRAPH_API")
@@ -270,59 +271,73 @@ class SharepointService:
 
     # ---------------- TEXT EXTRACTION ---------------- #
     @staticmethod
-    def extract_text_from_bytes(content_bytes: bytes, filename: str, content_type: str) -> str | None:
-        try:
-            ext = filename.lower()
-            ct = content_type.lower()
+    async def extract_text_from_bytes(content_bytes: bytes, filename: str, content_type: str) -> str | None:
+        """
+        Fast, async-safe text extraction from attachments.
+        Runs heavy parsing in a background thread.
+        """
+        ext = (filename or "").lower()
+        ct = (content_type or "").lower()
 
-            if ct.startswith("text/") or ext.endswith((".txt", ".csv", ".log", ".md")):
-                return content_bytes.decode("utf-8", errors="ignore")
+        def parse_attachment():
+            try:
+                # Text files
+                if ct.startswith("text/") or ext.endswith((".txt", ".md", ".csv", ".log")):
+                    return content_bytes.decode("utf-8", errors="ignore")
 
-            if ct == "application/pdf" or ext.endswith(".pdf"):
-                reader = PyPDF2.PdfReader(io.BytesIO(content_bytes))
-                return "\n".join(p.extract_text() or "" for p in reader.pages)
+                # PDF files
+                elif ct == "application/pdf" or ext.endswith(".pdf"):
+                    reader = PyPDF2.PdfReader(io.BytesIO(content_bytes))
+                    return " ".join((p.extract_text() or "") for p in reader.pages)
 
-
-            if ct in (
-                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                "application/msword",
-            ) or ext.endswith((".docx", ".doc")):
-                doc = docx.Document(io.BytesIO(content_bytes))
-                if ct in (
+                # Word documents
+                elif ct in (
                     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                     "application/msword",
                 ) or ext.endswith((".docx", ".doc")):
-
                     doc = docx.Document(io.BytesIO(content_bytes))
+                    if ct in (
+                        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                        "application/msword",
+                    ) or ext.endswith((".docx", ".doc")):
 
-                    text_parts = []
+                        doc = docx.Document(io.BytesIO(content_bytes))
 
-                    # ---- paragraphs ----
-                    for p in doc.paragraphs:
-                        if p.text.strip():
-                            text_parts.append(p.text.strip())
+                        text_parts = []
 
-                    # ---- tables (CRITICAL FIX) ----
-                    for table in doc.tables:
-                        for row in table.rows:
-                            cells = [cell.text.strip() for cell in row.cells if cell.text.strip()]
-                            if cells:
-                                text_parts.append(" | ".join(cells))
+                        # ---- paragraphs ----
+                        for p in doc.paragraphs:
+                            if p.text.strip():
+                                text_parts.append(p.text.strip())
 
-                    return "\n".join(text_parts)
+                        # ---- tables (CRITICAL FIX) ----
+                        for table in doc.tables:
+                            for row in table.rows:
+                                cells = [cell.text.strip() for cell in row.cells if cell.text.strip()]
+                                if cells:
+                                    text_parts.append(" | ".join(cells))
 
-            if ct in (
-                "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-                "application/vnd.ms-powerpoint",
-            ) or ext.endswith((".pptx", ".ppt")):
-                prs = Presentation(io.BytesIO(content_bytes))
-                return " ".join(
-                    s.text for slide in prs.slides for s in slide.shapes if hasattr(s, "text")
-                )
-        except Exception:
-            return None
+                        return "\n".join(text_parts)
 
-        return None
+                # PowerPoint files
+                elif ct in ("application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                            "application/vnd.ms-powerpoint") or ext.endswith((".pptx", ".ppt")):
+                    prs = Presentation(io.BytesIO(content_bytes))
+                    return " ".join(
+                        shape.text
+                        for slide in prs.slides
+                        for shape in slide.shapes
+                        if hasattr(shape, "text")
+                    )
+
+                # Other formats (images/ocr) - optional
+                else:
+                    return None
+
+            except Exception:
+                return None
+            
+        return await asyncio.to_thread(parse_attachment)
 
     # ---------------- KEYWORD DETECTION ---------------- #
     @staticmethod
@@ -384,6 +399,7 @@ class SharepointService:
 
     
     #--------------------Regex-----------------------------
+    #--------------------Regex-----------------------------
     PO_REGEX_PATTERNS = {
 
         # ---------------- PO NUMBER ----------------
@@ -405,7 +421,6 @@ class SharepointService:
         # ---------------- CUSTOMER NAME ----------------
         "customer_name": [
             # Or combine both:
-            r"(Ostbye[^A-Za-z0-9]*[A-Za-z0-9\s,&.-]+(?:\n\s*[A-Za-z0-9\s,&.-]+){0,2})",
             r"Ship\s+Ostbye\s+To\s*:\s*([^\n]+)",  # For Ostbye format
             r"(?:ship\s*to:|deliver\s*to:|ship\s+ostbye\s+to:)\s*([^\n]+)",
             r"Ship\s*To\s*:\s*([A-Za-z0-9 &.,\-]+)(?=\n\s*(?:FOB|Terms|Vendor|Contact|Phone|$))",
@@ -658,10 +673,11 @@ class SharepointService:
 
     
     
-    async def extract_po_fields_from_llm(self, text: str) -> dict:
+    async def extract_po_fields_from_llm(self,text: str) -> dict:
         if not text or not text.strip():
             return self.EMPTY_PO
 
+        # Quick heuristic to skip irrelevant text
         if not re.search(r"(po|order|\d{3,})", text, re.IGNORECASE):
             return self.EMPTY_PO
 
@@ -685,13 +701,25 @@ class SharepointService:
             )
 
             raw = resp.choices[0].message.content
-            match = re.search(r"\{{.*\}}", raw, re.DOTALL)
+
+            # ----------- CLEAN RAW OUTPUT -----------
+            # Remove markdown/code block if present
+            cleaned = re.sub(r"^```(?:json)?\s*|```$", "", raw.strip(), flags=re.IGNORECASE)
+
+            # Find JSON object in text
+            match = re.search(r"\{.*\}", cleaned, re.DOTALL)
             if not match:
                 return self.EMPTY_PO
 
-            data = json.loads(match.group())
-            out = self.EMPTY_PO.copy()
+            try:
+                data = json.loads(match.group())
+            except json.JSONDecodeError:
+                # Fallback: remove trailing commas or common minor formatting issues
+                cleaned_json = re.sub(r",\s*}", "}", match.group())
+                cleaned_json = re.sub(r",\s*]", "]", cleaned_json)
+                data = json.loads(cleaned_json)
 
+            out = self.EMPTY_PO.copy()
             for f in self.PO_FIELD_NAMES:
                 v = data.get(f)
                 out[f] = v if v not in ["", None, "null", "N/A"] else None
@@ -703,7 +731,7 @@ class SharepointService:
         
     def normalize_po_date_ddmmyyyy(self,date_str: Optional[str]) -> Optional[str]:
         """
-        Converts LLM date output to DD-MM-YYYY string.
+        Converts LLM or regex date output to YYYY-MM-DD string.
         Returns None if parsing fails.
         """
         if not date_str:
@@ -711,9 +739,22 @@ class SharepointService:
 
         date_str = date_str.strip()
 
-        for fmt in ("%d-%b-%Y", "%d-%B-%Y", "%d-%b-%y", "%d-%B-%y",  # For 11-Jul-2025
-                "%Y-%m-%d", "%m/%d/%y", "%d/%m/%y", "%d-%m-%Y", 
-                "%m-%d-%Y", "%y-%m-%d"):
+        date_formats = [
+            "%Y-%m-%d",    # 2025-07-11
+            "%d-%m-%Y",    # 11-07-2025
+            "%m-%d-%Y",    # 07-11-2025
+            "%m/%d/%Y",    # 07/11/2025
+            "%d/%m/%Y",    # 11/07/2025
+            "%y-%m-%d",    # 25-07-11
+            "%m/%d/%y",    # 07/11/25
+            "%d/%m/%y",    # 11/07/25
+            "%b/%d/%Y",    # Jul/11/2025
+            "%B/%d/%Y",    # July/11/2025
+            "%d-%b-%Y",    # 11-Jul-2025
+            "%d-%B-%Y",    # 11-July-2025
+        ]
+
+        for fmt in date_formats:
             try:
                 dt = datetime.strptime(date_str, fmt)
                 return dt.strftime("%Y-%m-%d")
@@ -721,6 +762,7 @@ class SharepointService:
                 continue
 
         return None
+
 
     def normalize_attachment_text(self,text: str) -> str:
             if not text:
@@ -1167,6 +1209,7 @@ class SharepointService:
         to_date: str,
     ):
         saved, failed = [], []
+        extracted_sharepoint_po_ids: list[int] = []
 
         site_id = await self.get_site_id(access_token)
         drive_id = await self.get_drive_id(access_token, site_id)
@@ -1194,7 +1237,7 @@ class SharepointService:
                         if await self.sp_repo.file_exists(user_id, file_hash):
                             continue
 
-                        text = self.extract_text_from_bytes(
+                        text = await self.extract_text_from_bytes(
                             data, f["name"], f["file"]["mimeType"]
                         )
                         if not text:
@@ -1256,14 +1299,14 @@ class SharepointService:
 
                         # ---------- HEADER ONLY (Fallback) ----------
                         if not items:
-                            if header.get("po_number") and header.get("customer_name"):
-                                await self.sp_repo.insert_sharepoint_po_details(
+                            if header.get("po_number") or header.get("customer_name"):
+                                sharepoint_po_det_id=await self.sp_repo.insert_sharepoint_po_details(
                                     user_id=user_id,
                                     po_number=header.get("po_number"),
                                     customer_name=header.get("customer_name"),
                                     vendor_number=header.get("vendor_number"),
                                     po_date=self.normalize_po_date_ddmmyyyy(header.get("po_date")),
-                                    delivery_date=header.get("delivery_date"),
+                                    delivery_date=self.normalize_po_date_ddmmyyyy(header.get("delivery_date")),
                                     cancel_date=self.normalize_po_date_ddmmyyyy(header.get("cancel_date")),
                                     gold_karat=header.get("gold_karat"),
                                     ec_style_number=header.get("ec_style_number"),
@@ -1273,6 +1316,7 @@ class SharepointService:
                                     description=header.get("description"), 
                                     created_by=user_id,
                                 )
+                                extracted_sharepoint_po_ids.append(sharepoint_po_det_id)
 
                         # ---------- MULTIPLE ITEM ROWS ----------
                         else:
@@ -1282,7 +1326,7 @@ class SharepointService:
                                 po_date = item.get("po_date") or header.get("po_date")
                                 vendor = item.get("vendor") or header.get("vendor_number")
                                 
-                                await self.sp_repo.insert_sharepoint_po_details(
+                                sharepoint_po_det_id =await self.sp_repo.insert_sharepoint_po_details(
                                     user_id=user_id,
                                     po_number=po_number,
                                     customer_name=header.get("customer_name"),  # From your PDF
@@ -1298,6 +1342,7 @@ class SharepointService:
                                     description=item.get("description"),
                                     created_by=user_id,
                                 )
+                                extracted_sharepoint_po_ids.append(sharepoint_po_det_id)
 
                         saved.append(f["name"])
 
@@ -1314,72 +1359,73 @@ class SharepointService:
             "failed_count": len(failed),
             "saved_files": saved,
             "failed_files": failed,
+            "extracted_sharepoint_po_ids": extracted_sharepoint_po_ids,
         }
         
     #--------------------------data comparison logic start--------------------------#
     # -------------------------- NORMALIZATION -------------------------- #
-    def normalize(self, value, field=None):
-        if value is None:
-            return ""
+    # def normalize(self, value, field=None):
+    #     if value is None:
+    #         return ""
 
-        text = str(value).strip().lower()
-        field = (field or "").strip().lower()
+    #     text = str(value).strip().lower()
+    #     field = (field or "").strip().lower()
 
-        # ------------------ GOLD KARAT / GOLD LOCK / KT ------------------ #
-        if field in ("gold_karat", "gold_lock", "kt"):
-            # unify 24, 24k, 24 kt, 24ct, 24 carat
-            text = re.sub(r"[^\d]", "", text)  # remove letters, spaces
-            return text
+    #     # ------------------ GOLD KARAT / GOLD LOCK / KT ------------------ #
+    #     if field in ("gold_karat", "gold_lock", "kt"):
+    #         # unify 24, 24k, 24 kt, 24ct, 24 carat
+    #         text = re.sub(r"[^\d]", "", text)  # remove letters, spaces
+    #         return text
 
-        # ------------------ QUANTITY ------------------ #
-        if field == "quantity":
-            nums = re.findall(r"\d+", text)
-            return nums[0] if nums else ""
+    #     # ------------------ QUANTITY ------------------ #
+    #     if field == "quantity":
+    #         nums = re.findall(r"\d+", text)
+    #         return nums[0] if nums else ""
 
-        # ------------------ DATE FIELDS ------------------ #
-        if field in ("po_date", "delivery_date", "cancel_date"):
-            if isinstance(value, (date, datetime)):
-                return value.strftime("%Y-%m-%d")
-            text = re.sub(r"[/.]", "-", text)
-            m = re.search(r"\d{4}-\d{1,2}-\d{1,2}", text)
-            if m:
-                y, mth, d = m.group().split("-")
-                return f"{int(y):04d}-{int(mth):02d}-{int(d):02d}"
-            return ""
+    #     # ------------------ DATE FIELDS ------------------ #
+    #     if field in ("po_date", "delivery_date", "cancel_date"):
+    #         if isinstance(value, (date, datetime)):
+    #             return value.strftime("%Y-%m-%d")
+    #         text = re.sub(r"[/.]", "-", text)
+    #         m = re.search(r"\d{4}-\d{1,2}-\d{1,2}", text)
+    #         if m:
+    #             y, mth, d = m.group().split("-")
+    #             return f"{int(y):04d}-{int(mth):02d}-{int(d):02d}"
+    #         return ""
 
-        # ------------------ TEXT FIELDS ------------------ #
-        text = re.sub(r"[^\w\s]", " ", text)
-        text = re.sub(r"[ \t]+", " ", text)
+    #     # ------------------ TEXT FIELDS ------------------ #
+    #     text = re.sub(r"[^\w\s]", " ", text)
+    #     text = re.sub(r"[ \t]+", " ", text)
 
 
-        # handle common abbreviations
-        replacements = {
-            "pvt": "private",
-            "ltd": "limited",
-            "co": "company",
-            "corp": "corporation",
-        }
-        for k, v in replacements.items():
-            text = re.sub(rf"\b{k}\b", v, text)
+    #     # handle common abbreviations
+    #     replacements = {
+    #         "pvt": "private",
+    #         "ltd": "limited",
+    #         "co": "company",
+    #         "corp": "corporation",
+    #     }
+    #     for k, v in replacements.items():
+    #         text = re.sub(rf"\b{k}\b", v, text)
 
-        return text.strip()
+    #     return text.strip()
 
 
     # -------------------------- CUSTOMER NAME CLEANER -------------------------- #
-    def clean_customer_name(self, name):
-        text = self.normalize(name, "customer_name")
-        # Remove common suffixes to avoid mismatch
-        text = re.sub(r"\b(private limited|private|limited|ltd|co|corporation)\b", "", text)
-        text = re.sub(r"\s+", " ", text)
-        return text.strip()
+    # def clean_customer_name(self, name):
+    #     text = self.normalize(name, "customer_name")
+    #     # Remove common suffixes to avoid mismatch
+    #     text = re.sub(r"\b(private limited|private|limited|ltd|co|corporation)\b", "", text)
+    #     text = re.sub(r"\s+", " ", text)
+    #     return text.strip()
 
 
     # -------------------------- PO KEY -------------------------- #
-    def build_po_key(self, po: dict) -> tuple:
-        return (
-            self.clean_customer_name(po.get("customer_name")),
-            self.normalize(po.get("po_number"), "po_number"),
-        )
+    # def build_po_key(self, po: dict) -> tuple:
+    #     return (
+    #         self.po.get("customer_name"),
+    #         self.normalize(po.get("po_number"), "po_number"),
+    #     )
 
 
     # -------------------------- JSON SAFE -------------------------- #
@@ -1398,21 +1444,26 @@ class SharepointService:
 
 
     # -------------------------- CANDIDATE SYSTEM PO SEARCH -------------------------- #
-    def candidate_system_pos(self,scanned, system_pos):
-        scanned_cust = self.clean_customer_name(scanned.get("customer_name"))
-        scanned_po = self.normalize(scanned.get("po_number"), "po_number")
+    # def candidate_system_pos(self, scanned, system_pos):
+    #     scanned_cust = (scanned.get("customer_name") or "").strip().lower()
+    #     scanned_po = self.normalize(scanned.get("po_number"), "po_number")
 
-        candidates = []
-        for sys in system_pos:
-            if not sys.get("customer_name") or not sys.get("po_number"):
-                continue
+    #     candidates = []
 
-            cust_sim = fuzz.partial_ratio(scanned_cust, self.clean_customer_name(sys["customer_name"]))
-            po_sim = fuzz.partial_ratio(scanned_po, self.normalize(sys["po_number"], "po_number"))
+    #     for sys in system_pos:
+    #         if not sys.get("customer_name") or not sys.get("po_number"):
+    #             continue
 
-            if po_sim >= 70 or cust_sim >= 80:
-                candidates.append(sys)
-        return candidates[:5]
+    #         sys_cust = (sys.get("customer_name") or "").strip().lower()
+    #         sys_po = self.normalize(sys.get("po_number"), "po_number")
+
+    #         cust_sim = fuzz.partial_ratio(scanned_cust, sys_cust)
+    #         po_sim = fuzz.partial_ratio(scanned_po, sys_po)
+
+    #         if po_sim >= 70 or cust_sim >= 80:
+    #             candidates.append(sys)
+
+    #     return candidates[:5]
 
 
     # -------------------------- FIELDS TO COMPARE -------------------------- #
@@ -1423,57 +1474,62 @@ class SharepointService:
     ]
 
 
-    def compare_po_fields(self,scanned, system):
-        mismatches = []
-        for field in self.FIELDS_TO_COMPARE:
-            s_val = scanned.get(field)
-            sys_val = system.get(field)
-            # ------------------ SPECIAL HANDLING ------------------ #
-            if field == "customer_name":
-                s_val = self.clean_customer_name(s_val)
-                sys_val = self.clean_customer_name(sys_val)
-            elif field in ("gold_karat", "gold_lock", "kt"):
-                s_val = self.normalize(s_val, "gold_karat")
-                sys_val = self.normalize(sys_val, "gold_karat")
-            else:
-                s_val = self.normalize(s_val, field)
-                sys_val = self.normalize(sys_val, field)
+    # def compare_po_fields(self,scanned, system):
+    #     mismatches = []
+    #     for field in self.FIELDS_TO_COMPARE:
+    #         s_val = scanned.get(field)
+    #         sys_val = system.get(field)
+    #         # ------------------ SPECIAL HANDLING ------------------ #
+    #         if field == "customer_name":
+    #             s_val = self.clean_customer_name(s_val)
+    #             sys_val = self.clean_customer_name(sys_val)
+    #         elif field in ("gold_karat", "gold_lock", "kt"):
+    #             s_val = self.normalize(s_val, "gold_karat")
+    #             sys_val = self.normalize(sys_val, "gold_karat")
+    #         else:
+    #             s_val = self.normalize(s_val, field)
+    #             sys_val = self.normalize(sys_val, field)
 
-            if s_val != sys_val:
-                mismatches.append({
-                    "field": field,
-                    "scanned": scanned.get(field),
-                    "system": system.get(field)
-                })
+    #         if s_val != sys_val:
+    #             mismatches.append({
+    #                 "field": field,
+    #                 "scanned": scanned.get(field),
+    #                 "system": system.get(field)
+    #             })
 
-        return mismatches
+    #     return mismatches
 
     # -------------------------- LLM FALLBACK -------------------------- #
-    async def llm_fallback_match(self,scanned_po, candidates):
-        safe_scanned = {k: self.make_json_safe(v) for k, v in scanned_po.items()}
-        safe_candidates = [{k: self.make_json_safe(v) for k, v in c.items()} for c in candidates]
-
+    @staticmethod
+    async def llm_batch_match(scanned_pos, system_pos):
         prompt = f"""
-    You are a PO reconciliation engine.
+    You are a PO matching engine.
 
-    Task: Match a scanned PO to one of the system POs.
+    Match scanned POs to system POs using ONLY:
+    - customer_name
+    - po_number
 
     Rules:
-    1. PO Number is strongest signal.
-    2. Customer Name: handle abbreviations, typos, word order.
-    3. Gold Karat / Gold Lock / Kt differences are ignored.
-    4. Quantity units may differ.
-    5. Date fields normalized to YYYY-MM-DD.
-    6. Color & Description: ignore word order, minor typos.
-    7. Respond ONLY in JSON:
-    {{ "matched_index": number | null, "confidence": 0.0-1.0 }}
+    - Handle spelling mistakes, abbreviations, extra/missing letters.
+    - One scanned PO matches at most one system PO.
+    - If no confident match exists, return null.
 
-    Scanned PO:
-    {json.dumps(safe_scanned, indent=2)}
+    Return ONLY JSON:
+    [
+    {{
+        "scanned_po_det_id": number,
+        "system_po_id": number | null,
+        "confidence": 0.0-1.0
+    }}
+    ]
 
-    System PO Candidates:
-    {json.dumps(safe_candidates, indent=2)}
+    Scanned POs:
+    {json.dumps(scanned_pos)}
+
+    System POs:
+    {json.dumps(system_pos)}
     """
+
         resp = openai_client.chat.completions.create(
             model="gpt-4.1-mini",
             temperature=0,
@@ -1482,95 +1538,213 @@ class SharepointService:
 
         raw = resp.choices[0].message.content.strip()
         raw = re.sub(r"^```json|```$", "", raw, flags=re.IGNORECASE).strip()
-        match = re.search(r"\{.*\}", raw, re.DOTALL)
-        if not match:
-            return None
-        result = json.loads(match.group())
-        if result.get("matched_index") is None or result.get("confidence", 0) < 0.85:
-            return None
-        idx = result["matched_index"]
-        return candidates[idx] if 0 <= idx < len(candidates) else None
+        return json.loads(raw)
+
+
+    async def llm_batch_compare(self,matched_pairs):
+        prompt = f"""
+    You are an expert PO field comparison engine.
+
+    Compare ONLY the following fields:
+    {self.FIELDS_TO_COMPARE}
+
+    Your goal is to detect **real business mismatches**. Do NOT report differences caused by minor spelling mistakes, abbreviations, word order, or formatting.
+
+    Rules:
+    1. Treat minor spelling errors, missing/extra letters, or phonetic variations as SAME.
+    2. Treat abbreviations and expansions (e.g., Pvt, Ltd, Private Limited) as SAME.
+    3. Ignore punctuation, dots, commas, extra spaces, capitalization.
+    4. Ignore word order in names, colors, or descriptions.
+    5. Ignore formatting differences in dates (YYYY-MM-DD, DD/MM/YYYY) or numbers/quantities.
+    6. Only report a mismatch if the values clearly indicate different meanings or entities.
+
+    Return ONLY JSON in the following format:
+    [
+    {{
+        "po_det_id": number,
+        "system_po_id": number,
+        "field": string,
+        "scanned_value": string,
+        "system_value": string
+    }}
+    ]
+
+    Here are the matched PO pairs to compare:
+    {json.dumps(matched_pairs, indent=2)}
+    """
+
+        # Call OpenAI LLM
+        resp = openai_client.chat.completions.create(
+            model="gpt-4.1-mini",
+            temperature=0,
+            messages=[{"role": "user", "content": prompt}]
+        )
+
+        # Clean up response
+        raw = resp.choices[0].message.content.strip()
+        raw = re.sub(r"^```json|```$", "", raw, flags=re.IGNORECASE).strip()
+
+        # Parse JSON
+        try:
+            result = json.loads(raw)
+            if not isinstance(result, list):
+                raise ValueError("LLM response is not a JSON list")
+            return result
+        except Exception as e:
+            # fallback: return empty list if parsing fails
+            print(f"LLM parsing error: {e}")
+            return []
+
+    @staticmethod
+    def chunk(data, size):
+        for i in range(0, len(data), size):
+            yield data[i:i + size]
+
 
 
     # -------------------------- MAIN SERVICE -------------------------- #
-    async def generate_sharepoint_missing_po_report_service(self, user_id: int):
-        scanned_pos = await self.sp_repo.get_all_sharepoint_po_details()
-        system_pos = await self.sp_repo.get_all_system_po_details()
+    async def generate_sharepoint_missing_po_report_service(
+        self,
+        user_id: int,
+        sharepoint_po_det_ids: list[int],
+        sp_repo : "SharepointRepo"
+    ):
+        """
+        Logic:
+        1. Fetch scanned POs only for given po_det_ids (multiple emails supported)
+        2. Fetch relevant system POs only (NOT full table)
+        3. LLM match scanned ↔ system
+        4. If matched with high confidence → compare fields → insert mismatches
+        5. If scanned PO not confidently matched → insert missing (scanned side)
+        6. DO NOT mark unrelated system POs as missing
+        """
 
-        system_map = {
-            self.build_po_key(po): po
+        # -------------------- Fetch scanned POs -------------------- #
+        scanned_pos = await sp_repo.get_po_details_by_ids(sharepoint_po_det_ids)
+
+        if not scanned_pos:
+            return {
+                "status": "success",
+                "message": "No scanned POs found for comparison"
+            }
+
+        # -------------------- Fetch relevant system POs -------------------- #
+        scanned_po_numbers = list({
+            po["po_number"]
+            for po in scanned_pos
+            if po.get("po_number")
+        })
+
+        system_pos = await sp_repo.get_system_pos_by_po_numbers(scanned_po_numbers)
+
+        # -------------------- JSON safe conversion -------------------- #
+        scanned_pos = [
+            {k: self.make_json_safe(v) for k, v in po.items()}
+            for po in scanned_pos
+        ]
+        system_pos = [
+            {k: self.make_json_safe(v) for k, v in po.items()}
             for po in system_pos
-            if po.get("customer_name") and po.get("po_number")
-        }
+        ]
 
-        existing_mismatches = await self.sp_repo.get_all_sharepoint_mismatches()
-        existing_keys = {
-            (m["sharepoint_po_det_id"], m["system_po_id"], m["mismatch_attribute"])
-            for m in existing_mismatches
-        }
+        # -------------------- Tracking -------------------- #
+        matched_scanned_ids: set[int] = set()
+        matched_system_ids: set[int] = set()
 
-        llm_cache = {}
+        # -------------------- Matching & comparison -------------------- #
+        for scanned_batch in self.chunk(scanned_pos, 25):
 
-        for scanned in scanned_pos:
-            if not scanned.get("customer_name") or not scanned.get("po_number"):
-                continue
+            matches = await self.llm_batch_match(scanned_batch, system_pos)
+            matched_pairs = []
 
-            scanned_key = self.build_po_key(scanned)
-            system_po = system_map.get(scanned_key)
+            for m in matches:
+                scanned = next(
+                    (p for p in scanned_batch if p["sharepoint_po_det_id"] == m["scanned_po_det_id"]),
+                    None
+                )
+                if not scanned:
+                    continue
 
-            # ------------------ USE FUZZY / LLM MATCH ------------------ #
-            if not system_po:
-                if scanned_key not in llm_cache:
-                    candidates = self.candidate_system_pos(scanned, system_pos)
-                    # Call LLM fallback if needed
-                    if candidates:
-                        system_po = await self.llm_fallback_match(scanned, candidates)
-                    llm_cache[scanned_key] = system_po
-                else:
-                    system_po = llm_cache[scanned_key]
+                # Ignore low confidence
+                if not m.get("system_po_id") or m.get("confidence", 0) < 0.85:
+                    continue
 
-            # ------------------ MARK PO AS MISSING ------------------ #
-            if not system_po:
-                exists = await self.sp_repo.get_existing_sharepoint_po_missing(sharepoint_po_det_id=scanned["sharepoint_po_det_id"])
+                # Prevent duplicate system PO matching
+                if m["system_po_id"] in matched_system_ids:
+                    continue
+
+                system = next(
+                    (p for p in system_pos if p["system_po_id"] == m["system_po_id"]),
+                    None
+                )
+                if not system:
+                    continue
+
+                matched_scanned_ids.add(scanned["sharepoint_po_det_id"])
+                matched_system_ids.add(system["system_po_id"])
+
+                matched_pairs.append({
+                    "sharepoint_po_det_id": scanned["sharepoint_po_det_id"],
+                    "system_po_id": system["system_po_id"],
+                    "scanned": {f: scanned.get(f) for f in self.FIELDS_TO_COMPARE},
+                    "system": {f: system.get(f) for f in self.FIELDS_TO_COMPARE},
+                })
+
+            # -------------------- Field mismatch check -------------------- #
+            if matched_pairs:
+                mismatches = await self.llm_batch_compare(matched_pairs)
+
+                for mm in mismatches:
+                    exists = await sp_repo.mismatch_exists(
+                        user_id=user_id,
+                        sharepoint_po_det_id=mm["sharepoint_po_det_id"],
+                        system_po_id=mm["system_po_id"],
+                        mismatch_attribute=mm["field"],
+                        scanned_value=str(mm["scanned_value"]),
+                        system_value=str(mm["system_value"]),
+                    )
+
+                    if not exists:
+                        await sp_repo.insert_mismatch(
+                            sharepoint_po_det_id=mm["sharepoint_po_det_id"],
+                            user_id=user_id,
+                            system_po_id=mm["system_po_id"],
+                            field=mm["field"],
+                            system_value=str(mm["system_value"]),
+                            scanned_value=str(mm["scanned_value"]),
+                            comment=f"{mm['field']} mismatch",
+                        )
+
+        # -------------------- Missing scanned POs -------------------- #
+        for po in scanned_pos:
+            if po["sharepoint_po_det_id"] not in matched_scanned_ids:
+
+                exists = await sp_repo.po_missing_exists(
+                    user_id=user_id,
+                    sharepoint_po_det_id=po["sharepoint_po_det_id"],
+                    system_po_id=None,
+                    mismatch_attribute="po_missing",
+                    scanned_value=po.get("po_number"),
+                    system_value="",
+                )
+
                 if not exists:
-                    await self.sp_repo.insert_sharepoint_po_missing(
-                        sharepoint_po_det_id=scanned["sharepoint_po_det_id"],
+                    await sp_repo.insert_po_missing(
+                        sharepoint_po_det_id=po["sharepoint_po_det_id"],
                         user_id=user_id,
                         system_po_id=None,
                         attribute="po_missing",
                         system_value="",
-                        scanned_value=scanned.get("po_number"),
-                        comment="PO not found"
+                        scanned_value=po.get("po_number"),
+                        comment="PO not found in system (or low confidence match)",
                     )
-                continue
-
-            # ------------------ COMPARE FIELDS ------------------ #
-            mismatches = self.compare_po_fields(scanned, system_po)
-            for m in mismatches:
-                key = (
-                    scanned["sharepoint_po_det_id"],
-                    system_po["system_po_id"],
-                    m["field"]
-                )
-                if key in existing_keys:
-                    continue
-
-                await self.sp_repo.insert_sharepoint_mismatch(
-                    sharepoint_po_det_id=scanned["sharepoint_po_det_id"],
-                    user_id=user_id,
-                    system_po_id=system_po["system_po_id"],
-                    field=m["field"],
-                    system_value=str(m["system"]),
-                    scanned_value=str(m["scanned"]),
-                    comment=f"{m['field']} mismatch"
-                )
-                existing_keys.add(key)
 
         return {
             "status": "success",
-            "message": "PO missing & mismatch report generated successfully"
+            "message": "PO comparison completed: missing & mismatches processed successfully",
         }
-    # --------------------------data comparison logic end--------------------------#
+
+
     
     
     
@@ -1594,9 +1768,11 @@ class SharepointService:
         request: Request,
         user_id: int,
         role_id: int,
-        format: str
+        format: str,
+        selected_ids: Optional[List[int]] = None
     ):
-        data = await SharepointRepo.download_sharepoint_missing_po_report(request, user_id, role_id)
+        selected_ids = selected_ids or []
+        data = await SharepointRepo.download_sharepoint_missing_po_report(request, user_id, role_id,selected_ids)
 
         if not data:
             raise HTTPException(status_code=404, detail="No missing PO data available")
@@ -1625,9 +1801,11 @@ class SharepointService:
         request: Request,
         user_id: int,
         role_id: int,
-        format: str
+        format: str,
+        selected_ids: Optional[List[int]] = None
     ):
-        data = await SharepointRepo.download_sharepoint_mismatch_po_report(request, user_id, role_id)
+        selected_ids = selected_ids or []
+        data = await SharepointRepo.download_sharepoint_mismatch_po_report(request, user_id, role_id,selected_ids)
 
         if not data:
             raise HTTPException(status_code=404, detail="No mismatch PO data available")

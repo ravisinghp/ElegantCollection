@@ -213,10 +213,11 @@ async def get_all_users(request):
             rm.role_name
         FROM users_master um
         LEFT JOIN role_master rm ON rm.role_id = um.role_id
+        WHERE um.is_active = 1
         ORDER BY um.user_id DESC
     """
 
-    query_count = "SELECT COUNT(*) AS total_count FROM users_master"
+    query_count = "SELECT COUNT(*) AS total_count FROM users_master WHERE is_active = 1"
 
     async with request.app.state.pool.acquire() as conn:
         async with conn.cursor(aiomysql.DictCursor) as cur:

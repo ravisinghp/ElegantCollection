@@ -4,6 +4,7 @@ from typing import Any,Dict
 from datetime import datetime, timedelta
 IST_OFFSET = timedelta(hours=5, minutes=30)
 from asyncmy.cursors import DictCursor
+from loguru import logger
 
 #Total R&D Effort On User Dashboard
 # async def fetch_total_user_effort_by_id(user_id: int, from_date: str, to_date: str, request: Request) -> float:
@@ -1027,6 +1028,32 @@ async def get_last_sync_by_user_id(
     except Exception as e:
         return []
 
+
+#Last sync for business admin and system admin dashboard
+async def get_last_sync(request: Request) -> List[Dict[str, Any]]:
+        try:
+            # 🔹 Latest created_on from both tables for Business/System Admin
+            query = """
+                SELECT GREATEST(
+                    COALESCE((SELECT MAX(created_on) FROM mail_details), '1970-01-01'),
+                    COALESCE((SELECT MAX(created_on) FROM sharepoint_files), '1970-01-01')
+                ) AS last_sync
+            """
+            async with request.app.state.pool.acquire() as conn:
+                async with conn.cursor() as cursor:
+                    await cursor.execute(query)
+                    row = await cursor.fetchone()
+ 
+                    if not row or not row[0]:
+                        return []
+ 
+                    return [{
+                        "last_sync": row[0]  # row[0] is already 'YYYY-MM-DD HH:MM:SS'
+                    }]
+        except Exception as e:
+            raise Exception(f"Error fetching last sync data: {str(e)}")
+ 
+ 
 #For duplicates folder checking
 async def check_folder_mapping_exists_repo(
     request: Request,
@@ -1172,3 +1199,115 @@ async def get_user_folders(request, user_id: int):
 #             await cursor.execute(query, (flag, user_id, role_id, org_id))
 #             await conn.commit() 
 #             return cursor.rowcount > 0   #  True if row updated
+
+
+
+#--------------Soft Delete and Hard Delete User and all related tables--------------
+# table_name : status_column
+RELATED_TABLES = {
+    "audit_po_details": "active",
+    "mail_details": "is_active",
+    "email_attachments": "is_active",
+    "sharepoint_files": "is_active",
+    "po_details": "active",
+    "sharepoint_po_details": "active",
+    "po_missing_report": "active",
+    "sharepoint_po_missing_report": "active",
+    "po_mismatch_report": "active",
+    "sharepoint_po_mismatch_report": "active",
+    "outlook_tokens": "is_active",
+    "category_master": "is_active",
+    "keyword_master": "is_active",
+    "user_source_mapping": "is_active",
+    "sd_folder_mapping_table": "is_active",
+}
+
+async def soft_delete_user(request, user_id: int) -> bool:
+    """Mark user and all related records as inactive"""
+    try:
+        async with request.app.state.pool.acquire() as conn:
+            async with conn.cursor() as cursor:
+                await conn.begin()
+
+                # Soft delete user
+                await cursor.execute(
+                    "UPDATE users_master SET is_active = 0 WHERE user_id = %s",
+                    (user_id,)
+                )
+
+                # Soft delete related tables
+                for table, status_col in RELATED_TABLES.items():
+                    await cursor.execute(
+                        f"""
+                        UPDATE {table}
+                        SET {status_col} = 0
+                        WHERE user_id = %s
+                        """,
+                        (user_id,)
+                    )
+
+                await conn.commit()
+
+        logger.info(f"User {user_id} soft-deleted successfully")
+        return True
+
+    except Exception as e:
+        logger.error(f"Soft delete failed for user {user_id}: {e}")
+        return False
+
+
+AUDIT_TABLES = {
+    "audit_po_details": "active",
+}
+
+HARD_DELETE_TABLES = [
+    "sd_folder_mapping_table",
+    "user_source_mapping",
+    "category_master",
+    "keyword_master",
+    "outlook_tokens",
+    "sharepoint_files",
+    "sharepoint_po_details",
+    "sharepoint_po_mismatch_report",
+    "sharepoint_po_missing_report",
+    "mail_details",
+    "email_attachments",
+    "po_details",
+    "po_missing_report",
+    "po_mismatch_report",
+    "audit_po_details"
+]
+
+async def hard_delete_user(request, user_id: int) -> bool:
+    try:
+        async with request.app.state.pool.acquire() as conn:
+            async with conn.cursor() as cursor:
+                await conn.begin()
+
+                # Soft delete audit tables
+                for table, col in AUDIT_TABLES.items():
+                    await cursor.execute(
+                        f"UPDATE {table} SET {col} = 0 WHERE user_id = %s",
+                        (user_id,)
+                    )
+
+                # Delete child tables first
+                for table in reversed(HARD_DELETE_TABLES):
+                    await cursor.execute(
+                        f"DELETE FROM {table} WHERE user_id = %s",
+                        (user_id,)
+                    )
+
+                # Delete user last
+                await cursor.execute(
+                    "DELETE FROM users_master WHERE user_id = %s",
+                    (user_id,)
+                )
+
+                await conn.commit()
+
+        return True
+
+    except Exception as e:
+        logger.error(f"Hard delete failed for user {user_id}: {e}")
+        return False

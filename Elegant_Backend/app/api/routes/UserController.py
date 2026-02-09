@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException,Query
+from fastapi import APIRouter, HTTPException,Query, status
 from starlette.requests import Request
 
 from app.services import UserService 
@@ -7,7 +7,8 @@ from typing import List, Dict, Any
 from fastapi.responses import StreamingResponse
 from app.models.domain.AdminDomain import UpdatePoCommentRequest, GenerateMissingPoReport, DownloadMissingMismatchRequest,FetchMissingMismatchReport,FolderMappingRequest,DownloadCombinedMissingMismatchRequest,DownloadAllMissingMismatchRequest,DownloadCombinedAllPORequest
 from fastapi.encoders import jsonable_encoder
-from app.models.schemas.users import BusinessAdminSearchRequest
+from app.models.schemas.users import BusinessAdminSearchRequest, DeleteUserPayload
+from loguru import logger
 
 
 #User Dashboard Card Data 
@@ -472,6 +473,17 @@ async def get_last_sync_by_user_id(user_id: int,role_id: int,request: Request):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+
+#Last sync on business and System admin  
+@router.get("/business_syatem_admin_last_sync")
+async def get_last_sync(request: Request):
+    try:
+        result = await UserService.get_last_sync(request)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))  
+
+
 # Save the Folder in Folder mapping for scheduler to get sync
 @router.post("/save_folder_mapping")
 async def save_folder_mapping(payload: FolderMappingRequest, request: Request ):
@@ -515,3 +527,32 @@ async def save_folder_mapping(payload: FolderMappingRequest, request: Request ):
 #         raise HTTPException(status_code=500, detail=str(e))
 
 
+#--------------Soft Delete and Hard Delete User and all related tables--------------
+@router.post("/deactivate_or_delete_user")
+async def deactivate_or_delete_user(
+    request: DeleteUserPayload,
+    request_obj: Request 
+):
+    service = UserService
+    try:
+        result = await service.deactivate_or_delete_user(request_obj, request.user_id, request.action)
+        if not result["success"]:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=result["message"]
+            )
+        return {
+            "status": "success",
+            "data": result
+        }
+    except ValueError as ve:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(ve)
+        )
+    except Exception as e:
+        logger.exception(f"Unexpected error deleting user {request.user_id}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to delete user"
+        )

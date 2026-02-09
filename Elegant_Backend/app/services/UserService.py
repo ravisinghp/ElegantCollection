@@ -7,6 +7,7 @@ from collections import Counter
 import io
 import pandas as pd
 from app.models.schemas.users import BusinessAdminSearchRequest
+from loguru import logger
 
 #Total R&D Effort On User Dashboard
 # async def get_total_user_effort_by_user_id(user_id: int, from_date: str, to_date: str, request: Request):
@@ -492,6 +493,16 @@ async def get_last_sync_by_user_id(user_id: int,role_id: int,request: Request):
     except Exception as e:
         raise Exception(f"Error fetching last sync data: {str(e)}")
 
+
+#Last sync On business and system admin
+async def get_last_sync(request: Request):
+    try:
+        last_sync_data = await UserRepo.get_last_sync(request)
+        return last_sync_data
+    except Exception as e:
+        raise Exception(f"Error fetching last sync data: {str(e)}")
+    
+
 #save the folders in folder mapping table for scheduler 
 async def save_folder_mapping_service(
     request: Request,
@@ -541,3 +552,23 @@ async def save_folder_mapping_service(
 #         return await UserRepo.update_term_condition_flag(user_id, role_id, org_id, request)
 #     except Exception as e:
 #         raise Exception(f"Error updating terms flag: {str(e)}")
+
+
+
+#---------------Soft Delete and Hard Delete User and all related tables-----------------#
+async def deactivate_or_delete_user(request_obj, user_id: int, action: str):
+    """
+    Delete or inactivate user based on action
+    action: 'inactive' or 'delete'
+    """
+    if action == "inactive":
+        success = await UserRepo.soft_delete_user(request_obj, user_id)
+        msg = "User inactivated successfully" if success else "Failed to inactivate user"
+    elif action == "delete":
+        success = await UserRepo.hard_delete_user(request_obj, user_id)
+        msg = "User deleted successfully" if success else "Failed to delete user"
+    else:
+        raise ValueError("Invalid action. Must be 'inactive' or 'delete'.")
+
+    logger.info(f"Action '{action}' on user {user_id}: {msg}")
+    return {"user_id": user_id, "action": action, "success": success, "message": msg}

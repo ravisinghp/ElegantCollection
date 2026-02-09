@@ -83,3 +83,7 @@ class BusinessAdminSearchRequest(BaseModel):
     userId: Optional[int] = None
     vendorNumber: Optional[str] = None
     
+
+class DeleteUserPayload(BaseModel):
+    user_id: int
+    action: str  # "inactive" or "delete"

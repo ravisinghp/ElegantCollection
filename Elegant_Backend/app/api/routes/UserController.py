@@ -134,8 +134,24 @@ async def download_all_mismatch_po_report(
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+    
+    
+@router.post("/download_all_selected_po_report")
+async def download_all_selected_po_report(
+    request: Request,
+    payload: dict,
+    format: str = Query("excel", enum=["excel", "pdf"])
+):
+    try:
+        return await UserService.download_all_selected_po_report(
+            request=request,
+            payload=payload,
+            format=format
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
-
+#On Business admin dashboard
 @router.post("/download_combined_all_po_report")
 async def download_combined_all_po_report(
     request: Request,

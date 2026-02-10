@@ -236,8 +236,66 @@ async def download_all_mismatch_po_report(request: Request):
         raise e
 
 
- 
+async def download_all_selected_po_report(
+        request: Request,
+        user_id: int,
+        role_id: int,
+        missing_po_ids: List[int],
+        mismatch_po_ids: List[int],
+    ) -> List[Dict[str, Any]]:
 
+        queries = []
+        params = []
+
+        # -------- EMAIL MISSING --------
+        if missing_po_ids:
+            queries.append(f"""
+                SELECT
+                    pd.po_number,
+                    pd.po_date,
+                    pd.vendor_number AS vendor_code,
+                    pd.customer_name,
+                    pm.created_on,
+                    'MISSING' AS po_status
+                FROM po_missing_report pm
+                JOIN po_details pd ON pm.po_det_id = pd.po_det_id
+                LEFT JOIN users_master um ON pm.user_id = um.user_id
+                WHERE pm.po_missing_id IN ({",".join(["%s"] * len(missing_po_ids))})
+            """)
+            params.extend(missing_po_ids)
+
+        # -------- EMAIL MISMATCH --------
+        if mismatch_po_ids:
+            queries.append(f"""
+                SELECT
+                    pd.po_number,
+                    pd.po_date,
+                    pd.vendor_number AS vendor_code,
+                    pd.customer_name,
+                    mm.created_on,
+                    'MISMATCH' AS po_status
+                FROM po_mismatch_report mm
+                JOIN po_details pd ON mm.po_det_id = pd.po_det_id
+                LEFT JOIN users_master um ON mm.user_id = um.user_id
+                WHERE mm.po_mismatch_id IN ({",".join(["%s"] * len(mismatch_po_ids))})
+            """)
+            params.extend(mismatch_po_ids)
+
+        if not queries:
+            return []
+
+        final_query = " UNION ALL ".join(queries) + " ORDER BY created_on DESC"
+
+        async with request.app.state.pool.acquire() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute(final_query, tuple(params))
+                columns = [col[0] for col in cursor.description]
+                rows = await cursor.fetchall()
+
+        return [dict(zip(columns, row)) for row in rows]
+
+ 
+#On Business admin dashboard
 async def download_combined_all_po_report(
         request: Request,
         user_id: int,
@@ -439,7 +497,7 @@ async def ignore_missing_po(
         async with request.app.state.pool.acquire() as conn:
             async with conn.cursor() as cursor:
 
-                # Get sharepoint_po_det_id
+                # Get po_det_id
                 await cursor.execute("""
                     SELECT po_det_id
                     FROM po_missing_report
@@ -453,7 +511,7 @@ async def ignore_missing_po(
 
                 po_det_id = row[0]
 
-                # Update sharepoint_po_missing
+                # Update po_missing
                 await cursor.execute("""
                     UPDATE po_missing_report
                     SET active = 0
@@ -461,7 +519,7 @@ async def ignore_missing_po(
                     AND active = 1
                 """, (po_missing_id,))
 
-                # Update sharepoint_po_details
+                # Update po_details
                 await cursor.execute("""
                     UPDATE po_details
                     SET active = 0

@@ -8,6 +8,7 @@ import io
 import pandas as pd
 from app.models.schemas.users import BusinessAdminSearchRequest
 from loguru import logger
+from fastapi.responses import StreamingResponse
 
 #Total R&D Effort On User Dashboard
 # async def get_total_user_effort_by_user_id(user_id: int, from_date: str, to_date: str, request: Request):
@@ -170,7 +171,65 @@ async def download_all_mismatch_po_report(
         except Exception as e:
             raise e
         
+async def download_all_selected_po_report(
+        request,
+        payload: dict,
+        format: str
+    ):
+        try:
+            user_id = payload.get("user_id")
+            role_id = payload.get("role_id")
+            missing_ids = payload.get("missing_po_ids", [])
+            mismatch_ids = payload.get("mismatch_po_ids", [])
+
+            data = await UserRepo.download_all_selected_po_report(
+                request=request,
+                user_id=user_id,
+                role_id=role_id,
+                missing_po_ids=missing_ids,
+                mismatch_po_ids=mismatch_ids
+            )
+
+            if not data:
+                raise HTTPException(status_code=404, detail="No PO data found")
+
+            df = pd.DataFrame(data)
+            filename = "all_selected_email_pos"
+
+            # ---------- EXCEL ----------
+            if format == "excel":
+                output = io.BytesIO()
+                df.to_excel(output, index=False)
+                output.seek(0)
+
+                return StreamingResponse(
+                    output,
+                    media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    headers={
+                        "Content-Disposition": f"attachment; filename={filename}.xlsx"
+                    }
+                )
+
+            # ---------- PDF ----------
+            if format == "pdf":
+                pdf_stream, pdf_name, media_type = _generate_po_pdf(df, filename)
+                return StreamingResponse(
+                    pdf_stream,
+                    media_type=media_type,
+                    headers={
+                        "Content-Disposition": f"attachment; filename={pdf_name}"
+                    }
+                )
+
+            raise HTTPException(status_code=400, detail="Invalid format")
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))      
+
         
+    #On Business admin dashboard    
 async def download_combined_all_po_report(
         request: Request,
         user_id: int,

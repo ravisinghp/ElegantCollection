@@ -334,13 +334,48 @@ class MailsRepository(BaseRepository):
         
 
 
-    async def update_outlook_token(
-        self,
-        user_id: int,
-        access_token: str,
-        refresh_token: str,
-        token_expiry: datetime,
-    ):
+    # async def update_outlook_token(
+    #     self,
+    #     user_id: int,
+    #     access_token: str,
+    #     refresh_token: str,
+    #     token_expiry: datetime,
+    # ):
+    #     query = """
+    #         UPDATE outlook_tokens
+    #         SET access_token = %s,
+    #             refresh_token = %s,
+    #             token_expiry = %s,
+    #             updated_at = NOW()
+    #         WHERE user_id = %s
+    #     """
+    #     await self._log_and_execute(query, (access_token, refresh_token, token_expiry, user_id))
+    async def get_outlook_token(self, user_id: int) -> Optional[OutlookToken]:
+        query = """
+            SELECT access_token, refresh_token, token_expiry
+            FROM outlook_tokens
+            WHERE user_id = %s
+            LIMIT 1
+        """
+        await self._log_and_execute(query, [user_id])
+        row = await self._cur.fetchone()
+        if not row:
+            return None
+        return OutlookToken(
+            access_token=row["access_token"],
+            refresh_token=row["refresh_token"],
+            token_expiry=row["token_expiry"]
+        )
+
+    async def insert_outlook_token(self, user_id: int, access_token: str, refresh_token: str, token_expiry: datetime):
+        query = """
+            INSERT INTO outlook_tokens (user_id, access_token, refresh_token, token_expiry)
+            VALUES (%s, %s, %s, %s)
+        """
+        await self._log_and_execute(query, [user_id, access_token, refresh_token, token_expiry])
+        await self._cur.connection.commit()
+
+    async def update_outlook_token(self, user_id: int, access_token: str, refresh_token: str, token_expiry: datetime):
         query = """
             UPDATE outlook_tokens
             SET access_token = %s,
@@ -349,8 +384,8 @@ class MailsRepository(BaseRepository):
                 updated_at = NOW()
             WHERE user_id = %s
         """
-        await self._log_and_execute(query, (access_token, refresh_token, token_expiry, user_id))
-
+        await self._log_and_execute(query, [access_token, refresh_token, token_expiry, user_id])
+        await self._cur.connection.commit()
 
     async def update_first_login_flag(self, user_id: int):
      query = """
@@ -430,28 +465,28 @@ class MailsRepository(BaseRepository):
         return result is not None
     
     
-    async def get_outlook_token(self, user_id: int) -> token:
-        query = """
-            SELECT
-                access_token,
-                refresh_token,
-                token_expiry
-            FROM outlook_tokens
-            WHERE user_id = %s
-            LIMIT 1
-        """
+    # async def get_outlook_token(self, user_id: int) -> token:
+    #     query = """
+    #         SELECT
+    #             access_token,
+    #             refresh_token,
+    #             token_expiry
+    #         FROM outlook_tokens
+    #         WHERE user_id = %s
+    #         LIMIT 1
+    #     """
 
-        await self._log_and_execute(query, [user_id])
-        row = await self._cur.fetchone()
+    #     await self._log_and_execute(query, [user_id])
+    #     row = await self._cur.fetchone()
 
-        if not row:
-            raise Exception("Outlook token not found for user")
+    #     if not row:
+    #         raise Exception("Outlook token not found for user")
 
-        return OutlookToken(
-            access_token=row["access_token"],
-            refresh_token=row["refresh_token"],
-            token_expiry=row["token_expiry"],
-        )
+    #     return OutlookToken(
+    #         access_token=row["access_token"],
+    #         refresh_token=row["refresh_token"],
+    #         token_expiry=row["token_expiry"],
+    #     )
 
     
 

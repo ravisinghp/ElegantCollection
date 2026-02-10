@@ -33,17 +33,20 @@ def get_application() -> FastAPI:
     # We explicitly define the frontend ports here to ensure they are never blocked.
     # Even if ALLOWED_HOSTS in config is missing 'localhost:5173', this list ensures it works.
     origins = [
-        # "http://172.105.34.172:5000",  # server
-        "http://localhost:5173",  # Vite / React (Your current app)
-        "http://192.168.1.81:5173",  # Local network access (if needed)
-        "http://localhost:3000",  # Create React App (Standard backup)
-        "http://localhost:8080",  # The Backend itself
-        "http://127.0.0.1:5173",  # Localhost via IP
+        "http://localhost:5173",
+        "http://172.105.34.172:5173",
+
+        "http://localhost:3000",
+        "http://172.105.34.172:5173",
+
+        "http://localhost:8080",
+        "http://172.105.34.172:8080",
     ]
  
     # If your config has extra hosts (like production domains), add them to the list
     if ALLOWED_HOSTS:
         # Ensure ALLOWED_HOSTS is a list before extending
+
         if isinstance(ALLOWED_HOSTS, list):
             origins.extend(ALLOWED_HOSTS)
         else:

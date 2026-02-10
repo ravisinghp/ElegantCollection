@@ -249,10 +249,11 @@ async def refresh_outlook_access_token(refresh_token: str) -> dict:
 
     data = {
         "client_id": CLIENT_ID,
-        "client_secret": CLIENT_SECRET,
+       # "client_secret": CLIENT_SECRET,
         "grant_type": "refresh_token",
         "refresh_token": refresh_token,
-        "scope": "https://graph.microsoft.com/.default",
+        #"scope": "https://graph.microsoft.com/.default offline_access",
+        # "scope": "offline_access User.Read Mail.Read Mail.ReadWrite"
     }
 
     timeout = httpx.Timeout(connect=10.0, read=30.0, write=30.0, pool=30.0)
@@ -264,20 +265,47 @@ async def refresh_outlook_access_token(refresh_token: str) -> dict:
 
 
 # mansi --------------------------------------------------------------------------------------------------------
+# async def get_valid_outlook_token(
+#     user_id: int,
+#     repo: MailsRepository,
+# ) -> str:
+#     token = await repo.get_outlook_token(user_id)
+
+#     if token.token_expiry > datetime.utcnow() + timedelta(minutes=2):
+#         return token.access_token
+
+#     new_tokens = await refresh_outlook_access_token(token.refresh_token)
+
+#     new_expiry = datetime.utcnow() + timedelta(
+#         seconds=int(new_tokens["expires_in"])
+#     )
+
+#     await repo.update_outlook_token(
+#         user_id=user_id,
+#         access_token=new_tokens["access_token"],
+#         refresh_token=new_tokens.get("refresh_token", token.refresh_token),
+#         token_expiry=new_expiry,
+#     )
+
+#     return new_tokens["access_token"]
 async def get_valid_outlook_token(
     user_id: int,
     repo: MailsRepository,
-) -> str:
+) -> str | None:
     token = await repo.get_outlook_token(user_id)
+    if not token:
+        return None
 
     if token.token_expiry > datetime.utcnow() + timedelta(minutes=2):
         return token.access_token
 
-    new_tokens = await refresh_outlook_access_token(token.refresh_token)
+    try:
+        new_tokens = await refresh_outlook_access_token(token.refresh_token)
+    except Exception:
+        # refresh failed, maybe refresh token revoked
+        return None
 
-    new_expiry = datetime.utcnow() + timedelta(
-        seconds=int(new_tokens["expires_in"])
-    )
+    new_expiry = datetime.utcnow() + timedelta(seconds=int(new_tokens["expires_in"]))
 
     await repo.update_outlook_token(
         user_id=user_id,
@@ -287,6 +315,7 @@ async def get_valid_outlook_token(
     )
 
     return new_tokens["access_token"]
+
 
 # ------------------Email + Attachment Fetching + LLM logic start ------------------ #
 def strip_html_to_text(html_content: Optional[str]) -> str:

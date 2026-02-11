@@ -10,6 +10,7 @@ import jwt
 from datetime import date, datetime
 from openai import OpenAI
 import asyncio
+from app.utils.image_ocr import extract_text_from_image_bytes
 
 # Load the .env file
 load_dotenv()
@@ -984,22 +985,12 @@ def extract_po_items(text: str):
 
     return items
 
-# def extract_po_items(text: str):
-#     items = []
-
-#     for m in ITEM_REGEX.finditer(text):
-#         items.append({
-#             "description": m.group("description").strip(),
-#             "gold_karat": re.search(r"\d{2}", m.group("material")).group(),
-#             "quantity": int(m.group("quantity")),
-#             "delivery_date": m.group("delivery_date")
-#         })
-
-#     return items
-
 
 async def extract_po_header(text: str):
     return await extract_po_fields(text)
+
+
+IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".bmp", ".tiff", ".webp")
 
 
 async def extract_text_from_attachment(content_bytes, filename, content_type):
@@ -1037,8 +1028,14 @@ async def extract_text_from_attachment(content_bytes, filename, content_type):
                     for shape in slide.shapes
                     if hasattr(shape, "text")
                 )
-
-            # Other formats (images/ocr) - optional
+            
+            elif filename.endswith(IMAGE_EXTENSIONS):
+                # IMAGE → OCR
+                try:
+                    return extract_text_from_image_bytes(content_bytes)
+                except Exception as e:
+                    logger.error(f"OCR failed for {filename}: {e}")
+                    return ""
             else:
                 return None
 
@@ -1206,34 +1203,6 @@ async def fetch_and_save_mails_by_folders(
                         file_path = os.path.join("attachments", safe_filename)
                         with open(file_path, "wb") as f:
                             f.write(content_bytes)
-
-                        # -------- Extract text from attachments --------
-                        # attachment_text = None
-                        # ext = (filename or "").lower()
-                        # ct = (content_type or "").lower()
-                        # try:
-                        #     if ct.startswith("text/") or ext.endswith((".txt", ".md", ".csv", ".log")):
-                        #         attachment_text = content_bytes.decode("utf-8", errors="ignore")
-                        #     elif ct == "application/pdf" or ext.endswith(".pdf"):
-                        #         reader = PyPDF2.PdfReader(io.BytesIO(content_bytes))
-                        #         attachment_text = " ".join((p.extract_text() or "") for p in reader.pages)
-                        #     elif ct in ("application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                        #                 "application/msword") or ext.endswith((".docx", ".doc")):
-                        #         document = docx.Document(io.BytesIO(content_bytes))
-                        #         attachment_text = " ".join(p.text for p in document.paragraphs)
-                        #     elif ct in ("a pplication/vnd.openxmlformats-officedocument.presentationml.presentation",
-                        #                 "application/vnd.ms-powerpoint") or ext.endswith((".pptx", ".ppt")):
-                        #         prs = Presentation(io.BytesIO(content_bytes))
-                        #         attachment_text = " ".join(
-                        #             shape.text
-                        #             for slide in prs.slides
-                        #             for shape in slide.shapes
-                        #             if hasattr(shape, "text")
-                        #         )
-                        #     # elif content_type.startswith("image/") or ext.endswith((".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff")):
-                        #     #     attachment_text = ocr_from_image_bytes(content_bytes)
-                        # except Exception:
-                        #     attachment_text = None
 
                         attachment_text = await extract_text_from_attachment(content_bytes, filename, content_type)
                         if attachment_text:

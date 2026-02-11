@@ -82,6 +82,7 @@ class BusinessAdminSearchRequest(BaseModel):
     toDate: Optional[str] = None
     userId: Optional[int] = None
     vendorNumber: Optional[str] = None
+    poNumber: Optional[str] = None
     
 
 class DeleteUserPayload(BaseModel):

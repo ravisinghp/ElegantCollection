@@ -861,92 +861,204 @@ async def get_active_users(request: Request):
             return [row[0] for row in rows]
         
 #----------------Search PO for Business Admin Dashboard-----------------#
-async def search_pos_business_admin(request: Request, filters):
-    base_query = """
-        SELECT * FROM (
+def build_conditions(date_col, vendor_col, user_col, po_col, params, filters):
+    cond = []
 
-            -- ================= MISSING =================
-            SELECT
-                pm.po_missing_id AS record_id,
-                COALESCE(pd.po_number, sp.po_number) AS po_number,
-                COALESCE(pd.po_date, sp.po_date) AS po_date,
-                COALESCE(pd.vendor_number, sp.vendor_number) AS vendor_code,
-                COALESCE(pd.customer_name, sp.customer_name) AS customer_name,
-                um.user_id,
-                um.user_name AS username,
-                'missing' AS record_type
-            FROM po_missing_report pm
-            LEFT JOIN po_details pd ON pm.po_det_id = pd.po_det_id
-            LEFT JOIN system_po_details sp ON pm.system_po_id = sp.system_po_id
-            LEFT JOIN users_master um ON pm.user_id = um.user_id
-            WHERE pm.active = 1
-
-            UNION ALL
-
-            -- ================= MISMATCH =================
-            SELECT
-                mm.po_mismatch_id AS record_id,
-                pd.po_number,
-                pd.po_date,
-                pd.vendor_number AS vendor_code,
-                pd.customer_name,
-                um.user_id,
-                um.user_name AS username,
-                'mismatch' AS record_type
-            FROM po_mismatch_report mm
-            JOIN po_details pd ON mm.po_det_id = pd.po_det_id
-            LEFT JOIN users_master um ON mm.user_id = um.user_id
-            WHERE mm.active = 1
-
-            UNION ALL
-
-            -- ================= NORMAL =================
-            SELECT
-                pd.po_det_id AS record_id,
-                pd.po_number,
-                pd.po_date,
-                pd.vendor_number AS vendor_code,
-                pd.customer_name,
-                um.user_id,
-                um.user_name AS username,
-                'normal' AS record_type
-            FROM po_details pd
-            LEFT JOIN po_missing_report pm
-                ON pm.po_det_id = pd.po_det_id AND pm.active = 1
-            LEFT JOIN po_mismatch_report mm
-                ON mm.po_det_id = pd.po_det_id AND mm.active = 1
-            LEFT JOIN users_master um ON um.user_id = pd.user_id
-            WHERE pm.po_det_id IS NULL
-              AND mm.po_det_id IS NULL
-
-        ) t
-        WHERE 1=1
-    """
-
-    params = []
-
-    # ---------- Filters ----------
     if filters.fromDate:
-        base_query += " AND t.po_date >= %s"
+        cond.append(f"{date_col} >= %s")
         params.append(filters.fromDate)
 
     if filters.toDate:
-        base_query += " AND t.po_date <= %s"
+        cond.append(f"{date_col} <= %s")
         params.append(filters.toDate)
 
     if filters.userId:
-        base_query += " AND t.user_id = %s"
+        cond.append(f"{user_col} = %s")
         params.append(int(filters.userId))
 
     if filters.vendorNumber:
-        base_query += " AND t.vendor_code = %s"
+        cond.append(f"{vendor_col} = %s")
         params.append(filters.vendorNumber)
 
-    base_query += " ORDER BY t.po_date DESC"
+    if filters.poNumber:
+        cond.append(f"{po_col} = %s")
+        params.append(filters.poNumber)
+
+    return " AND " + " AND ".join(cond) if cond else ""
+
+
+async def search_pos_business_admin(request: Request, filters):
+    params = []
+
+    query = f"""
+    SELECT * FROM (
+
+        /* ============ Email : MISSING ============ */
+        SELECT
+            pm.po_missing_id ,
+            COALESCE(pd.po_number, spd.po_number) AS po_number,
+            COALESCE(pd.po_date, spd.po_date) AS po_date,
+            COALESCE(pd.vendor_number, spd.vendor_number) AS vendor_code,
+            COALESCE(pd.customer_name) AS customer_name,
+            um.user_id,
+            um.user_name AS username,
+            'missing' AS record_type
+        FROM po_missing_report pm
+        LEFT JOIN po_details pd ON pm.po_det_id = pd.po_det_id
+        LEFT JOIN sharepoint_po_details spd ON pm.system_po_id = spd.sharepoint_po_det_id
+        JOIN users_master um ON pm.user_id = um.user_id
+        WHERE pm.active = 1
+        {build_conditions(
+            "COALESCE(pd.po_date, spd.po_date)",
+            "COALESCE(pd.vendor_number, spd.vendor_number)",
+            "pm.user_id",
+            "COALESCE(pd.po_number, spd.po_number)",
+            params,
+            filters
+        )}
+
+        UNION ALL
+
+        /* ============ Email : MISMATCH ============ */
+        SELECT
+            mm.po_mismatch_id AS record_id,
+            pd.po_number,
+            pd.po_date,
+            pd.vendor_number,
+            pd.customer_name,
+            um.user_id,
+            um.user_name AS username,
+            'mismatch' AS record_type
+        FROM po_mismatch_report mm
+        JOIN po_details pd ON mm.po_det_id = pd.po_det_id
+        JOIN users_master um ON mm.user_id = um.user_id
+        WHERE mm.active = 1
+        {build_conditions(
+            "pd.po_date",
+            "pd.vendor_number",
+            "mm.user_id",
+            "pd.po_number",
+            params,
+            filters
+        )}
+
+        UNION ALL
+
+        /* ============ Email : NORMAL ============ */
+        SELECT
+            pd.po_det_id AS record_id,
+            pd.po_number,
+            pd.po_date,
+            pd.vendor_number,
+            pd.customer_name,
+            um.user_id,
+            um.user_name AS username,
+            'normal' AS record_type
+        FROM po_details pd
+        JOIN users_master um ON pd.user_id = um.user_id
+        LEFT JOIN po_missing_report pm
+            ON pm.po_det_id = pd.po_det_id AND pm.active = 1
+        LEFT JOIN po_mismatch_report mm
+            ON mm.po_det_id = pd.po_det_id AND mm.active = 1
+        WHERE pm.po_det_id IS NULL
+          AND mm.po_det_id IS NULL
+        {build_conditions(
+            "pd.po_date",
+            "pd.vendor_number",
+            "pd.user_id",
+            "pd.po_number",
+            params,
+            filters
+        )}
+
+        UNION ALL
+
+        /* ============ SHAREPOINT : MISSING ============ */
+        SELECT
+            spm.sharepoint_po_missing_id,
+            spd.po_number,
+            spd.po_date,
+            spd.vendor_number,
+            spd.customer_name,
+            um.user_id,
+            um.user_name AS username,
+            'missing' AS record_type
+        FROM sharepoint_po_missing_report spm
+        LEFT JOIN sharepoint_po_details spd
+            ON spm.sharepoint_po_det_id = spd.sharepoint_po_det_id
+        LEFT JOIN users_master um ON spm.user_id = um.user_id
+        WHERE spm.active = 1
+        {build_conditions(
+            "spd.po_date",
+            "spd.vendor_number",
+            "spm.user_id",
+            "spd.po_number",
+            params,
+            filters
+        )}
+
+        UNION ALL
+
+        /* ============ SHAREPOINT : MISMATCH ============ */
+        SELECT
+            spmm.sharepoint_po_mismatch_id AS record_id,
+            spd.po_number,
+            spd.po_date,
+            spd.vendor_number,
+            spd.customer_name,
+            um.user_id,
+            um.user_name AS username,
+            'mismatch' AS record_type
+        FROM sharepoint_po_mismatch_report spmm
+        JOIN sharepoint_po_details spd
+            ON spmm.sharepoint_po_det_id = spd.sharepoint_po_det_id
+        JOIN users_master um ON spmm.user_id = um.user_id
+        WHERE spmm.active = 1
+        {build_conditions(
+            "spd.po_date",
+            "spd.vendor_number",
+            "spmm.user_id",
+            "spd.po_number",
+            params,
+            filters
+        )}
+
+        UNION ALL
+
+        /* ============ SHAREPOINT : NORMAL ============ */
+        SELECT
+            spd.sharepoint_po_det_id AS record_id,
+            spd.po_number,
+            spd.po_date,
+            spd.vendor_number,
+            spd.customer_name,
+            um.user_id,
+            um.user_name AS username,
+            'normal' AS record_type
+        FROM sharepoint_po_details spd
+        JOIN users_master um ON spd.user_id = um.user_id
+        LEFT JOIN sharepoint_po_missing_report spm
+            ON spm.sharepoint_po_det_id = spd.sharepoint_po_det_id AND spm.active = 1
+        LEFT JOIN sharepoint_po_mismatch_report spmm
+            ON spmm.sharepoint_po_det_id = spd.sharepoint_po_det_id AND spmm.active = 1
+        WHERE spm.sharepoint_po_det_id IS NULL
+          AND spmm.sharepoint_po_det_id IS NULL
+        {build_conditions(
+            "spd.po_date",
+            "spd.vendor_number",
+            "spd.user_id",
+            "spd.po_number",
+            params,
+            filters
+        )}
+
+    ) t
+    ORDER BY t.po_date DESC
+    """
 
     async with request.app.state.pool.acquire() as conn:
         async with conn.cursor() as cursor:
-            await cursor.execute(base_query, tuple(params))
+            await cursor.execute(query, tuple(params))
             cols = [c[0] for c in cursor.description]
             rows = await cursor.fetchall()
 
@@ -1093,8 +1205,8 @@ async def get_last_sync(request: Request) -> List[Dict[str, Any]]:
             # 🔹 Latest created_on from both tables for Business/System Admin
             query = """
                 SELECT GREATEST(
-                    COALESCE((SELECT MAX(created_on) FROM mail_details), '1970-01-01'),
-                    COALESCE((SELECT MAX(created_on) FROM sharepoint_files), '1970-01-01')
+                    COALESCE((SELECT MAX(created_on) FROM mail_details), 'No Sync yet'),
+                    COALESCE((SELECT MAX(created_on) FROM sharepoint_files), 'No Sync yet')
                 ) AS last_sync
             """
             async with request.app.state.pool.acquire() as conn:

@@ -6,7 +6,7 @@ from app.services.sharepoint_service import SharepointService
 from app.api.dependencies.database import get_repository
 from app.services.usersmailservice import get_valid_outlook_token
 import logging
-from app.models.schemas.sharepoint_schema import FolderRequestParams
+from app.models.schemas.sharepoint_schema import FolderRequestParams,SharepointSitesRequest
 from fastapi.responses import JSONResponse
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import StreamingResponse
@@ -31,6 +31,33 @@ async def get_sharepoint_dashboard_stats(request: Request,userId:int):
         }
     except Exception as e :
         return None
+    
+@router.post("/sharepoint_sites")
+async def get_sharepoint_sites(
+    request: SharepointSitesRequest,
+    mail_repo: MailsRepository = Depends(get_repository(MailsRepository)),
+):
+    if request.user_id <= 0:
+        raise HTTPException(400, "Invalid user_id")
+
+    access_token = await get_valid_outlook_token(request.user_id, mail_repo)
+    if not access_token:
+        raise HTTPException(401, "Unable to fetch access token")
+
+    #Get the user's email from database
+    user = await mail_repo.get_user(request.user_id)
+    if not user or not user.get("mail_id"):
+        raise HTTPException(404, "User email not found")
+    
+    user_email = user["mail_id"]  # This will be harshit.dubey@planfirma.com
+    
+    service = SharepointService(None)
+    
+    #Pass the email to filter sites
+    sites = await service.get_sites_by_user_email(access_token, user_email)
+
+    return {"sites": sites}
+
 
 
 @router.post("/sharepoint_all_folders")
@@ -57,7 +84,7 @@ async def get_all_sharepoint_folders(
 
         # Get site ID
         try:
-            site_id = await service.get_site_id(access_token)
+            site_id = request.site_id
         except Exception as e:
             logger.error(f"Error fetching site ID: {e}")
             raise HTTPException(status_code=HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to get site ID: {str(e)}")

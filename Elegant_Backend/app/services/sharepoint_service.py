@@ -79,20 +79,93 @@ class SharepointService:
             f"{filename_prefix}.pdf",
             "application/pdf"
         )
-
-    # ---------------- GET SITE ID ---------------- #
-    async def get_site_id(self, access_token: str):
-        url = f"{GRAPH_API}/sites/{SHAREPOINT_SITE_URL}:{SHAREPOINT_SITE_PATH}"
+        
+        
+    # ---------------- GET SITES BY USER EMAIL ---------------- #
+    async def get_sites_by_user_email(self, access_token: str, user_email: str):
+        """
+        Get ONLY the SharePoint sites that belong to or are accessible by this specific email.
+        Returns exactly what the user sees in their SharePoint UI.
+        """
         headers = {"Authorization": f"Bearer {access_token}"}
-
+        sites = []
+        site_ids = set()  # To avoid duplicates
+        
         async with aiohttp.ClientSession() as session:
+            # ✅ METHOD 1: Get sites where this email is a member/owner
+            # This is the most accurate - get sites where the user has direct access
+            url = f"{GRAPH_API}/users/{user_email}/sites?$select=id,displayName,webUrl"
+            
             async with session.get(url, headers=headers) as resp:
-                if resp.status != 200:
-                    text = await resp.text()
-                    logger.error(f"Failed to get site ID: {resp.status} | {text}")
-                    raise Exception(f"Failed to get site ID: {resp.status}")
-                data = await resp.json()
-                return data.get("id")
+                if resp.status == 200:
+                    data = await resp.json()
+                    for site in data.get("value", []):
+                        site_id = site.get("id")
+                        if site_id not in site_ids:
+                            site_ids.add(site_id)
+                            sites.append({
+                                "id": site_id,
+                                "name": site.get("displayName") or "Untitled",
+                                "webUrl": site.get("webUrl")
+                            })
+            
+            # ✅ METHOD 2: Get sites created by this email
+            url = f"{GRAPH_API}/sites?search=*&$filter=createdBy/user/email eq '{user_email}'"
+            
+            async with session.get(url, headers=headers) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    for site in data.get("value", []):
+                        site_id = site.get("id")
+                        if site_id not in site_ids:
+                            site_ids.add(site_id)
+                            sites.append({
+                                "id": site_id,
+                                "name": site.get("displayName"),
+                                "webUrl": site.get("webUrl")
+                            })
+            
+            # ✅ METHOD 3: Get sites where this email has explicit permissions
+            # First, get all sites (limited to avoid timeout)
+            url = f"{GRAPH_API}/sites?search=*&$top=50"
+            
+            async with session.get(url, headers=headers) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    
+                    # For each site, check if user has access
+                    for site in data.get("value", []):
+                        site_id = site.get("id")
+                        
+                        # Skip if we already have this site
+                        if site_id in site_ids:
+                            continue
+                        
+                        # Check permissions for this specific email
+                        perm_url = f"{GRAPH_API}/sites/{site_id}/permissions"
+                        async with session.get(perm_url, headers=headers) as perm_resp:
+                            if perm_resp.status == 200:
+                                perm_data = await perm_resp.json()
+                                
+                                # Check if this email has any permissions
+                                has_access = False
+                                for perm in perm_data.get("value", []):
+                                    granted_to = perm.get("grantedToV2", {})
+                                    user = granted_to.get("user", {})
+                                    if user.get("email") == user_email:
+                                        has_access = True
+                                        break
+                                
+                                if has_access:
+                                    site_ids.add(site_id)
+                                    sites.append({
+                                        "id": site_id,
+                                        "name": site.get("displayName"),
+                                        "webUrl": site.get("webUrl")
+                                    })
+        
+        logger.info(f"Found {len(sites)} sites for user {user_email}")
+        return sites
             
     #Fetching Total Numbers of Attachments on User Dashboard
     async def get_documents_analyzed_by_user_id(user_id: int, request: Request):
@@ -102,16 +175,38 @@ class SharepointService:
             return None
 
     # ---------------- GET DRIVE ID ---------------- #
+    # async def get_drive_id(self, access_token: str, site_id: str):
+    #     headers = {"Authorization": f"Bearer {access_token}"}
+    #     async with aiohttp.ClientSession() as session:
+    #         async with session.get(f"{GRAPH_API}/sites/{site_id}/drive", headers=headers) as resp:
+    #             if resp.status != 200:
+    #                 text = await resp.text()
+    #                 logger.error(f"Failed to get drive ID: {resp.status} | {text}")
+    #                 raise Exception(f"Failed to get drive ID: {resp.status}")
+    #             data = await resp.json()
+    #             return data.get("id")
+    
     async def get_drive_id(self, access_token: str, site_id: str):
         headers = {"Authorization": f"Bearer {access_token}"}
+
         async with aiohttp.ClientSession() as session:
-            async with session.get(f"{GRAPH_API}/sites/{site_id}/drive", headers=headers) as resp:
+            async with session.get(
+                f"{GRAPH_API}/sites/{site_id}/drives",
+                headers=headers
+            ) as resp:
+
                 if resp.status != 200:
                     text = await resp.text()
-                    logger.error(f"Failed to get drive ID: {resp.status} | {text}")
-                    raise Exception(f"Failed to get drive ID: {resp.status}")
+                    logger.error(f"Failed to get drives: {resp.status} | {text}")
+                    raise Exception("Failed to get drives")
+
                 data = await resp.json()
-                return data.get("id")
+
+                for drive in data.get("value", []):
+                    if drive.get("name") == LIBRARY_NAME:
+                        return drive.get("id")
+
+        raise Exception(f"Library '{LIBRARY_NAME}' not found")
 
     # ---------------- LIST ALL FOLDERS RECURSIVELY ---------------- #
     async def list_folders_recursive(self, access_token: str, drive_id: str, folder_path: str = ""):
@@ -154,14 +249,13 @@ class SharepointService:
     ) -> List[dict]:
 
         headers = {"Authorization": f"Bearer {access_token}"}
-        collected_files = []
 
         async def walk(path: str):
             url = f"{GRAPH_API}/drives/{drive_id}/root"
-            if path:
-                url += f":/{path}:/children"
+            if folder_path:
+                url = f"{GRAPH_API}/drives/{drive_id}/root:/{folder_path}:/children"
             else:
-                url += "/children"
+                url = f"{GRAPH_API}/drives/{drive_id}/root/children"
 
             async with aiohttp.ClientSession(headers=headers) as session:
                 async with session.get(url) as resp:
@@ -171,18 +265,23 @@ class SharepointService:
                         return
 
                     data = await resp.json()
+                    
+            collected_files = []       
 
             for item in data.get("value", []):
                 # FILE
                 if "file" in item:
                     collected_files.append(item)
+            return collected_files
 
-                # FOLDER → RECURSE
-                elif "folder" in item:
-                    sub_path = f"{path}/{item['name']}" if path else item["name"]
-                    await walk(sub_path)
+                # # FOLDER → RECURSE
+                # elif "folder" in item:
+                #     sub_path = f"{path}/{item['name']}" if path else item["name"]
+                #     await walk(sub_path)
 
-        await walk(folder_path)
+        result=await walk(folder_path)
+        
+        
 
         # ---------- DATE FILTER ----------
         if from_date or to_date:

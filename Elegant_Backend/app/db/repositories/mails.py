@@ -178,6 +178,19 @@ class MailsRepository(BaseRepository):
             raise RuntimeError("Failed to retrieve inserted mail_details id")
         return int(last_id)
     
+    async def get_user(self, user_id: int):
+        query = """
+            SELECT *
+            FROM users_master
+            WHERE user_id = %s
+            AND is_active = 1
+            LIMIT 1
+        """
+
+        await self._log_and_execute(query, [user_id])
+        return await self._cur.fetchone()
+
+    
 
     async def insert_attachment(
         self,

@@ -131,7 +131,7 @@ class SchedulerService:
                             )
 
                             #fetch emails and sync 
-                            await usersmailservice.fetch_and_save_mails_by_folders(
+                            response = await usersmailservice.fetch_and_save_mails_by_folders(
                                 access_token=access_token,
                                 folder_names=folders,
                                 user_id=user_id,
@@ -139,12 +139,18 @@ class SchedulerService:
                                 to_date=to_date,
                                 mails_repo=repo
                             )
+                            po_det_ids = response.get("extracted_po_ids", [])
+                            if po_det_ids:
+                                await usersmailservice.generate_missing_po_report_service(
+                                    user_id=user_id, po_det_ids=po_det_ids, mails_repo=repo
+                                )
+                            return {"status": "success"}
                             
-                            #Generate PO missing & mismatch report
-                            await usersmailservice.generate_missing_po_report_service(
-                                repo=repo,
-                                user_id=user_id
-                            )
+                            # #Generate PO missing & mismatch report
+                            # await usersmailservice.generate_missing_po_report_service(
+                            #     repo=repo,
+                            #     user_id=user_id
+                            # )
 
                     print(f"Done user {user_id}")
 

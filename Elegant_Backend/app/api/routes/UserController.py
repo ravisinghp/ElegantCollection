@@ -7,7 +7,7 @@ from typing import List, Dict, Any
 from fastapi.responses import StreamingResponse
 from app.models.domain.AdminDomain import UpdatePoCommentRequest, GenerateMissingPoReport, DownloadMissingMismatchRequest,FetchMissingMismatchReport,FolderMappingRequest,DownloadCombinedMissingMismatchRequest,DownloadAllMissingMismatchRequest,DownloadCombinedAllPORequest
 from fastapi.encoders import jsonable_encoder
-from app.models.schemas.users import BusinessAdminSearchRequest, DeleteUserPayload
+from app.models.schemas.users import BusinessAdminSearchRequest, DeleteUserPayload, DeletePOByBusinessAdminPayload
 from loguru import logger
 
 
@@ -165,8 +165,10 @@ async def download_combined_all_po_report(
             role_id=payload.role_id,
             email_missing_ids=payload.email_missing_ids,
             email_mismatch_ids=payload.email_mismatch_ids,
+            email_matched_ids=payload.email_matched_ids,
             sharepoint_missing_ids=payload.sharepoint_missing_ids,
             sharepoint_mismatch_ids=payload.sharepoint_mismatch_ids,
+            sharepoint_matched_ids=payload.sharepoint_matched_ids,
             format=format
         )
 
@@ -571,4 +573,34 @@ async def deactivate_or_delete_user(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to delete user"
+        )
+
+# ---------------Soft Delete and Hard Delete PO for Business Admin-----------------#
+@router.post("/delete_or_deactivate_po_by_business_admin")
+async def delete_or_deactivate_po_by_business_admin(
+    request: DeletePOByBusinessAdminPayload,
+    request_obj: Request 
+):
+    service = UserService
+    try:
+        result = await service.delete_or_deactivate_po_by_business_admin(request_obj, request.record_id, request.action, request.source, request.record_type)
+        if not result["success"]:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=result["message"]
+            )
+        return {
+            "status": "success",
+            "data": result
+        }
+    except ValueError as ve:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(ve)
+        )
+    except Exception as e:
+        logger.exception(f"Unexpected error deleting Pos {request.user_id}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to delete POs"
         )

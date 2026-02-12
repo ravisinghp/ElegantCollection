@@ -11,20 +11,18 @@ from app.core.config import (
 
 # -------------------- CONNECT TO MSSQL -------------------- #
 async def connect_to_mssql(app: FastAPI):
-    """
-    Connect to MSSQL and store pool in app state.
-    If MSSQL config is missing, skip connection safely.
-    """
+    app.state.mssql_connected = False
+    app.state.mssql_message = "MSSQL not initialized"
 
-    # SAFETY CHECK (VERY IMPORTANT)
     if not all([MSSQL_HOST, MSSQL_DB, MSSQL_USER, MSSQL_PWD]):
-        logger.warning("MSSQL config not provided — skipping MSSQL connection")
+        message = "MSSQL config not provided — skipping MSSQL connection"
+        logger.warning(message)
+
+        app.state.mssql_message = message
         return
 
     try:
-        logger.info(
-            f"Connecting to MSSQL at {MSSQL_HOST}:{MSSQL_PORT}/{MSSQL_DB}"
-        )
+        logger.info(f"Connecting to MSSQL at {MSSQL_HOST}:{MSSQL_PORT}/{MSSQL_DB}")
 
         dsn = (
             f"DRIVER={{ODBC Driver 17 for SQL Server}};"
@@ -41,12 +39,20 @@ async def connect_to_mssql(app: FastAPI):
             maxsize=10,
         )
 
-        logger.info("MSSQL connection established!")
+        app.state.mssql_connected = True
+        message = "MSSQL database connected successfully"
+        app.state.mssql_message = message
 
-    except Exception as e:
-        logger.exception("Failed to connect to MSSQL")
-        # App should still run even if MSSQL fails
+        logger.info(message)
+
+    except Exception:
+        message = "Failed to connect to MSSQL database"
+
         app.state.mssql_pool = None
+        app.state.mssql_connected = False
+        app.state.mssql_message = message
+
+        logger.exception(message)
 
 
 # -------------------- CLOSE MSSQL CONNECTION -------------------- #

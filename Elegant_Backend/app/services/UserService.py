@@ -181,13 +181,14 @@ async def download_all_selected_po_report(
             role_id = payload.get("role_id")
             missing_ids = payload.get("missing_po_ids", [])
             mismatch_ids = payload.get("mismatch_po_ids", [])
-
+            matched_ids = payload.get("matched_po_ids", [])
             data = await UserRepo.download_all_selected_po_report(
                 request=request,
                 user_id=user_id,
                 role_id=role_id,
                 missing_po_ids=missing_ids,
-                mismatch_po_ids=mismatch_ids
+                mismatch_po_ids=mismatch_ids,
+                matched_po_ids=matched_ids
             )
 
             if not data:
@@ -631,3 +632,23 @@ async def deactivate_or_delete_user(request_obj, user_id: int, action: str):
 
     logger.info(f"Action '{action}' on user {user_id}: {msg}")
     return {"user_id": user_id, "action": action, "success": success, "message": msg}
+
+
+
+#---------------Soft Delete and Hard Delete PO By Business Admin-----------------#
+async def delete_or_deactivate_po_by_business_admin(request_obj, record_id: int, action: str, source: str, record_type: str):
+    """
+    Delete or inactivate user based on action
+    action: 'inactive' or 'delete'
+    """
+    if action == "inactive":
+        success = await UserRepo.soft_delete_po_by_business_admin(request_obj, record_id, source, record_type)
+        msg = "PO inactivated successfully" if success else "Failed to inactivate PO"
+    elif action == "delete":
+        success = await UserRepo.hard_delete_po_by_business_admin(request_obj, record_id, source, record_type)
+        msg = "PO deleted successfully" if success else "Failed to delete PO"
+    else:
+        raise ValueError("Invalid action. Must be 'inactive' or 'delete'.")
+
+    logger.info(f"Action '{action}' on user {record_id}: {msg}")
+    return {"user_id": record_id, "action": action, "success": success, "message": msg}

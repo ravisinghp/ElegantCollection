@@ -88,3 +88,9 @@ class BusinessAdminSearchRequest(BaseModel):
 class DeleteUserPayload(BaseModel):
     user_id: int
     action: str  # "inactive" or "delete"
+
+class DeletePOByBusinessAdminPayload(BaseModel): 
+    record_id: int 
+    action: str # "inactive" or "delete"
+    source: str # "email" | "sharepoint",
+    record_type:str # "missing" | "mismatch"

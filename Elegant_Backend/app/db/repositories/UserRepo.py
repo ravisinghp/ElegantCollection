@@ -242,6 +242,7 @@ async def download_all_selected_po_report(
         role_id: int,
         missing_po_ids: List[int],
         mismatch_po_ids: List[int],
+        matched_po_ids: List[int],
     ) -> List[Dict[str, Any]]:
 
         queries = []
@@ -280,6 +281,21 @@ async def download_all_selected_po_report(
                 WHERE mm.po_mismatch_id IN ({",".join(["%s"] * len(mismatch_po_ids))})
             """)
             params.extend(mismatch_po_ids)
+		
+		# -------- EMAIL MATCHED --------
+        if matched_po_ids:
+            queries.append(f"""
+                SELECT
+                    pd.po_number,
+                    pd.po_date,
+                    pd.vendor_number AS vendor_code,
+                    pd.customer_name,
+                    pd.created_on AS 'Sync_at',
+                    'MATCHED' AS po_status
+                FROM po_details pd
+                WHERE pd.po_det_id IN ({",".join(["%s"] * len(matched_po_ids))})
+            """)
+            params.extend(matched_po_ids)
 
         if not queries:
             return []
@@ -297,111 +313,140 @@ async def download_all_selected_po_report(
  
 #On Business admin dashboard
 async def download_combined_all_po_report(
-        request: Request,
-        user_id: int,
-        role_id: int,
-        email_missing_ids: list[int],
-        email_mismatch_ids: list[int],
-        sharepoint_missing_ids: list[int],
-        sharepoint_mismatch_ids: list[int]
-    ):
-        try:
-            queries = []
-            params = []
+    request: Request,
+    user_id: int,
+    role_id: int,
+    email_missing_ids: list[int],
+    email_mismatch_ids: list[int],
+    email_matched_ids: list[int],
+    sharepoint_missing_ids: list[int],
+    sharepoint_mismatch_ids: list[int],
+    sharepoint_matched_ids: list[int],
+):
+    try:
+        queries = []
+        params = []
 
-            # EMAIL MISSING
-            if email_missing_ids:
-                placeholders = ",".join(["%s"] * len(email_missing_ids))
-                queries.append(f"""
-                    SELECT
-                        'EMAIL' AS source,
-                        'MISSING' AS record_type,
-                        pd.po_number,
-                        pd.po_date,
-                        pd.vendor_number AS vendor_code,
-                        pd.customer_name
-                    FROM po_missing_report pm
-                    JOIN po_details pd ON pd.po_det_id = pm.po_det_id
-                    WHERE pm.active = 1
-                      AND pm.po_missing_id IN ({placeholders})
-                """)
-                params.extend(email_missing_ids)
+        # ---------------- EMAIL MISSING ----------------
+        if email_missing_ids:
+            placeholders = ",".join(["%s"] * len(email_missing_ids))
+            queries.append(f"""
+                SELECT
+                    'EMAIL' AS source,
+                    'MISSING' AS record_type,
+                    pd.po_number,
+                    pd.po_date,
+                    pd.vendor_number AS vendor_code,
+                    pd.customer_name
+                FROM po_missing_report pm
+                JOIN po_details pd ON pd.po_det_id = pm.po_det_id
+                WHERE pm.active = 1
+                  AND pm.po_missing_id IN ({placeholders})
+            """)
+            params.extend(email_missing_ids)
 
-            # EMAIL MISMATCH
-            if email_mismatch_ids:
-                placeholders = ",".join(["%s"] * len(email_mismatch_ids))
-                queries.append(f"""
-                    SELECT
-                        'EMAIL' AS source,
-                        'MISMATCH' AS record_type,
-                        pd.po_number,
-                        pd.po_date,
-                        pd.vendor_number AS vendor_code,
-                        pd.customer_name
-                    FROM po_mismatch_report mm
-                    JOIN po_details pd ON pd.po_det_id = mm.po_det_id
-                    WHERE mm.active = 1
-                      AND mm.po_mismatch_id IN ({placeholders})
-                """)
-                params.extend(email_mismatch_ids)
+        # ---------------- EMAIL MISMATCH ----------------
+        if email_mismatch_ids:
+            placeholders = ",".join(["%s"] * len(email_mismatch_ids))
+            queries.append(f"""
+                SELECT
+                    'EMAIL' AS source,
+                    'MISMATCH' AS record_type,
+                    pd.po_number,
+                    pd.po_date,
+                    pd.vendor_number AS vendor_code,
+                    pd.customer_name
+                FROM po_mismatch_report mm
+                JOIN po_details pd ON pd.po_det_id = mm.po_det_id
+                WHERE mm.active = 1
+                  AND mm.po_mismatch_id IN ({placeholders})
+            """)
+            params.extend(email_mismatch_ids)
 
-            # SHAREPOINT MISSING
-            if sharepoint_missing_ids:
-                placeholders = ",".join(["%s"] * len(sharepoint_missing_ids))
-                queries.append(f"""
-                    SELECT
-                        'SHAREPOINT' AS source,
-                        'MISSING' AS record_type,
-                        sp.po_number,
-                        sp.po_date,
-                        sp.vendor_number AS vendor_code,
-                        sp.customer_name
-                    FROM sharepoint_po_missing_report spm
-                    JOIN sharepoint_po_details sp
-                      ON sp.sharepoint_po_det_id = spm.sharepoint_po_det_id
-                    WHERE spm.active = 1
-                      AND spm.sharepoint_po_missing_id IN ({placeholders})
-                """)
-                params.extend(sharepoint_missing_ids)
+        # ---------------- EMAIL MATCHED ----------------
+        if email_matched_ids:
+            placeholders = ",".join(["%s"] * len(email_matched_ids))
+            queries.append(f"""
+                SELECT
+                    'EMAIL' AS source,
+                    'MATCH' AS record_type,
+                    pd.po_number,
+                    pd.po_date,
+                    pd.vendor_number AS vendor_code,
+                    pd.customer_name
+                FROM po_details pd
+                WHERE pd.po_det_id IN ({placeholders})
+            """)
+            params.extend(email_matched_ids)
 
-            # SHAREPOINT MISMATCH
-            if sharepoint_mismatch_ids:
-                placeholders = ",".join(["%s"] * len(sharepoint_mismatch_ids))
-                queries.append(f"""
-                    SELECT
-                        'SHAREPOINT' AS source,
-                        'MISMATCH' AS record_type,
-                        sp.po_number,
-                        sp.po_date,
-                        sp.vendor_number AS vendor_code,
-                        sp.customer_name
-                    FROM sharepoint_po_mismatch_report spm
-                    JOIN sharepoint_po_details sp
-                      ON sp.sharepoint_po_det_id = spm.sharepoint_po_det_id
-                    WHERE spm.active = 1
-                      AND spm.sharepoint_po_mismatch_id IN ({placeholders})
-                """)
-                params.extend(sharepoint_mismatch_ids)
+        # ---------------- SHAREPOINT MISSING ----------------
+        if sharepoint_missing_ids:
+            placeholders = ",".join(["%s"] * len(sharepoint_missing_ids))
+            queries.append(f"""
+                SELECT
+                    'SHAREPOINT' AS source,
+                    'MISSING' AS record_type,
+                    sp.po_number,
+                    sp.po_date,
+                    sp.vendor_number AS vendor_code,
+                    sp.customer_name
+                FROM sharepoint_po_missing_report spm
+                JOIN sharepoint_po_details sp
+                  ON sp.sharepoint_po_det_id = spm.sharepoint_po_det_id
+                WHERE spm.active = 1
+                  AND spm.sharepoint_po_missing_id IN ({placeholders})
+            """)
+            params.extend(sharepoint_missing_ids)
 
-            if not queries:
-                return []
+        # ---------------- SHAREPOINT MISMATCH ----------------
+        if sharepoint_mismatch_ids:
+            placeholders = ",".join(["%s"] * len(sharepoint_mismatch_ids))
+            queries.append(f"""
+                SELECT
+                    'SHAREPOINT' AS source,
+                    'MISMATCH' AS record_type,
+                    sp.po_number,
+                    sp.po_date,
+                    sp.vendor_number AS vendor_code,
+                    sp.customer_name
+                FROM sharepoint_po_mismatch_report spm
+                JOIN sharepoint_po_details sp
+                  ON sp.sharepoint_po_det_id = spm.sharepoint_po_det_id
+                WHERE spm.active = 1
+                  AND spm.sharepoint_po_mismatch_id IN ({placeholders})
+            """)
+            params.extend(sharepoint_mismatch_ids)
 
-            final_query = " UNION ALL ".join(queries) + " ORDER BY po_date DESC"
+        # ---------------- SHAREPOINT MATCHED ----------------
+        if sharepoint_matched_ids:
+            placeholders = ",".join(["%s"] * len(sharepoint_matched_ids))
+            queries.append(f"""
+                SELECT
+                    'SHAREPOINT' AS source,
+                    'MATCH' AS record_type,
+                    pd.po_number,
+                    pd.po_date,
+                    pd.vendor_number AS vendor_code,
+                    pd.customer_name
+                FROM sharepoint_po_details pd
+                WHERE pd.sharepoint_po_det_id IN ({placeholders})
+            """)
+            params.extend(sharepoint_matched_ids)
 
-            async with request.app.state.pool.acquire() as conn:
-                async with conn.cursor() as cursor:
-                    await cursor.execute(final_query, tuple(params))
-                    columns = [col[0] for col in cursor.description]
-                    rows = await cursor.fetchall()
+        if not queries:
+            return []
 
-                    return [dict(zip(columns, row)) for row in rows]
+        final_query = " UNION ALL ".join(queries) + " ORDER BY po_date DESC"
 
-        except Exception as e:
-            raise e       
-        
-        
-        
+        async with request.app.state.pool.acquire() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute(final_query, tuple(params))
+                columns = [col[0] for col in cursor.description]
+                rows = await cursor.fetchall()
+                return [dict(zip(columns, row)) for row in rows]
 
+    except Exception as e:
+        raise e
         
 
 #Adding and Update comment for po missing  from UI
@@ -1576,4 +1621,102 @@ async def hard_delete_user(request, user_id: int) -> bool:
 
     except Exception as e:
         logger.error(f"Hard delete failed for user {user_id}: {e}")
+        return False
+
+#--------------Soft Delete and Hard Delete PO by Business Admin--------------
+TABLE_PK_MAP = {
+    "po_missing_report": "po_missing_id",
+    "po_mismatch_report": "po_mismatch_id",
+    "po_details": "po_det_id",
+
+    "sharepoint_po_missing_report": "sharepoint_po_missing_id",
+    "sharepoint_po_mismatch_report": "sharepoint_po_mismatch_id",
+    "sharepoint_po_details": "sharepoint_po_det_id",
+}
+
+VALID_SOURCES = {"email", "sharepoint"}
+VALID_TYPES = {"missing", "mismatch"}
+
+
+def get_table_name(source: str, record_type: str | None) -> str:
+    if source not in VALID_SOURCES:
+        raise ValueError("Invalid source")
+
+    if record_type and record_type in VALID_TYPES:
+        if source == "email":
+            return f"po_{record_type}_report"
+        else:
+            return f"{source}_po_{record_type}_report"
+
+    # matched / normal
+    if source == "email":
+        return "po_details"
+    else:
+        return f"{source}_po_details"
+
+def get_pk_column(table: str) -> str:
+    pk = TABLE_PK_MAP.get(table)
+    if not pk:
+        raise ValueError(f"No PK mapping found for table: {table}")
+    return pk
+
+
+async def soft_delete_po_by_business_admin(
+    request,
+    record_id: int,
+    source: str,
+    record_type: str | None = None
+) -> bool:
+    try:
+        table = get_table_name(source, record_type)
+        pk_col = get_pk_column(table)
+
+        async with request.app.state.pool.acquire() as conn:
+            async with conn.cursor() as cursor:
+                await conn.begin()
+
+                await cursor.execute(
+                    f"""
+                    UPDATE {table}
+                    SET active = 0
+                    WHERE {pk_col} = %s
+                    """,
+                    (record_id,)
+                )
+
+                await conn.commit()
+
+        logger.info(f"Soft delete done for {record_id} in {table}")
+        return True
+
+    except Exception as e:
+        logger.error(f"Soft delete failed: {e}")
+        return False
+
+async def hard_delete_po_by_business_admin(
+    request,
+    record_id: int,
+    source: str,
+    record_type: str | None = None
+) -> bool:
+    try:
+        table = get_table_name(source, record_type)
+        pk_col = get_pk_column(table)
+
+        async with request.app.state.pool.acquire() as conn:
+            async with conn.cursor() as cursor:
+                await conn.begin()
+
+                await cursor.execute(
+                    f"DELETE FROM {table} WHERE {pk_col} = %s",
+                    (record_id,)
+                )
+
+                await conn.commit()
+
+        logger.info(f"Hard delete done for {record_id} in {table}")
+        return True
+
+    except Exception as e:
+        logger.error(f"Hard delete failed: {e}")
         return False

@@ -230,3 +230,11 @@ async def search_category(
         return JSONResponse(content=result)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+    
+
+@router.get("/mssql_connection_status")
+async def mssql_connection_status(request: Request):
+    return {
+        "mssql_connected": getattr(request.app.state, "mssql_connected", False),
+        "message": getattr(request.app.state, "mssql_message", "Unknown status")
+    }

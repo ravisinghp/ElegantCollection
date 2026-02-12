@@ -129,6 +129,8 @@ async def sync_sharepoint_files(
         folders = body.get("folders", [])  # list of folder paths
         from_date = body.get("from_date")
         to_date = body.get("to_date")
+        site_id = body.get("site_id")
+
 
         # -------- Validation --------
         if not user_id:
@@ -156,6 +158,12 @@ async def sync_sharepoint_files(
                 status_code=401,
                 detail="Unable to fetch valid access token",
             )
+        
+        if not site_id:
+            raise HTTPException(
+                status_code=HTTP_400_BAD_REQUEST,
+                detail="site_id is required",
+            )
 
         service = SharepointService(sp_repo)
 
@@ -165,6 +173,7 @@ async def sync_sharepoint_files(
             folders=folders,
             from_date=from_date,
             to_date=to_date,
+            site_id=site_id,
         )
         sharepoint_po_det_ids = response.get("extracted_sharepoint_po_ids", [])
         if sharepoint_po_det_ids:

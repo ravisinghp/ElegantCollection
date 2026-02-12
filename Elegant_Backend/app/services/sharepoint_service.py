@@ -83,89 +83,53 @@ class SharepointService:
         
     # ---------------- GET SITES BY USER EMAIL ---------------- #
     async def get_sites_by_user_email(self, access_token: str, user_email: str):
-        """
-        Get ONLY the SharePoint sites that belong to or are accessible by this specific email.
-        Returns exactly what the user sees in their SharePoint UI.
-        """
         headers = {"Authorization": f"Bearer {access_token}"}
         sites = []
-        site_ids = set()  # To avoid duplicates
-        
+
         async with aiohttp.ClientSession() as session:
-            # ✅ METHOD 1: Get sites where this email is a member/owner
-            # This is the most accurate - get sites where the user has direct access
-            url = f"{GRAPH_API}/users/{user_email}/sites?$select=id,displayName,webUrl"
-            
-            async with session.get(url, headers=headers) as resp:
+
+            # 1. Get group memberships
+            async with session.get(
+                "https://graph.microsoft.com/v1.0/me/memberOf",
+                headers=headers
+            ) as resp:
+                data = await resp.json()
+
+                for item in data.get("value", []):
+                    if item["@odata.type"] == "#microsoft.graph.group":
+                        group_id = item["id"]
+
+                        # Get root site of group
+                        async with session.get(
+                            f"https://graph.microsoft.com/v1.0/groups/{group_id}/sites/root",
+                            headers=headers
+                        ) as site_resp:
+                            if site_resp.status == 200:
+                                site = await site_resp.json()
+                                sites.append({
+                                    "id": site["id"],
+                                    "name": site["displayName"],
+                                    "webUrl": site["webUrl"]
+                                })
+
+            # 2. Add followed sites
+            async with session.get(
+                "https://graph.microsoft.com/v1.0/me/followedSites",
+                headers=headers
+            ) as resp:
                 if resp.status == 200:
                     data = await resp.json()
                     for site in data.get("value", []):
-                        site_id = site.get("id")
-                        if site_id not in site_ids:
-                            site_ids.add(site_id)
-                            sites.append({
-                                "id": site_id,
-                                "name": site.get("displayName") or "Untitled",
-                                "webUrl": site.get("webUrl")
-                            })
-            
-            # ✅ METHOD 2: Get sites created by this email
-            url = f"{GRAPH_API}/sites?search=*&$filter=createdBy/user/email eq '{user_email}'"
-            
-            async with session.get(url, headers=headers) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    for site in data.get("value", []):
-                        site_id = site.get("id")
-                        if site_id not in site_ids:
-                            site_ids.add(site_id)
-                            sites.append({
-                                "id": site_id,
-                                "name": site.get("displayName"),
-                                "webUrl": site.get("webUrl")
-                            })
-            
-            # ✅ METHOD 3: Get sites where this email has explicit permissions
-            # First, get all sites (limited to avoid timeout)
-            url = f"{GRAPH_API}/sites?search=*&$top=50"
-            
-            async with session.get(url, headers=headers) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    
-                    # For each site, check if user has access
-                    for site in data.get("value", []):
-                        site_id = site.get("id")
-                        
-                        # Skip if we already have this site
-                        if site_id in site_ids:
-                            continue
-                        
-                        # Check permissions for this specific email
-                        perm_url = f"{GRAPH_API}/sites/{site_id}/permissions"
-                        async with session.get(perm_url, headers=headers) as perm_resp:
-                            if perm_resp.status == 200:
-                                perm_data = await perm_resp.json()
-                                
-                                # Check if this email has any permissions
-                                has_access = False
-                                for perm in perm_data.get("value", []):
-                                    granted_to = perm.get("grantedToV2", {})
-                                    user = granted_to.get("user", {})
-                                    if user.get("email") == user_email:
-                                        has_access = True
-                                        break
-                                
-                                if has_access:
-                                    site_ids.add(site_id)
-                                    sites.append({
-                                        "id": site_id,
-                                        "name": site.get("displayName"),
-                                        "webUrl": site.get("webUrl")
-                                    })
-        
+                        sites.append({
+                            "id": site["id"],
+                            "name": site["displayName"],
+                            "webUrl": site["webUrl"]
+                        })
+
+
         logger.info(f"Found {len(sites)} sites for user {user_email}")
         return sites
+
             
     #Fetching Total Numbers of Attachments on User Dashboard
     async def get_documents_analyzed_by_user_id(user_id: int, request: Request):
@@ -251,7 +215,6 @@ class SharepointService:
         headers = {"Authorization": f"Bearer {access_token}"}
 
         async def walk(path: str):
-            url = f"{GRAPH_API}/drives/{drive_id}/root"
             if folder_path:
                 url = f"{GRAPH_API}/drives/{drive_id}/root:/{folder_path}:/children"
             else:
@@ -261,25 +224,24 @@ class SharepointService:
                 async with session.get(url) as resp:
                     if resp.status != 200:
                         text = await resp.text()
-                        logger.error(f"Failed to fetch files: {resp.status} | {text}")
-                        return
+                        logger.error(f"Failed: {resp.status} | {text}")
+                        return []
 
                     data = await resp.json()
-                    
-            collected_files = []       
+
+            collected_files = []
 
             for item in data.get("value", []):
-                # FILE
                 if "file" in item:
                     collected_files.append(item)
+
             return collected_files
 
-                # # FOLDER → RECURSE
-                # elif "folder" in item:
-                #     sub_path = f"{path}/{item['name']}" if path else item["name"]
-                #     await walk(sub_path)
 
-        result=await walk(folder_path)
+        result = await walk(folder_path)
+
+        for f in result:
+            print(f)
         
         
 
@@ -300,7 +262,7 @@ class SharepointService:
             )
 
             filtered = []
-            for f in collected_files:
+            for f in result:
                 created_str = f.get("createdDateTime")
 
                 if not created_str:
@@ -326,9 +288,9 @@ class SharepointService:
 
                 filtered.append(f)
 
-            collected_files = filtered
+            result = filtered
 
-        return collected_files
+        return result
 
     # ---------------- UTILS ---------------- #
     @staticmethod
@@ -1306,11 +1268,12 @@ class SharepointService:
         folders: list[str],
         from_date: str,
         to_date: str,
+        site_id: str,
     ):
         saved, failed = [], []
         extracted_sharepoint_po_ids: list[int] = []
 
-        site_id = await self.get_site_id(access_token)
+        # site_id = await self.get_site_id(access_token)
         drive_id = await self.get_drive_id(access_token, site_id)
         keywords = await self.sp_repo.fetch_keywords()
 

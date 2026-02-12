@@ -237,8 +237,10 @@ async def download_combined_all_po_report(
         role_id: int,
         email_missing_ids: list[int],
         email_mismatch_ids: list[int],
+        email_matched_ids: list[int],
         sharepoint_missing_ids: list[int],
         sharepoint_mismatch_ids: list[int],
+        sharepoint_matched_ids: list[int],
         format: str
     ):
         try:
@@ -248,8 +250,10 @@ async def download_combined_all_po_report(
                 role_id=role_id,
                 email_missing_ids=email_missing_ids,
                 email_mismatch_ids=email_mismatch_ids,
+                email_matched_ids=email_matched_ids,
                 sharepoint_missing_ids=sharepoint_missing_ids,
-                sharepoint_mismatch_ids=sharepoint_mismatch_ids
+                sharepoint_mismatch_ids=sharepoint_mismatch_ids,
+                sharepoint_matched_ids=sharepoint_matched_ids
             )
 
             if not data:

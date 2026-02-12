@@ -652,7 +652,7 @@ async def get_vendors_business_admin(request):
             FROM (
                 SELECT vendor_number FROM po_details WHERE vendor_number IS NOT NULL
                 UNION
-                SELECT vendor_number FROM system_po_details WHERE vendor_number IS NOT NULL
+                SELECT vendor_number FROM sharepoint_po_details WHERE vendor_number IS NOT NULL
             ) vendor_list
             ORDER BY vendor_number;
         """

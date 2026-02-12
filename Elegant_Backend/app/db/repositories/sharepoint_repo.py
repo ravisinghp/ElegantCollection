@@ -21,8 +21,9 @@ INSERT INTO sharepoint_po_details (
     color,
     quantity,
     description,
-    created_by
-) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+    created_by,
+    gold_lock
+) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,%s)
 """
 
 
@@ -264,6 +265,7 @@ class SharepointRepo(BaseRepository):
         quantity: Optional[str],
         description: Optional[str],
         created_by: Optional[int],
+        gold_lock: Optional[str] ,
     ) -> int:
         
         await self._log_and_execute(
@@ -283,6 +285,7 @@ class SharepointRepo(BaseRepository):
                 quantity,
                 description,
                 created_by,
+                gold_lock,
             ),
         )
 
@@ -440,7 +443,7 @@ class SharepointRepo(BaseRepository):
         base_query = """
             SELECT
                 pm.sharepoint_po_missing_id,
-                pm.sharepoint_po_det_id,
+                pd.sharepoint_po_det_id,
                 pm.system_po_id,
 
                 COALESCE(pd.po_number, sp.po_number) AS po_number,
@@ -487,7 +490,7 @@ class SharepointRepo(BaseRepository):
         base_query = """
             SELECT
                 mm.sharepoint_po_mismatch_id,
-                mm.sharepoint_po_det_id,
+                pd.sharepoint_po_det_id,
                 mm.system_po_id,
 
                 pd.po_number,
@@ -534,6 +537,8 @@ class SharepointRepo(BaseRepository):
         base_query = """
                 SELECT
                     pd.*,
+                    'SHAREPOINT' AS source,
+                    'NORMAL' AS record_type,
                     pd.vendor_number AS vendor_code,
                     u.user_name AS username
                 FROM sharepoint_po_details pd
@@ -677,6 +682,7 @@ class SharepointRepo(BaseRepository):
                     pd.po_date,
                     pd.vendor_number AS vendor_code,
                     pd.customer_name,
+                    sm.created_on AS Sync_at,
                     'MISSING' AS record_type
                 FROM sharepoint_po_missing_report sm
                 JOIN sharepoint_po_details pd ON pd.sharepoint_po_det_id = sm.sharepoint_po_det_id
@@ -698,6 +704,7 @@ class SharepointRepo(BaseRepository):
                     pd.po_date,
                     pd.vendor_number AS vendor_code,
                     pd.customer_name,
+                    mm.created_on AS Sync_at,
                     mm.mismatch_attribute,
                     mm.scanned_value,
                     mm.system_value,
@@ -717,7 +724,7 @@ class SharepointRepo(BaseRepository):
         if not queries:
             return []
 
-        final_query = " UNION ALL ".join(queries) + " ORDER BY po_date DESC"
+        final_query = " UNION ALL ".join(queries) + " ORDER BY sync_at DESC"
 
         async with request.app.state.pool.acquire() as conn:
             async with conn.cursor() as cursor:

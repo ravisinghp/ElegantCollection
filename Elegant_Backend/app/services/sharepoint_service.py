@@ -15,6 +15,7 @@ from datetime import date, datetime,timedelta,timezone
 from fastapi import APIRouter, HTTPException,Query,Request
 import pandas as pd
 import asyncio
+from app.utils.image_ocr import extract_text_from_image_bytes
 # Load env
 load_dotenv()
 GRAPH_API = os.getenv("GRAPH_API")
@@ -392,8 +393,15 @@ class SharepointService:
                     )
 
                 # Other formats (images/ocr) - optional
+                elif filename.endswith(SharepointService.IMAGE_EXTENSIONS):
+                # IMAGE → OCR
+                    try:
+                        return extract_text_from_image_bytes(content_bytes)
+                    except Exception as e:
+                        logger.error(f"OCR failed for {filename}: {e}")
+                        return ""
                 else:
-                    return None
+                    return None                     
 
             except Exception:
                 return None
@@ -454,6 +462,7 @@ class SharepointService:
         "gold_karat",
         "color",
         "description",
+        "gold_lock"
     ]
 
     EMPTY_PO = {k: None for k in PO_FIELD_NAMES}
@@ -615,6 +624,14 @@ class SharepointService:
             r"[A-Z0-9\-]+(?:\s+\d+KW)?\s+([A-Za-z ].*?SIZE:\s*[0-9.]+)",
             r"[A-Z0-9\-]+\s+\d+KW\s+([A-Za-z ].*?SIZE:\s*[0-9.]+)",
         ],
+        
+         # ---------------- GOLD LOCK ----------------
+        "gold_lock": [
+            r"(?:gold\s*lock|gold_lock|gold\s*locking|lock\s*value|lock\s*percentage|metal\s*lock|lock)\s*[:\-]?\s*([0-9]+(?:\.[0-9]+)?)",
+            r"(?:gold\s*lock|gold_lock|gold\s*locking|lock\s*value|lock\s*percentage|metal\s*lock|lock)\s*[:\-]?\s*[\n\r]+?\s*([0-9]+(?:\.[0-9]+)?)",
+            r"(?:gold\s*lock|gold_lock|gold\s*locking|lock\s*value|lock\s*percentage|metal\s*lock|lock)\s{2,}([0-9]+(?:\.[0-9]+)?)",
+            r"(?:goldlock|gold_lock|lock)\s*([0-9]+(?:\.[0-9]+)?)"
+        ],
 
                 
        
@@ -633,6 +650,7 @@ class SharepointService:
     "color": None,
     "quantity": None,
     "description": None,
+    "gold_lock": None,
 }
 
 
@@ -1213,6 +1231,8 @@ class SharepointService:
     async def extract_po_header(self,text: str):
         return await self.extract_po_fields(text)
     
+    IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".bmp", ".tiff", ".webp")
+    
     def remove_footer_noise(self, text: str) -> str:
         FOOTER_PATTERNS = [
             r"^total\s+estimated\s+cost.*$",
@@ -1377,6 +1397,7 @@ class SharepointService:
                                     quantity=header.get("quantity"),
                                     description=header.get("description"), 
                                     created_by=user_id,
+                                    gold_lock=header.get("gold_lock"),
                                 )
                                 extracted_sharepoint_po_ids.append(sharepoint_po_det_id)
 
@@ -1403,6 +1424,7 @@ class SharepointService:
                                     quantity=item.get("quantity"),
                                     description=item.get("description"),
                                     created_by=user_id,
+                                    gold_lock=item.get("gold_lock")
                                 )
                                 extracted_sharepoint_po_ids.append(sharepoint_po_det_id)
 
@@ -1531,7 +1553,7 @@ class SharepointService:
     # -------------------------- FIELDS TO COMPARE -------------------------- #
     FIELDS_TO_COMPARE = [
         "customer_name", "vendor_number", "po_date", "po_number",
-        "delivery_date", "cancel_date", "gold_lock", "ec_style_number",
+        "delivery_date", "cancel_date", "gold_lock", "gold_lock", "ec_style_number",
         "customer_style_number", "kt", "color", "quantity", "description"
     ]
 

@@ -8,6 +8,7 @@ from typing import Any,Dict
 
 insert_sharepoint_po_details = """
 INSERT INTO sharepoint_po_details (
+    sharepoint_file_id,
     user_id,
     po_number,
     customer_name,
@@ -23,7 +24,7 @@ INSERT INTO sharepoint_po_details (
     description,
     created_by,
     gold_lock
-) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,%s)
+) VALUES (%s,%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,%s)
 """
 
 
@@ -251,6 +252,7 @@ class SharepointRepo(BaseRepository):
     async def insert_sharepoint_po_details(
         self,
         *,
+        sharepoint_file_id:int,
         user_id: int,
         po_number: Optional[str],
         customer_name: Optional[str],
@@ -271,6 +273,7 @@ class SharepointRepo(BaseRepository):
         await self._log_and_execute(
             insert_sharepoint_po_details,
             (
+                sharepoint_file_id,
                 user_id,
                 po_number,
                 customer_name,
@@ -665,10 +668,12 @@ class SharepointRepo(BaseRepository):
         user_id: int,
         role_id: int,
         sharepoint_missing_ids: List[int] = None,
-        sharepoint_mismatch_ids: List[int] = None
+        sharepoint_mismatch_ids: List[int] = None,
+        sharepoint_matched_ids: List[int] = None
     ) -> List[Dict]:
         sharepoint_missing_ids = sharepoint_missing_ids or []
         sharepoint_mismatch_ids = sharepoint_mismatch_ids or []
+        sharepoint_matched_ids = sharepoint_matched_ids or []
 
         queries = []
         params = []
@@ -720,6 +725,21 @@ class SharepointRepo(BaseRepository):
             q += f" AND mm.sharepoint_po_mismatch_id IN ({placeholders})"
             params.extend(sharepoint_mismatch_ids)
             queries.append(q)
+            
+        #Sharepoint Matched POs
+        if sharepoint_matched_ids:
+            queries.append(f"""
+                SELECT
+                    pd.po_number,
+                    pd.po_date,
+                    pd.vendor_number AS vendor_code,
+                    pd.customer_name,
+                    pd.created_on AS 'Sync_at',
+                    'MATCHED' AS po_status
+                FROM sharepoint_po_details pd
+                WHERE pd.sharepoint_po_det_id IN ({",".join(["%s"] * len(sharepoint_matched_ids))})
+            """)
+            params.extend(sharepoint_matched_ids)
 
         if not queries:
             return []

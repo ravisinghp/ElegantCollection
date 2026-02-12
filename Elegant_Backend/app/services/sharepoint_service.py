@@ -1333,7 +1333,7 @@ class SharepointService:
                         folder_name = self.extract_relative_folder_path(parent_path)
 
                         # ---------------- Save SharePoint File ----------------
-                        file_id = await self.sp_repo.save_sharepoint_file(
+                        sharepoint_file_id = await self.sp_repo.save_sharepoint_file(
                             user_id=user_id,
                             file_name=f["name"],
                             file_type=f["file"]["mimeType"],
@@ -1383,6 +1383,7 @@ class SharepointService:
                         if not items:
                             if header.get("po_number") or header.get("customer_name"):
                                 sharepoint_po_det_id=await self.sp_repo.insert_sharepoint_po_details(
+                                    sharepoint_file_id=sharepoint_file_id,
                                     user_id=user_id,
                                     po_number=header.get("po_number"),
                                     customer_name=header.get("customer_name"),
@@ -1410,6 +1411,7 @@ class SharepointService:
                                 vendor = item.get("vendor") or header.get("vendor_number")
                                 
                                 sharepoint_po_det_id =await self.sp_repo.insert_sharepoint_po_details(
+                                    sharepoint_file_id=sharepoint_file_id,
                                     user_id=user_id,
                                     po_number=po_number,
                                     customer_name=header.get("customer_name"),  # From your PDF
@@ -1921,10 +1923,11 @@ class SharepointService:
         role_id: int,
         sharepoint_missing_ids: List[int] = None,
         sharepoint_mismatch_ids: List[int] = None,
+        sharepoint_matched_ids: List[int] = None,
         format: str = "excel"
     ):
         data = await SharepointRepo.download_selected_po_report(
-            request, user_id, role_id, sharepoint_missing_ids, sharepoint_mismatch_ids
+            request, user_id, role_id, sharepoint_missing_ids, sharepoint_mismatch_ids, sharepoint_matched_ids
         )
 
         if not data:

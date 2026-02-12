@@ -65,8 +65,10 @@ class DownloadCombinedAllPORequest(BaseModel):
     role_id: int
     email_missing_ids: list[int] = []
     email_mismatch_ids: list[int] = []
+    email_matched_ids: list[int] = []
     sharepoint_missing_ids: list[int] = []
     sharepoint_mismatch_ids: list[int] = []
+    sharepoint_matched_ids: list[int] = []
     
 class DownloadAllMissingMismatchRequest(BaseModel):
     user_id: int
@@ -82,6 +84,7 @@ class DownloadAllSelectedSharepointPORequest(BaseModel):
     role_id: int
     sharepoint_missing_ids: Optional[List[int]] = []
     sharepoint_mismatch_ids: Optional[List[int]] = []
+    sharepoint_matched_po_ids: Optional[List[int]] = []
     
     
 class DownloadCombinedMissingMismatchRequest(BaseModel):

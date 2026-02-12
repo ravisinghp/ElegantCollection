@@ -307,6 +307,7 @@ async def download_all_selected_po_report(
             role_id=payload.role_id,
             sharepoint_missing_ids=payload.sharepoint_missing_ids,
             sharepoint_mismatch_ids=payload.sharepoint_mismatch_ids,
+            sharepoint_matched_ids=payload.sharepoint_matched_po_ids,
             format=format
         )
 

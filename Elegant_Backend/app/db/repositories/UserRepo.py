@@ -1648,11 +1648,11 @@ def get_table_name(source: str, record_type: str | None) -> str:
         else:
             return f"{source}_po_{record_type}_report"
 
-    # matched / normal
     if source == "email":
         return "po_details"
     else:
         return f"{source}_po_details"
+
 
 def get_pk_column(table: str) -> str:
     pk = TABLE_PK_MAP.get(table)
@@ -1660,6 +1660,43 @@ def get_pk_column(table: str) -> str:
         raise ValueError(f"No PK mapping found for table: {table}")
     return pk
 
+async def resolve_detail_id(cursor, record_id: int, source: str, record_type: str | None):
+    
+    if source == "email":
+        detail_col = "po_det_id"
+        missing_table = "po_missing_report"
+        mismatch_table = "po_mismatch_report"
+        missing_pk = "po_missing_id"
+        mismatch_pk = "po_mismatch_id"
+
+    else:
+        detail_col = "sharepoint_po_det_id"
+        missing_table = "sharepoint_po_missing_report"
+        mismatch_table = "sharepoint_po_mismatch_report"
+        missing_pk = "sharepoint_po_missing_id"
+        mismatch_pk = "sharepoint_po_mismatch_id"
+
+    # If coming from missing table
+    if record_type == "missing":
+        await cursor.execute(
+            f"SELECT {detail_col} FROM {missing_table} WHERE {missing_pk} = %s",
+            (record_id,)
+        )
+        row = await cursor.fetchone()
+        return row[0] if row else None
+
+    # If coming from mismatch table
+    elif record_type == "mismatch":
+        await cursor.execute(
+            f"SELECT {detail_col} FROM {mismatch_table} WHERE {mismatch_pk} = %s",
+            (record_id,)
+        )
+        row = await cursor.fetchone()
+        return row[0] if row else None
+
+    # If coming from details directly
+    else:
+        return record_id
 
 async def soft_delete_po_by_business_admin(
     request,
@@ -1668,25 +1705,49 @@ async def soft_delete_po_by_business_admin(
     record_type: str | None = None
 ) -> bool:
     try:
-        table = get_table_name(source, record_type)
-        pk_col = get_pk_column(table)
-
         async with request.app.state.pool.acquire() as conn:
             async with conn.cursor() as cursor:
                 await conn.begin()
 
+                # Resolve detail ID
+                detail_id = await resolve_detail_id(cursor, record_id, source, record_type)
+
+                if not detail_id:
+                    raise Exception("Detail ID not found")
+
+                if source == "email":
+                    detail_table = "po_details"
+                    detail_col = "po_det_id"
+                    missing_table = "po_missing_report"
+                    mismatch_table = "po_mismatch_report"
+
+                else:
+                    detail_table = "sharepoint_po_details"
+                    detail_col = "sharepoint_po_det_id"
+                    missing_table = "sharepoint_po_missing_report"
+                    mismatch_table = "sharepoint_po_mismatch_report"
+
+                # 1️⃣ Inactivate parent
                 await cursor.execute(
-                    f"""
-                    UPDATE {table}
-                    SET active = 0
-                    WHERE {pk_col} = %s
-                    """,
-                    (record_id,)
+                    f"UPDATE {detail_table} SET active = 0 WHERE {detail_col} = %s",
+                    (detail_id,)
+                )
+
+                # 2️⃣ Inactivate all missing
+                await cursor.execute(
+                    f"UPDATE {missing_table} SET active = 0 WHERE {detail_col} = %s",
+                    (detail_id,)
+                )
+
+                # 3️⃣ Inactivate all mismatch
+                await cursor.execute(
+                    f"UPDATE {mismatch_table} SET active = 0 WHERE {detail_col} = %s",
+                    (detail_id,)
                 )
 
                 await conn.commit()
 
-        logger.info(f"Soft delete done for {record_id} in {table}")
+        logger.info(f"Soft delete successful for detail_id {detail_id}")
         return True
 
     except Exception as e:
@@ -1700,21 +1761,48 @@ async def hard_delete_po_by_business_admin(
     record_type: str | None = None
 ) -> bool:
     try:
-        table = get_table_name(source, record_type)
-        pk_col = get_pk_column(table)
-
         async with request.app.state.pool.acquire() as conn:
             async with conn.cursor() as cursor:
                 await conn.begin()
 
+                # Resolve detail ID
+                detail_id = await resolve_detail_id(cursor, record_id, source, record_type)
+
+                if not detail_id:
+                    raise Exception("Detail ID not found")
+
+                if source == "email":
+                    detail_table = "po_details"
+                    detail_col = "po_det_id"
+                    missing_table = "po_missing_report"
+                    mismatch_table = "po_mismatch_report"
+
+                else:
+                    detail_table = "sharepoint_po_details"
+                    detail_col = "sharepoint_po_det_id"
+                    missing_table = "sharepoint_po_missing_report"
+                    mismatch_table = "sharepoint_po_mismatch_report"
+
+                # Delete children first
                 await cursor.execute(
-                    f"DELETE FROM {table} WHERE {pk_col} = %s",
-                    (record_id,)
+                    f"DELETE FROM {missing_table} WHERE {detail_col} = %s",
+                    (detail_id,)
+                )
+
+                await cursor.execute(
+                    f"DELETE FROM {mismatch_table} WHERE {detail_col} = %s",
+                    (detail_id,)
+                )
+
+                # Delete parent
+                await cursor.execute(
+                    f"DELETE FROM {detail_table} WHERE {detail_col} = %s",
+                    (detail_id,)
                 )
 
                 await conn.commit()
 
-        logger.info(f"Hard delete done for {record_id} in {table}")
+        logger.info(f"Hard delete successful for detail_id {detail_id}")
         return True
 
     except Exception as e:

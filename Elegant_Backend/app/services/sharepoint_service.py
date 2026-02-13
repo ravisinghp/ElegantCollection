@@ -86,34 +86,37 @@ class SharepointService:
     async def get_sites_by_user_email(self, access_token: str, user_email: str):
         headers = {"Authorization": f"Bearer {access_token}"}
         sites = []
-
+        seen_site_ids = set()   #add this
+ 
         async with aiohttp.ClientSession() as session:
-
-            # 1. Get group memberships
+ 
+            #Group memberships
             async with session.get(
                 "https://graph.microsoft.com/v1.0/me/memberOf",
                 headers=headers
             ) as resp:
                 data = await resp.json()
-
+ 
                 for item in data.get("value", []):
                     if item["@odata.type"] == "#microsoft.graph.group":
                         group_id = item["id"]
-
-                        # Get root site of group
+ 
                         async with session.get(
                             f"https://graph.microsoft.com/v1.0/groups/{group_id}/sites/root",
                             headers=headers
                         ) as site_resp:
                             if site_resp.status == 200:
                                 site = await site_resp.json()
-                                sites.append({
-                                    "id": site["id"],
-                                    "name": site["displayName"],
-                                    "webUrl": site["webUrl"]
-                                })
-
-            # 2. Add followed sites
+ 
+                                if site["id"] not in seen_site_ids: #prevent duplicate
+                                    seen_site_ids.add(site["id"])
+                                    sites.append({
+                                        "id": site["id"],
+                                        "name": site["displayName"],
+                                        "webUrl": site["webUrl"]
+                                    })
+ 
+            #Followed sites
             async with session.get(
                 "https://graph.microsoft.com/v1.0/me/followedSites",
                 headers=headers
@@ -121,15 +124,26 @@ class SharepointService:
                 if resp.status == 200:
                     data = await resp.json()
                     for site in data.get("value", []):
-                        sites.append({
-                            "id": site["id"],
-                            "name": site["displayName"],
-                            "webUrl": site["webUrl"]
-                        })
-
-
-        logger.info(f"Found {len(sites)} sites for user {user_email}")
+ 
+                        if site["id"] not in seen_site_ids:  #prevent duplicate
+                            seen_site_ids.add(site["id"])
+                            sites.append({
+                                "id": site["id"],
+                                "name": site["displayName"],
+                                "webUrl": site["webUrl"]
+                            })
+ 
+        logger.info(f"Found {len(sites)} unique sites for user {user_email}")
         return sites
+ 
+           
+    #Fetching Total Numbers of Attachments on User Dashboard
+    async def get_documents_analyzed_by_user_id(user_id: int, request: Request):
+        try:
+            return await SharepointRepo.fetch_documents_analyzed_by_user_id(user_id,  request)
+        except Exception as e:
+            return None
+ 
 
             
     #Fetching Total Numbers of Attachments on User Dashboard

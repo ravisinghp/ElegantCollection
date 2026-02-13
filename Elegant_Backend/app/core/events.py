@@ -36,8 +36,8 @@ def create_start_app_handler(app: FastAPI):
             trigger="cron",
             day_of_week="mon-fri",
             # minute="*/2",     #  EVERY 2 MINUTES
-            hour=17,
-            minute=24,
+            hour=8,
+            minute=0,
             args=[app],
             id="escalation_job",
             replace_existing=True,

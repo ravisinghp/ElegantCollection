@@ -164,27 +164,43 @@ class SchedulerService:
       
     #------------------ save schedule details----------------------      
     async def save_schedule(request, payload, user_id: int):
-        try:
-            days_str = ",".join(payload.days)
-
-            # Take first selected day (admin selects one day)
-            selected_day = payload.days[0]
-
-            # Convert day actual date
-            run_date = get_selected_weekday_date(selected_day)
-
-            # Combine date time
+ 
+        for day in payload.days:
+ 
+            run_date = get_selected_weekday_date(day)
+ 
             schedule_time = datetime.combine(
                 run_date,
                 time(payload.hour, payload.minute)
             )
-
-            return await UserRepo.save_schedule(
+ 
+            is_duplicate = await UserRepo.check_duplicate_schedule(
+                request,
+                day,
+                schedule_time
+            )
+ 
+            if is_duplicate:
+                raise ValueError(
+                    f"Scheduler already exists for {day} at "
+                    f"{schedule_time.strftime('%Y-%m-%d %H:%M')}"
+                )
+ 
+        for day in payload.days:
+ 
+            run_date = get_selected_weekday_date(day)
+ 
+            schedule_time = datetime.combine(
+                run_date,
+                time(payload.hour, payload.minute)
+            )
+ 
+            await UserRepo.save_schedule(
                 request=request,
-                days=days_str,
-                schedule_time=schedule_time,  # TIMESTAMP
+                days=day,
+                schedule_time=schedule_time,
                 created_by=user_id
             )
-
-        except Exception as e:
-            raise Exception(f"Service error while saving scheduler: {str(e)}")
+ 
+        return True
+ 

@@ -1,84 +1,3 @@
-# class EscalationRepository:
-#     def __init__(self, cur):
-#         self._cur = cur
-
-    # async def get_missing_reports(self):
-    #     query = """
-    #         SELECT *, 'missing' AS report_type
-    #         FROM po_missing_report
-    #         WHERE active = 1
-    #           AND created_on IS NOT NULL
-    #           AND updated_on IS NULL
-    #     """
-    #     await self._cur.execute(query)
-    #     return await self._cur.fetchall()
-
-    # async def get_mismatch_reports(self):
-    #     query = """
-    #         SELECT *, 'mismatch' AS report_type
-    #         FROM po_mismatch_report
-    #         WHERE active = 1
-    #           AND created_on IS NOT NULL
-    #           AND updated_on IS NULL
-    #     """
-    #     await self._cur.execute(query)
-    #     return await self._cur.fetchall()
-
-
-    # async def get_holidays(self):
-    #     query = """
-    #         SELECT holiday_date FROM holidays
-    #     """
-    #     await self._cur.execute(query)
-    #     rows = await self._cur.fetchall()
-    #     return [row['holiday_date'] for row in rows]
-
-
-
-
-
-    # async def _get_reports_by_threshold(self, table_name: str, threshold_days: int = 3):
-    #     query = f"""
-    #         SELECT *
-    #         FROM {table_name}
-    #         WHERE active = 1
-    #           AND created_on IS NOT NULL
-    #     """
-    #     await self._cur.execute(query)
-    #     rows = await self._cur.fetchall()
-
-    #     holidays = await self.get_holidays()
-    #     now = datetime.now()
-
-    #     filtered = []
-    #     for row in rows:
-    #         updated_on = row.get("updated_on") or now
-    #         if working_days_between(row["created_on"], updated_on, holidays) > threshold_days:
-    #             filtered.append(row)
-
-    #     return filtered
-
-    # #  WRITE THESE METHODS HERE 
-    # async def get_missing_reports(self, threshold_days: int = 3):
-    #     return await self._get_reports_by_threshold(
-    #         "po_missing_report", threshold_days
-    #     )
-
-    # async def get_mismatch_reports(self, threshold_days: int = 3):
-    #     return await self._get_reports_by_threshold(
-    #         "po_mismatch_report", threshold_days
-    #     )
-
-    # async def get_holidays(self):
-    #     query = "SELECT holiday_date FROM holidays"
-    #     await self._cur.execute(query)
-    #     rows = await self._cur.fetchall()
-    #     return [row["holiday_date"] for row in rows]
-
-
-    # ----------------------------------------------------------------------
-    # newwww
-
 from datetime import datetime
 from app.utils.date_utils import working_days_between
 
@@ -121,19 +40,9 @@ class EscalationRepository:
                         "working_days": working_days
                     })
 
-            # for rule in escalation_rules:
-            #     if working_days == rule["threshold_working_days"]:
-            #         escalated_reports.append({
-            #             **row,
-            #             "escalation_level": rule["escalation_level"],
-            #             "recipient_role": rule["recipient_role"],
-            #             "working_days": working_days
-            #         })
-            #         break   # 🔑 VERY IMPORTANT
-
         return escalated_reports
 
-    #  ADD THESE METHODS RIGHT HERE 👇
+    #  ADD THESE METHODS RIGHT HERE 
     async def get_missing_reports(self):
         return await self._get_reports_with_escalation(
             "po_missing_report",

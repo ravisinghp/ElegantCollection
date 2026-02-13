@@ -1410,8 +1410,24 @@ async def insert_folder_mapping_repo(
 
     except Exception as e:
         raise Exception(f"DB error while inserting folder mapping: {str(e)}")
+   
     
-
+async def check_duplicate_schedule(request, day: str, schedule_time):
+ 
+    query = """
+        SELECT 1
+        FROM sd_task_master_table
+        WHERE day = %s
+        AND time = %s
+        AND is_active = 1
+        LIMIT 1
+    """
+ 
+    async with request.app.state.pool.acquire() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(query, (day, schedule_time))
+            result = await cursor.fetchone()
+            return result is not None
 #Save the Scheduler details in sd task master table in db 
 async def save_schedule(
     request,

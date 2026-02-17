@@ -471,9 +471,9 @@ class MailsRepository(BaseRepository):
         return result is not None
     
 
-    async def attachment_exists(self, file_hash: str) -> bool:
-        query = "SELECT 1 FROM email_attachments WHERE file_hash = %s AND is_active = 1 LIMIT 1"
-        await self._log_and_execute(query, [file_hash])
+    async def attachment_exists(self, file_hash: str, user_id: int) -> bool:
+        query = "SELECT 1 FROM email_attachments WHERE file_hash = %s AND user_id = %s AND is_active = 1 LIMIT 1"
+        await self._log_and_execute(query, [file_hash, user_id])
         result = await self._cur.fetchone()
         return result is not None
     

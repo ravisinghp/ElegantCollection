@@ -504,9 +504,6 @@ class SharepointService:
 
         # ---------------- CUSTOMER NAME ----------------
         "customer_name": [
-            # Or combine both:
-            r"Ship\s+Ostbye\s+To\s*:\s*([^\n]+)",  # For Ostbye format
-            r"(?:ship\s*to:|deliver\s*to:|ship\s+ostbye\s+to:)\s*([^\n]+)",
             r"Ship\s*To\s*:\s*([A-Za-z0-9 &.,\-]+)(?=\n\s*(?:FOB|Terms|Vendor|Contact|Phone|$))",
             r"Ship\s+To:\s*\n\s*([A-Za-z0-9 &.,\-]+(?:\n\s*[A-Za-z0-9 &.,\-]+){1,4})",
             r"Ship\s+To:\s*\n\s*([A-Za-z0-9 &.,\-]+(?:\n\s*[A-Za-z0-9 &.,\-]+){1,3})",
@@ -514,6 +511,7 @@ class SharepointService:
             r"(?:customer\s*name|customer|buyer|client)\s*[:\-]?\s*([A-Za-z][A-Za-z\s&\.]+?)"
             r"(?=\s+(?:vendor|vendor_no|vendor_number|supplier|po|delivery|cancel|date|quantity|gold|color|description)\b|$)",
             r"customer_name\s*:\s*([A-Za-z][A-Za-z\s&\.]+?)",
+            r"(?i)ship\s+([A-Za-z0-9&.,\-]+)",
             # ---------------- CUSTOMER (SHIP TO FULL BLOCK) ----------------
             r"ship\s*to\s*:\s*\n\s*([A-Za-z0-9 &.,\-]+(?:\n\s*[A-Za-z0-9 &.,\-]+){1,4})",
 
@@ -766,21 +764,75 @@ class SharepointService:
 
     
     
-    async def extract_po_fields_from_llm(self,text: str) -> dict:
-        if not text or not text.strip():
-            return self.EMPTY_PO
-
-        # Quick heuristic to skip irrelevant text
-        if not re.search(r"(po|order|\d{3,})", text, re.IGNORECASE):
-            return self.EMPTY_PO
-
+    async def extract_po_fields_from_llm(text: str) -> dict:
         prompt = f"""
-    Extract ONLY explicitly present values.
-    Return null if missing.
-    Never guess.
+    You are a document extraction engine for Jewelry Purchase Orders.
 
-    Return JSON with keys:
-    {self.PO_FIELD_NAMES}
+    RULES (STRICT):
+    - Extract ONLY values explicitly present in the text
+    - NEVER merge two fields
+    - NEVER include field names inside values
+    - NEVER guess or infer
+    - If a value contains another field label, SPLIT and keep only the correct value
+    - Return null if missing
+    - Preserve original text formatting
+
+    --------------------
+    FIELD-SPECIFIC RULES
+    --------------------
+    PO NUMBER:
+    - Extract only if clearly labeled as PO Number, P.O., Purchase Order Number, or similar.
+    - Value must look like an actual PO identifier.
+
+    CUSTOMER NAME:
+    - Extract only if explicitly labeled as:
+    customer, customer name, buyer, sold to
+    - Do NOT treat vendor, supplier, ship-from, or company logo name as customer.
+    - If label is missing or unclear, return null.
+
+    VENDOR NAME:
+    - Extract only if explicitly labeled as:
+    vendor, supplier, sold by
+    - Do NOT infer from logos or addresses.
+
+    PO DATE:
+    - Extract only if clearly labeled as PO Date, Order Date, or Purchase Order Date.
+
+    DELIVERY DATE:
+    - Extract only if clearly labeled as Delivery Date, Due Date, or Expected Delivery.
+
+    GOLD KARAT / METAL:
+    - Extract only if explicitly labeled as:
+    gold karat, karat, metal, gold purity
+    - Return the value EXACTLY as written (example: "14KW", "18K Rose", "22K Yellow", "A W").
+    - Do NOT extract karat values from description or item rows.
+    - If label is missing, return null.
+
+    COLOR:
+    - Extract only if explicitly labeled as:
+    color or colour
+    - Do NOT extract color from description or product names.
+
+    DESCRIPTION:
+    - Extract ONLY if explicitly labeled as:
+    description, item description, desc, particulars, product description, item details
+    - The value must be the FULL description exactly as written after the label.
+    - Preserve original wording and order.
+    - Do NOT truncate, summarize, or rewrite.
+    - Do NOT extract description from tables, item rows, or free text without a label.
+    - If no explicit description label exists, return null.
+
+    QUANTITY:
+    - Extract only if explicitly labeled as quantity, qty, or pieces.
+
+    GOLD LOCK:
+    - Extract only if explicitly labeled as gold lock, lock value, or lock percentage.
+
+    --------------------
+    OUTPUT FORMAT
+    --------------------
+    Return a valid JSON object with EXACTLY these keys:
+    {PO_FIELD_NAMES}
 
     TEXT:
     {text}
@@ -793,34 +845,26 @@ class SharepointService:
                 messages=[{"role": "user", "content": prompt}]
             )
 
-            raw = resp.choices[0].message.content
+            raw = resp.choices[0].message.content.strip()
 
-            # ----------- CLEAN RAW OUTPUT -----------
-            # Remove markdown/code block if present
-            cleaned = re.sub(r"^```(?:json)?\s*|```$", "", raw.strip(), flags=re.IGNORECASE)
+            # Remove markdown
+            raw = re.sub(r"^```(?:json)?|```$", "", raw, flags=re.I).strip()
 
-            # Find JSON object in text
-            match = re.search(r"\{.*\}", cleaned, re.DOTALL)
+            match = re.search(r"\{.*\}", raw, re.S)
             if not match:
-                return self.EMPTY_PO
+                return EMPTY_PO
 
-            try:
-                data = json.loads(match.group())
-            except json.JSONDecodeError:
-                # Fallback: remove trailing commas or common minor formatting issues
-                cleaned_json = re.sub(r",\s*}", "}", match.group())
-                cleaned_json = re.sub(r",\s*]", "]", cleaned_json)
-                data = json.loads(cleaned_json)
+            data = json.loads(match.group())
 
-            out = self.EMPTY_PO.copy()
-            for f in self.PO_FIELD_NAMES:
-                v = data.get(f)
-                out[f] = v if v not in ["", None, "null", "N/A"] else None
+            result = {}
+            for k in PO_FIELD_NAMES:
+                v = data.get(k)
+                result[k] = v if v not in ("", None, "null", "N/A") else None
 
-            return out if any(out.values()) else self.EMPTY_PO
+            return result
 
         except Exception:
-            return self.EMPTY_PO
+            return EMPTY_PO
         
     def normalize_po_date_ddmmyyyy(self,date_str: Optional[str]) -> Optional[str]:
         """

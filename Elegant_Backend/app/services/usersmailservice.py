@@ -1194,7 +1194,7 @@ async def fetch_and_save_mails_by_folders(
                             continue
 
                         file_hash = compute_file_hash(content_bytes)
-                        if await mails_repo.attachment_exists(file_hash):
+                        if await mails_repo.attachment_exists(file_hash, user_id):
                             continue
 
                         # Save File

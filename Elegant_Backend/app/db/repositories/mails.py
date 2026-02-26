@@ -67,15 +67,6 @@ INSERT INTO po_details (
 """
 
 
-# PO REPOSITORY (SAME FILE - MATCHES MAILSREPOSITORY STYLE)
-# ---------------------------------------------------------------------
-
-# GET_ALL_PO_DETAILS = """
-# SELECT *
-# FROM po_details
-# WHERE po_det_id IN (:po_det_ids)
-# """
-
 GET_ALL_SYSTEM_PO_DETAILS = """
 SELECT * FROM system_po_details WHERE active = 1
 """
@@ -236,36 +227,12 @@ class MailsRepository(BaseRepository):
 
     async def mail_exists(self, graph_mail_id: str, user_id: str) -> bool:
         """Check if a mail with the given graph_mail_id already exists"""
-        query = "SELECT 1 FROM mail_details WHERE graph_mail_id = %s AND user_id = %s AND is_active = 1 LIMIT 1"
+        query = "SELECT 1 FROM mail_details WHERE graph_mail_id = %s AND user_id = %s LIMIT 1"
         await self._log_and_execute(query, [graph_mail_id,user_id])
         result = await self._cur.fetchone()
         return result is not None
     
     
-    
-
-
-    # async def save_event(self, event_data: Dict[str, Any]):
-    #     query = """
-    #     INSERT INTO events (user_id, event_id, subject, start_time, end_time, body_preview, keywords_count)
-    #     VALUES (%s, %s, %s, %s, %s, %s, %s)
-    #     """
-    #     async with self.conn.cursor() as cur:
-    #         await cur.execute(
-    #             query,
-    #             (
-    #                 event_data["user_id"],
-    #                 event_data["event_id"],
-    #                 event_data["subject"],
-    #                 event_data["start"],
-    #                 event_data["end"],
-    #                 event_data["body_preview"],
-    #                 event_data["keywords_count"],
-    #             ),
-    #         )
-    #         await self.conn.commit()
-
-
     async def fetch_keywords(self) -> List[str]:
         """
         Fetch active keywords for a given user_id from keyword_master table.
@@ -346,23 +313,6 @@ class MailsRepository(BaseRepository):
         await self._log_and_execute(query, (user_id, access_token, refresh_token,token_expiry))
         
 
-
-    # async def update_outlook_token(
-    #     self,
-    #     user_id: int,
-    #     access_token: str,
-    #     refresh_token: str,
-    #     token_expiry: datetime,
-    # ):
-    #     query = """
-    #         UPDATE outlook_tokens
-    #         SET access_token = %s,
-    #             refresh_token = %s,
-    #             token_expiry = %s,
-    #             updated_at = NOW()
-    #         WHERE user_id = %s
-    #     """
-    #     await self._log_and_execute(query, (access_token, refresh_token, token_expiry, user_id))
     async def get_outlook_token(self, user_id: int) -> Optional[OutlookToken]:
         query = """
             SELECT access_token, refresh_token, token_expiry
@@ -380,6 +330,7 @@ class MailsRepository(BaseRepository):
             token_expiry=row["token_expiry"]
         )
 
+
     async def insert_outlook_token(self, user_id: int, access_token: str, refresh_token: str, token_expiry: datetime):
         query = """
             INSERT INTO outlook_tokens (user_id, access_token, refresh_token, token_expiry)
@@ -387,6 +338,7 @@ class MailsRepository(BaseRepository):
         """
         await self._log_and_execute(query, [user_id, access_token, refresh_token, token_expiry])
         await self._cur.connection.commit()
+
 
     async def update_outlook_token(self, user_id: int, access_token: str, refresh_token: str, token_expiry: datetime):
         query = """
@@ -400,6 +352,7 @@ class MailsRepository(BaseRepository):
         await self._log_and_execute(query, [access_token, refresh_token, token_expiry, user_id])
         await self._cur.connection.commit()
 
+
     async def update_first_login_flag(self, user_id: int):
      query = """
         UPDATE users_master
@@ -408,6 +361,7 @@ class MailsRepository(BaseRepository):
         WHERE user_id = %s
         """
      await self._log_and_execute(query, (user_id,))
+
 
     async def insert_po_details(
         self,
@@ -477,33 +431,6 @@ class MailsRepository(BaseRepository):
         result = await self._cur.fetchone()
         return result is not None
     
-    
-    # async def get_outlook_token(self, user_id: int) -> token:
-    #     query = """
-    #         SELECT
-    #             access_token,
-    #             refresh_token,
-    #             token_expiry
-    #         FROM outlook_tokens
-    #         WHERE user_id = %s
-    #         LIMIT 1
-    #     """
-
-    #     await self._log_and_execute(query, [user_id])
-    #     row = await self._cur.fetchone()
-
-    #     if not row:
-    #         raise Exception("Outlook token not found for user")
-
-    #     return OutlookToken(
-    #         access_token=row["access_token"],
-    #         refresh_token=row["refresh_token"],
-    #         token_expiry=row["token_expiry"],
-    #     )
-
-    
-
-
 
 # ---------------------------------------------------------------------
 # REPOSITORY SECTION (IN SAME FILE)
@@ -541,11 +468,6 @@ class MailsRepository(BaseRepository):
         return await self._cur.fetchall()
     
 
-    # async def get_all_system_po_details(self):
-    #     """Used in your PO mismatch service"""
-    #     await self._log_and_execute(GET_ALL_SYSTEM_PO_DETAILS, [])
-    #     return await self._cur.fetchall()
-
     async def check_po_exists(self, po_number: str) -> bool:
         """Optional helper if you need PO existence checking"""
         await self._log_and_execute(CHECK_PO_EXISTS, [po_number])
@@ -573,6 +495,7 @@ class MailsRepository(BaseRepository):
     )
         return await self._cur.fetchone()
     
+
     async def get_existing_po_missing(self, po_det_id: int):
         await self._log_and_execute(
         GET_EXISTING_PO_MISSING,
@@ -651,6 +574,7 @@ class MailsRepository(BaseRepository):
 
         return int(last_id)
 
+
     # -----------------Checking existence of missing and mismatched POs-------------------- #
     async def mismatch_exists(
         self,
@@ -683,6 +607,7 @@ class MailsRepository(BaseRepository):
             ]
         )
         return await self._cur.fetchone()
+
 
     async def po_missing_exists(
         self,

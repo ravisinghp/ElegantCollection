@@ -5,21 +5,6 @@ from datetime import datetime, timedelta
 IST_OFFSET = timedelta(hours=5, minutes=30)
 from asyncmy.cursors import DictCursor
 from loguru import logger
-
-#Total R&D Effort On User Dashboard
-# async def fetch_total_user_effort_by_id(user_id: int, from_date: str, to_date: str, request: Request) -> float:
-#     query = """
-#         SELECT ROUND(COALESCE(SUM(rd.planned_effort_time), 0) / 60.0, 2) AS total_hours
-#         FROM report_data rd, mail_details md
-#         WHERE md.mail_dtl_id=rd.mail_dtl_id and rd.user_id = %s
-#           AND DATE(md.date_time) BETWEEN %s AND %s
-#     """
-#     async with request.app.state.pool.acquire() as conn:
-#         async with conn.cursor() as cursor:
-#             await cursor.execute(query, (user_id, from_date, to_date))
-#             row = await cursor.fetchone()
-#             return float(row[0]) if row and row[0] is not None else 0.0
-        
         
 
 #Fetching Total Numbers of Emails on User Dashboard
@@ -29,6 +14,20 @@ async def fetch_emails_processed_by_user_id(user_id: int,  request: Request) -> 
         FROM mail_details m
         WHERE m.is_active = 1
         AND m.user_id = %s;
+    """
+    async with request.app.state.pool.acquire() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(query, (user_id,))
+            row = await cursor.fetchone()
+            return int(row[0]) if row else 0
+
+
+async def get_total_emails_fetch_by_user_id(user_id: int,  request: Request) -> int:
+    query = """
+       SELECT COUNT(DISTINCT p.mail_dtl_id)
+        FROM po_details p
+        WHERE p.active = 1
+        AND p.user_id = %s;
     """
     async with request.app.state.pool.acquire() as conn:
         async with conn.cursor() as cursor:
@@ -54,7 +53,26 @@ WHERE
             row = await cursor.fetchone()
             return int(row[0]) if row else 0
         
+async def get_all_documents_fetch_by_user_id(user_id: int, request: Request) -> int:
+    query = """
+       SELECT
+            COUNT(DISTINCT e.mail_dtl_id)
+        FROM
+            email_attachments e
+        INNER JOIN po_details pd
+            ON
+            pd.mail_dtl_id = e.mail_dtl_id
+        WHERE
+            e.is_active = 1
+            AND e.user_id = %s;
+    """
+    async with request.app.state.pool.acquire() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(query, (user_id, ))
+            row = await cursor.fetchone()
+            return int(row[0]) if row else 0
         
+
 #For Downloading the PO Missing Report     
 async def download_missing_po_report(
     request: Request,
@@ -103,7 +121,7 @@ async def download_missing_po_report(
             return [dict(zip(columns, row)) for row in rows]
 
 
-   #For Doanloading the PO Mismatch Report   
+#For Doanloading the PO Mismatch Report   
 async def download_mismatch_po_report(request: Request, user_id: int, role_id: int):
     base_query  = """
         SELECT
@@ -152,6 +170,7 @@ async def download_mismatch_po_report(request: Request, user_id: int, role_id: i
 
             return [dict(zip(columns, row)) for row in rows]
              
+
 #For Business admin Dashboard download all missing pos 
 async def download_all_missing_po_report(request: Request):
     try:
@@ -672,90 +691,6 @@ async def get_vendors_business_admin(request):
 
         except Exception as e:
             raise Exception(f"DB error while fetching vendors: {str(e)}")
-# async def create_po_missing_comment(
-#     po_missing_id: int,
-#     comment: str,
-#     request: Request
-# ) -> bool:
-
-#     query = """
-#         UPDATE po_missing_report
-#         SET comment = %s
-#         WHERE po_missing_id = %s
-#           AND active = 1
-#           AND (comment IS NULL OR comment = '')
-#     """
-
-#     async with request.app.state.pool.acquire() as conn:
-#         async with conn.cursor() as cursor:
-#             await cursor.execute(query, (comment, po_missing_id))
-#             await conn.commit()
-#             return cursor.rowcount > 0
-        
-        
-# async def create_po_mismatch_comment(
-#     po_mismatch_id: int,
-#     comment: str,
-#     request: Request
-# ) -> bool:
-
-#     query = """
-#         UPDATE po_mismatch_report
-#         SET comment = %s
-#         WHERE po_mismatch_id = %s
-#           AND active = 1
-#           AND (comment IS NULL OR comment = '')
-#     """
-
-#     async with request.app.state.pool.acquire() as conn:
-#         async with conn.cursor() as cursor:
-#             await cursor.execute(query, (comment, po_mismatch_id))
-#             await conn.commit()
-#             return cursor.rowcount > 0
-
-        
-   
-#     #Update the Comment For PO Missing 
-# async def update_po_missing_comment(
-#     po_missing_id: int,
-#     comment: str,
-#     request: Request
-# ) -> bool:
-
-#     query = """
-#         UPDATE po_missing_report
-#         SET comment = %s
-#         WHERE po_missing_id = %s
-#           AND active = 1
-#     """
-
-#     async with request.app.state.pool.acquire() as conn:
-#         async with conn.cursor() as cursor:
-#             await cursor.execute(query, (comment, po_missing_id))
-#             await conn.commit()
-#             return cursor.rowcount > 0 
-        
-
-
-# #Update the Comment For PO Mismatch
-# async def update_po_mismatch_comment(
-#     po_mismatch_id: int,
-#     comment: str,
-#     request: Request
-# ) -> bool:
-
-#     query = """
-#         UPDATE po_mismatch_report
-#         SET comment = %s
-#         WHERE po_mismatch_id = %s
-#           AND active = 1
-#     """
-
-#     async with request.app.state.pool.acquire() as conn:
-#         async with conn.cursor() as cursor:
-#             await cursor.execute(query, (comment, po_mismatch_id))
-#             await conn.commit()
-#             return cursor.rowcount > 0    
 
         
 async def fetch_missing_po_data(request: Request, frontendRequest):
@@ -765,25 +700,22 @@ async def fetch_missing_po_data(request: Request, frontendRequest):
             pm.po_missing_id,
             pm.po_det_id,
             pm.system_po_id,
-
             COALESCE(pd.po_number, sp.po_number) AS po_number,
             COALESCE(pd.po_date, sp.po_date) AS po_date,
             COALESCE(pd.vendor_number, sp.vendor_number) AS vendor_code,
             COALESCE(pd.customer_name, sp.customer_name) AS customer_name,
             COALESCE(pd.created_on, sp.created_on) AS created_on,
             um.user_name AS username,
-
-            pm.comment,
+            md.date_time AS emailDate,
+            md.mail_from AS emailFrom,
+            md.subject,
             'MISSING' AS po_status,
-
-            CASE
-                WHEN pm.po_det_id IS NOT NULL THEN 'SCANNED'
-                ELSE 'SYSTEM'
-            END AS source
+            'email' AS source
         FROM po_missing_report pm
         LEFT JOIN po_details pd ON pm.po_det_id = pd.po_det_id
         LEFT JOIN system_po_details sp ON pm.system_po_id = sp.system_po_id
         LEFT JOIN users_master um ON pm.user_id = um.user_id
+        LEFT JOIN mail_details md ON md.mail_dtl_id = pd.mail_dtl_id
         WHERE pm.active = 1
     """
 
@@ -806,32 +738,32 @@ async def fetch_missing_po_data(request: Request, frontendRequest):
         
         
 async def fetch_mismatch_po_data(request: Request, frontendRequest):
-
     base_query = """
         SELECT
             mm.po_mismatch_id,
             mm.po_det_id,
             mm.system_po_id,
-
             pd.po_number,
             pd.po_date,
             pd.vendor_number AS vendor_code,
             pd.customer_name,
             um.user_name AS username,
-
             mm.mismatch_attribute,
             mm.scanned_value,
             mm.system_value,
             mm.created_on,
-           
-
-            'MISMATCH' AS po_status
+            md.date_time AS emailDate,
+            md.mail_from AS emailFrom,
+            md.subject,
+            'MISMATCH' AS po_status,
+            'email' AS source
         FROM po_mismatch_report mm
         LEFT JOIN po_details pd 
             ON mm.po_det_id = pd.po_det_id
         LEFT JOIN system_po_details sp
             ON mm.system_po_id = sp.system_po_id
         LEFT JOIN users_master um ON mm.user_id = um.user_id
+        LEFT JOIN mail_details md ON md.mail_dtl_id = pd.mail_dtl_id
         WHERE mm.active = 1
     """
 
@@ -854,25 +786,32 @@ async def fetch_mismatch_po_data(request: Request, frontendRequest):
 
 async def fetch_matched_po_data(request: Request, frontendRequest):
 
-    base_query = """
-                SELECT
-                pd.*,
-                pd.vendor_number AS vendor_code,
-                u.user_name AS username
+    base_query = """            
+            SELECT pd.*,
+            um.user_name AS username,
+            md.date_time AS emailDate,
+            md.mail_from AS emailFrom,
+            md.subject,
+            'normal' AS po_status,
+            'email' AS source
             FROM po_details pd
-            LEFT JOIN po_missing_report pm
-                ON pm.po_det_id = pd.po_det_id
-            AND pm.active = 1
-            LEFT JOIN po_mismatch_report mm
-                ON mm.po_det_id = pd.po_det_id
-            AND mm.active = 1
-            LEFT JOIN mail_details md
-                ON md.mail_dtl_id = pd.mail_dtl_id
-            LEFT JOIN users_master u
-                ON u.user_id = md.user_id
-            WHERE pd.active = 1           
-            AND pm.po_det_id IS NULL
-            AND mm.po_det_id IS NULL
+            INNER JOIN system_po_details sp
+                ON pd.po_number <=> sp.po_number
+                AND pd.customer_name <=> sp.customer_name
+                AND pd.vendor_number <=> sp.vendor_number
+                AND pd.po_date <=> sp.po_date
+                AND pd.delivery_date <=> sp.delivery_date
+                AND pd.cancel_date <=> sp.cancel_date
+                AND pd.ec_style_number <=> sp.ec_style_number
+                AND pd.customer_style_number <=> sp.customer_style_number
+                AND pd.quantity <=> sp.quantity
+                AND pd.gold_karat <=> sp.gold_karat
+                AND pd.color <=> sp.color
+                AND pd.description <=> sp.description
+                AND pd.gold_lock <=> sp.gold_lock
+                LEFT JOIN mail_details md ON md.mail_dtl_id = pd.mail_dtl_id 
+                LEFT JOIN users_master um ON um.user_id = pd.user_id
+            WHERE pd.active = 1
     """
 
     params = []
@@ -890,7 +829,8 @@ async def fetch_matched_po_data(request: Request, frontendRequest):
 
     return [dict(zip(cols, r)) for r in rows]
         
-        #for schedular we are getting all users 
+
+#for schedular we are getting all users 
 async def get_active_users(request: Request):
     query = """
         SELECT user_id
@@ -904,7 +844,8 @@ async def get_active_users(request: Request):
             await cursor.execute(query)
             rows = await cursor.fetchall()
             return [row[0] for row in rows]
-        
+    
+
 #----------------Search PO for Business Admin Dashboard-----------------#
 def build_conditions(date_col, vendor_col, user_col, po_col, params, filters):
     cond = []
@@ -1205,100 +1146,6 @@ async def search_pos_business_admin(request: Request, filters):
     return [dict(zip(cols, row)) for row in rows]
 
 
-
-#Fetching Total Numbers of Meeting on User Dashboard
-# async def fetch_meetings_processed_by_user_id(user_id: int, from_date: str, to_date: str, request: Request) -> int:
-#     query = """
-#         SELECT COUNT(*) 
-#         FROM meeting_report_data mrd,cal_master cm
-#         WHERE mrd.cal_id=cm.cal_id and mrd.user_id = %s 
-#           AND mrd.is_active = TRUE
-#           AND DATE(cm.event_start_datetime) BETWEEN %s AND %s
-#     """
-#     async with request.app.state.pool.acquire() as conn:
-#         async with conn.cursor() as cursor:
-#             await cursor.execute(query, (user_id, from_date, to_date))
-#             row = await cursor.fetchone()
-#             return int(row[0]) if row else 0
-
-
-
-
-# ### This code is used to fetch calculateing one month to current date data week wise
-# async def get_weekly_hours_previous_month(request, from_date:str,to_date:str,org_id: int, user_id: int,) -> List[Dict[str, Any]]:
-#     try:
-#         query = """
-#         WITH date_range AS (
-#             SELECT
-#                 CAST(%s AS DATE) AS start_date,
-#                 CAST(DATE_ADD(%s, INTERVAL 1 DAY) AS DATE) AS end_date
-#                                         )
-#                                         SELECT
-#                 DATE_FORMAT(MIN(md.date_time), '%%b %%Y') AS month_name,
-#                 CONCAT('Week ', FLOOR(DATEDIFF(md.date_time, p.start_date) / 7) + 1) AS week_index,
-#                 ROUND(SUM(r.planned_effort_time) / 60, 2) AS total_hours
-#             FROM
-#                 report_data r
-#             LEFT JOIN 
-#                             mail_details md ON
-#                 md.mail_dtl_id = r.mail_dtl_id
-#             JOIN 
-#                 date_range p
-#                                             ON
-#                 md.date_time >= p.start_date
-#                 AND md.date_time < p.end_date
-#             WHERE
-#                 r.org_id = %s
-#                 AND r.user_id = %s
-#             GROUP BY
-#                 week_index
-#             ORDER BY
-#                 MIN(md.date_time);
-#         """
-
-#         async with request.app.state.pool.acquire() as conn:
-#             async with conn.cursor() as cursor:
-#                 #pass both org_id and user_id as parameters
-#                 await cursor.execute(query, (from_date,to_date,org_id,user_id,))
-#                 rows = await cursor.fetchall()
-
-#                 result = [
-#                     {
-#                         "month_name": row[0],
-#                         "week_of_month": row[1],
-#                         "total_hours": float(row[2]) if row[2] is not None else 0.0,
-#                     }
-#                     for row in rows
-#                 ]
-
-#                 return result
-#     except Exception as e:
-#         return []
-
-
-# #Fetching Top Keywords On User Dashboard 
-# async def fetch_keywords_by_userId(request, org_id: int, user_id: int,from_date:str,to_date:str) -> List[Tuple[str]]:
-#     try:
-#         query = """
-#            SELECT
-#             rd.keywords_found
-#         FROM
-#             report_data rd
-#         JOIN users_master u ON
-#             rd.user_id = u.user_id
-#         Join mail_details m on m.mail_dtl_id =rd.mail_dtl_id
-#         WHERE
-#             u.user_id = %s
-#             AND u.is_active = 1
-#             AND m.date_time between %s and %s;
-#         """
-#         async with request.app.state.pool.acquire() as conn:
-#             async with conn.cursor() as cursor:
-#                 await cursor.execute(query, (user_id,from_date,to_date))
-#                 return await cursor.fetchall()
-#     except Exception as e:
-#         return []
-    
 #  #Last Sync On User Dashboard
 async def get_last_sync_by_user_id(
     user_id: int,
@@ -1343,12 +1190,14 @@ async def get_last_sync_by_user_id(
 #Last sync for business admin and system admin dashboard
 async def get_last_sync(request: Request) -> List[Dict[str, Any]]:
         try:
-            # 🔹 Latest created_on from both tables for Business/System Admin
+            # Latest created_on from both tables for Business/System Admin
             query = """
-                SELECT GREATEST(
-                    COALESCE((SELECT MAX(created_on) FROM mail_details), 'No Sync yet'),
-                    COALESCE((SELECT MAX(created_on) FROM sharepoint_files), 'No Sync yet')
-                ) AS last_sync
+               SELECT MAX(created_on) AS last_sync
+                FROM (
+                    SELECT MAX(created_on) AS created_on FROM mail_details
+                    UNION ALL
+                    SELECT MAX(created_on) AS created_on FROM sharepoint_files
+                ) AS combined;
             """
             async with request.app.state.pool.acquire() as conn:
                 async with conn.cursor() as cursor:
@@ -1390,6 +1239,7 @@ async def check_folder_mapping_exists_repo(
     except Exception as e:
         raise Exception(f"DB error while checking folder mapping: {str(e)}")
 
+
 #Insert Folder in DB 
 async def insert_folder_mapping_repo(
     request: Request,
@@ -1428,6 +1278,8 @@ async def check_duplicate_schedule(request, day: str, schedule_time):
             await cursor.execute(query, (day, schedule_time))
             result = await cursor.fetchone()
             return result is not None
+
+
 #Save the Scheduler details in sd task master table in db 
 async def save_schedule(
     request,
@@ -1462,6 +1314,63 @@ async def save_schedule(
     except Exception as e:
         raise Exception(f"DB error while inserting scheduler: {str(e)}")
 
+
+#Display all active  Scheduler ON UI
+async def fetch_all_scheduler(request: Request, role_id: int):
+    try:
+ 
+        query = """
+            SELECT
+                task_sd_id,
+                day,
+                time,
+                created_on
+            FROM sd_task_master_table
+            WHERE is_active = 1
+        """
+ 
+        params = []
+ 
+        # Only admin can see schedulers
+        if role_id != 2:
+            return []
+ 
+        query += " ORDER BY task_sd_id DESC"
+ 
+        async with request.app.state.pool.acquire() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute(query)
+                cols = [c[0] for c in cursor.description]
+                rows = await cursor.fetchall()
+ 
+        return [dict(zip(cols, r)) for r in rows]
+ 
+    except Exception as e:
+        print("Repository Error:", e)
+        raise e
+   
+   
+async def delete_scheduler(request: Request, task_sd_id: int):
+    try:
+        query = """
+            DELETE
+            FROM sd_task_master_table
+            WHERE task_sd_id = %s
+            AND is_active = 1
+        """
+ 
+        async with request.app.state.pool.acquire() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute(query, (task_sd_id,))
+                await conn.commit()
+ 
+        return {"success": True, "message": "Scheduler deleted"}
+ 
+    except Exception as e:
+        print("Repository Error:", e)
+        raise
+
+    
 #---------------------Get Active Schedule From task_sd_master_table-------------
 async def get_active_schedule(request):
     query = """
@@ -1480,7 +1389,8 @@ async def get_active_schedule(request):
             await cursor.execute(query)
             return await cursor.fetchone()
  
- #--------------------Get All Active Users with refresh Token------------           
+
+#--------------------Get All Active Users with refresh Token------------           
 async def get_users_with_refresh_token(request):
     query = """
         SELECT
@@ -1496,7 +1406,8 @@ async def get_users_with_refresh_token(request):
             await cursor.execute(query)
             return await cursor.fetchall()
  
- #---------------Get folders which we have to sync----------------           
+
+#---------------Get folders which we have to sync----------------           
 async def get_user_folders(request, user_id: int):
         query = """
             SELECT
@@ -1512,25 +1423,9 @@ async def get_user_folders(request, user_id: int):
                 rows = await cursor.fetchall()
 
         return [row[0] for row in rows]
-# #Update Term Condition Fleg When User login once
-# async def update_term_condition_flag(user_id: int, role_id: int, org_id: int, request: Request, flag: int = 1):
-#     query = """
-#         UPDATE users_master
-#         SET term_condition_flag = %s
-#         WHERE user_id = %s
-#           AND role_id = %s
-#           AND org_id = %s
-#     """
-#     async with request.app.state.pool.acquire() as conn:
-#         async with conn.cursor() as cursor:
-#             await cursor.execute(query, (flag, user_id, role_id, org_id))
-#             await conn.commit() 
-#             return cursor.rowcount > 0   #  True if row updated
 
 
-
-#--------------Soft Delete and Hard Delete User and all related tables--------------
-# table_name : status_column
+#--------------Soft Delete and Hard Delete User and all related tables by System Admin start--------------
 RELATED_TABLES = {
     "audit_po_details": "active",
     "mail_details": "is_active",
@@ -1549,7 +1444,7 @@ RELATED_TABLES = {
     "sd_folder_mapping_table": "is_active",
 }
 
-async def soft_delete_user(request, user_id: int) -> bool:
+async def soft_delete_user_by_system_admin(request, user_id: int) -> bool:
     """Mark user and all related records as inactive"""
     try:
         async with request.app.state.pool.acquire() as conn:
@@ -1605,7 +1500,7 @@ HARD_DELETE_TABLES = [
     "audit_po_details"
 ]
 
-async def hard_delete_user(request, user_id: int) -> bool:
+async def hard_delete_user_by_system_admin(request, user_id: int) -> bool:
     try:
         async with request.app.state.pool.acquire() as conn:
             async with conn.cursor() as cursor:
@@ -1638,8 +1533,10 @@ async def hard_delete_user(request, user_id: int) -> bool:
     except Exception as e:
         logger.error(f"Hard delete failed for user {user_id}: {e}")
         return False
+# ------------------soft Delete and Hard Delete User and all related tables by System Admin end-----------------
 
-#--------------Soft Delete and Hard Delete PO by Business Admin--------------
+
+#-----------------------Soft Delete and Hard Delete PO by Business Admin or User it self start------------------------
 TABLE_PK_MAP = {
     "po_missing_report": "po_missing_id",
     "po_mismatch_report": "po_mismatch_id",
@@ -1675,6 +1572,7 @@ def get_pk_column(table: str) -> str:
     if not pk:
         raise ValueError(f"No PK mapping found for table: {table}")
     return pk
+
 
 async def resolve_detail_id(cursor, record_id: int, source: str, record_type: str | None):
     
@@ -1714,7 +1612,8 @@ async def resolve_detail_id(cursor, record_id: int, source: str, record_type: st
     else:
         return record_id
 
-async def soft_delete_po_by_business_admin(
+
+async def soft_delete_po_by_business_admin_or_user(
     request,
     record_id: int,
     source: str,
@@ -1725,9 +1624,7 @@ async def soft_delete_po_by_business_admin(
             async with conn.cursor() as cursor:
                 await conn.begin()
 
-                # Resolve detail ID
                 detail_id = await resolve_detail_id(cursor, record_id, source, record_type)
-
                 if not detail_id:
                     raise Exception("Detail ID not found")
 
@@ -1737,40 +1634,117 @@ async def soft_delete_po_by_business_admin(
                     missing_table = "po_missing_report"
                     mismatch_table = "po_mismatch_report"
 
-                else:
+                    # Get mail_dtl_id
+                    await cursor.execute(
+                        f"SELECT mail_dtl_id FROM {detail_table} WHERE {detail_col} = %s",
+                        (detail_id,)
+                    )
+                    mail_row = await cursor.fetchone()
+                    mail_dtl_id = mail_row[0] if mail_row else None
+
+                    if not mail_dtl_id:
+                        raise Exception("mail_dtl_id not found")
+
+                    # Inactivate all related POs
+                    await cursor.execute(
+                        f"UPDATE {detail_table} SET active = 0 WHERE mail_dtl_id = %s",
+                        (mail_dtl_id,)
+                    )
+
+                    await cursor.execute(
+                        f"""
+                        UPDATE {missing_table}
+                        SET active = 0
+                        WHERE {detail_col} IN (
+                            SELECT {detail_col} FROM {detail_table}
+                            WHERE mail_dtl_id = %s
+                        )
+                        """,
+                        (mail_dtl_id,)
+                    )
+
+                    await cursor.execute(
+                        f"""
+                        UPDATE {mismatch_table}
+                        SET active = 0
+                        WHERE {detail_col} IN (
+                            SELECT {detail_col} FROM {detail_table}
+                            WHERE mail_dtl_id = %s
+                        )
+                        """,
+                        (mail_dtl_id,)
+                    )
+
+                    await cursor.execute(
+                        "UPDATE mail_details SET is_active = 0 WHERE mail_dtl_id = %s",
+                        (mail_dtl_id,)
+                    )
+
+                else:  # 🔵 SHAREPOINT FLOW
                     detail_table = "sharepoint_po_details"
                     detail_col = "sharepoint_po_det_id"
                     missing_table = "sharepoint_po_missing_report"
                     mismatch_table = "sharepoint_po_mismatch_report"
 
-                # 1️⃣ Inactivate parent
-                await cursor.execute(
-                    f"UPDATE {detail_table} SET active = 0 WHERE {detail_col} = %s",
-                    (detail_id,)
-                )
+                    # 1️⃣ Get sharepoint_file_id (PARENT ID)
+                    await cursor.execute(
+                        f"SELECT sharepoint_file_id FROM {detail_table} WHERE {detail_col} = %s",
+                        (detail_id,)
+                    )
+                    file_row = await cursor.fetchone()
+                    sharepoint_file_id = file_row[0] if file_row else None
 
-                # 2️⃣ Inactivate all missing
-                await cursor.execute(
-                    f"UPDATE {missing_table} SET active = 0 WHERE {detail_col} = %s",
-                    (detail_id,)
-                )
+                    if not sharepoint_file_id:
+                        raise Exception("sharepoint_file_id not found")
 
-                # 3️⃣ Inactivate all mismatch
-                await cursor.execute(
-                    f"UPDATE {mismatch_table} SET active = 0 WHERE {detail_col} = %s",
-                    (detail_id,)
-                )
+                    # 2️⃣ Inactivate ALL related details
+                    await cursor.execute(
+                        f"UPDATE {detail_table} SET active = 0 WHERE sharepoint_file_id = %s",
+                        (sharepoint_file_id,)
+                    )
 
+                    # 3️⃣ Inactivate ALL related missing
+                    await cursor.execute(
+                        f"""
+                        UPDATE {missing_table}
+                        SET active = 0
+                        WHERE {detail_col} IN (
+                            SELECT {detail_col}
+                            FROM {detail_table}
+                            WHERE sharepoint_file_id = %s
+                        )
+                        """,
+                        (sharepoint_file_id,)
+                    )
+
+                    # 4️⃣ Inactivate ALL related mismatch
+                    await cursor.execute(
+                        f"""
+                        UPDATE {mismatch_table}
+                        SET active = 0
+                        WHERE {detail_col} IN (
+                            SELECT {detail_col}
+                            FROM {detail_table}
+                            WHERE sharepoint_file_id = %s
+                        )
+                        """,
+                        (sharepoint_file_id,)
+                    )
+
+                    # 5️⃣ Inactivate parent file
+                    await cursor.execute(
+                        "UPDATE sharepoint_files SET is_active = 0 WHERE sharepoint_file_id = %s",
+                        (sharepoint_file_id,)
+                    )
                 await conn.commit()
 
-        logger.info(f"Soft delete successful for detail_id {detail_id}")
         return True
 
     except Exception as e:
         logger.error(f"Soft delete failed: {e}")
         return False
 
-async def hard_delete_po_by_business_admin(
+async def hard_delete_po_by_business_admin_or_user(
     request,
     record_id: int,
     source: str,
@@ -1781,9 +1755,7 @@ async def hard_delete_po_by_business_admin(
             async with conn.cursor() as cursor:
                 await conn.begin()
 
-                # Resolve detail ID
                 detail_id = await resolve_detail_id(cursor, record_id, source, record_type)
-
                 if not detail_id:
                     raise Exception("Detail ID not found")
 
@@ -1793,34 +1765,112 @@ async def hard_delete_po_by_business_admin(
                     missing_table = "po_missing_report"
                     mismatch_table = "po_mismatch_report"
 
-                else:
+                    await cursor.execute(
+                        f"SELECT mail_dtl_id FROM {detail_table} WHERE {detail_col} = %s",
+                        (detail_id,)
+                    )
+                    mail_row = await cursor.fetchone()
+                    mail_dtl_id = mail_row[0] if mail_row else None
+
+                    if not mail_dtl_id:
+                        raise Exception("mail_dtl_id not found")
+
+                    # Delete children first
+                    await cursor.execute(
+                        "DELETE FROM email_attachments WHERE mail_dtl_id = %s",
+                        (mail_dtl_id,)
+                    )
+
+                    await cursor.execute(
+                        f"""
+                        DELETE FROM {missing_table}
+                        WHERE {detail_col} IN (
+                            SELECT {detail_col} FROM {detail_table}
+                            WHERE mail_dtl_id = %s
+                        )
+                        """,
+                        (mail_dtl_id,)
+                    )
+
+                    await cursor.execute(
+                        f"""
+                        DELETE FROM {mismatch_table}
+                        WHERE {detail_col} IN (
+                            SELECT {detail_col} FROM {detail_table}
+                            WHERE mail_dtl_id = %s
+                        )
+                        """,
+                        (mail_dtl_id,)
+                    )
+
+                    await cursor.execute(
+                        f"DELETE FROM {detail_table} WHERE mail_dtl_id = %s",
+                        (mail_dtl_id,)
+                    )
+
+                    await cursor.execute(
+                        "DELETE FROM mail_details WHERE mail_dtl_id = %s",
+                        (mail_dtl_id,)
+                    )
+
+                else:  # 🔵 SHAREPOINT FLOW
                     detail_table = "sharepoint_po_details"
                     detail_col = "sharepoint_po_det_id"
                     missing_table = "sharepoint_po_missing_report"
                     mismatch_table = "sharepoint_po_mismatch_report"
 
-                # Delete children first
-                await cursor.execute(
-                    f"DELETE FROM {missing_table} WHERE {detail_col} = %s",
-                    (detail_id,)
-                )
+                    # 1️⃣ Get sharepoint_file_id
+                    await cursor.execute(
+                        f"SELECT sharepoint_file_id FROM {detail_table} WHERE {detail_col} = %s",
+                        (detail_id,)
+                    )
+                    file_row = await cursor.fetchone()
+                    sharepoint_file_id = file_row[0] if file_row else None
 
-                await cursor.execute(
-                    f"DELETE FROM {mismatch_table} WHERE {detail_col} = %s",
-                    (detail_id,)
-                )
+                    if not sharepoint_file_id:
+                        raise Exception("sharepoint_file_id not found")
 
-                # Delete parent
-                await cursor.execute(
-                    f"DELETE FROM {detail_table} WHERE {detail_col} = %s",
-                    (detail_id,)
-                )
+                    # 2️⃣ Delete children first
+                    await cursor.execute(
+                        f"""
+                        DELETE FROM {missing_table}
+                        WHERE {detail_col} IN (
+                            SELECT {detail_col}
+                            FROM {detail_table}
+                            WHERE sharepoint_file_id = %s
+                        )
+                        """,
+                        (sharepoint_file_id,)
+                    )
 
+                    await cursor.execute(
+                        f"""
+                        DELETE FROM {mismatch_table}
+                        WHERE {detail_col} IN (
+                            SELECT {detail_col}
+                            FROM {detail_table}
+                            WHERE sharepoint_file_id = %s
+                        )
+                        """,
+                        (sharepoint_file_id,)
+                    )
+
+                    # 3️⃣ Delete details
+                    await cursor.execute(
+                        f"DELETE FROM {detail_table} WHERE sharepoint_file_id = %s",
+                        (sharepoint_file_id,)
+                    )
+
+                    # 4️⃣ Delete parent file
+                    await cursor.execute(
+                        "DELETE FROM sharepoint_files WHERE sharepoint_file_id = %s",
+                        (sharepoint_file_id,)
+                    )
                 await conn.commit()
 
-        logger.info(f"Hard delete successful for detail_id {detail_id}")
         return True
 
     except Exception as e:
         logger.error(f"Hard delete failed: {e}")
         return False
+# -----------------------Soft Delete and Hard Delete PO by Business Admin or User it self end------------------------

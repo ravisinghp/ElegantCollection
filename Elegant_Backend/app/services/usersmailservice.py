@@ -261,6 +261,7 @@ async def refresh_outlook_access_token(refresh_token: str) -> dict:
 
     async with httpx.AsyncClient(timeout=timeout) as client:
         resp = await client.post(url, data=data)
+        print(f"the response of data : {data}")
         resp.raise_for_status()
         return resp.json()
 
@@ -302,7 +303,10 @@ async def get_valid_outlook_token(
 
     try:
         new_tokens = await refresh_outlook_access_token(token.refresh_token)
-    except Exception:
+        print(f"the response of updated refresh token : {token}")
+        print(f"the response of updated refresh new token : {new_tokens}")
+    except Exception as e:
+        print("Exception:",e)
         # refresh failed, maybe refresh token revoked
         return None
 
@@ -428,13 +432,42 @@ def extract_po_fields_regex(text: str) -> dict:
 
     return out if any(out.values()) else EMPTY_PO
 
+
+DB_FIELD_LIMITS = {
+    "customer_name": 255,
+    "vendor_number": 100,
+    "po_number": 100,
+    "gold_karat": 100,
+    "ec_style_number": 100,
+    "customer_style_number": 100,
+    "color": 50,
+    "quantity": 100,
+    "gold_lock": 100,
+}
  
+def trim_to_db_limits(data: dict) -> dict:
+    trimmed = {}
+ 
+    for field, value in data.items():
+        if not value:
+            trimmed[field] = value
+            continue
+ 
+        if field in DB_FIELD_LIMITS:
+            max_len = DB_FIELD_LIMITS[field]
+            trimmed[field] = value[:max_len]
+        else:
+            trimmed[field] = value
+ 
+    return trimmed
+  
 
 MANDATORY_FIELDS = ["po_number", "customer_name", "vendor_number", "po_date", "delivery_date", "quantity"]
 
-
 async def extract_po_fields(text: str) -> dict:
-    regex_data = extract_po_fields_regex(text)
+    regex_data_response = extract_po_fields_regex(text)
+    regex_data = trim_to_db_limits(regex_data_response)
+    logger.info(f"regex data:{regex_data}")
 
     # Check if mandatory fields are present
     if all(regex_data.get(f) for f in MANDATORY_FIELDS) and len(text.strip()) >= 100:
@@ -446,6 +479,7 @@ async def extract_po_fields(text: str) -> dict:
 
     # Otherwise call LLM
     llm_data = await extract_po_fields_from_llm(text)
+    logger.info(f"LLM data:{llm_data}")
 
     # Merge: LLM always wins
     final = regex_data.copy()
@@ -753,6 +787,7 @@ FIELD-SPECIFIC RULES
 PO NUMBER:
 - Extract only if clearly labeled as PO Number, P.O., Purchase Order Number, or similar.
 - Value must look like an actual PO identifier.
+- Also accept labels: PO #, PO#, P.O. #
 
 CUSTOMER NAME:
 - Extract only if explicitly labeled as:
@@ -767,16 +802,28 @@ VENDOR NAME:
 
 PO DATE:
 - Extract only if clearly labeled as PO Date, Order Date, or Purchase Order Date.
+- Also accept label: Date (only if located near PO Number or in PO header section)
 
 DELIVERY DATE:
 - Extract only if clearly labeled as Delivery Date, Due Date, or Expected Delivery.
 
 GOLD KARAT / METAL:
-- Extract only if explicitly labeled as:
+- Extract ONLY if the label appears as a standalone field header.
+- Valid labels (case-insensitive):
   gold karat, karat, metal, gold purity
-- Return the value EXACTLY as written (example: "14KW", "18K Rose", "22K Yellow", "A W").
-- Do NOT extract karat values from description or item rows.
-- If label is missing, return null.
+- The label MUST be immediately followed by:
+  • a colon (:)
+  • OR a dash (-)
+  • OR a newline (value on the next line)
+- Extract ONLY the value directly associated with that label.
+- Return the value EXACTLY as written (examples: "14KW", "18K Rose", "22K Yellow", "A W", "18 KT").
+- DO NOT extract if:
+  • the label appears inside a sentence
+  • the label is followed by words like "field", "example", "e.g.", "supports", etc.
+  • the value appears in descriptions, item rows, product lines, or explanatory text
+- If no properly formatted standalone labeled field exists, return null.
+- If multiple valid labeled fields exist, return the first one.
+
 
 COLOR:
 - Extract only if explicitly labeled as:
@@ -814,6 +861,7 @@ TEXT:
             temperature=0,
             messages=[{"role": "user", "content": prompt}]
         )
+        logger.info(f"response:{resp}")
 
         raw = resp.choices[0].message.content.strip()
 
@@ -833,7 +881,8 @@ TEXT:
 
         return result
 
-    except Exception:
+    except Exception as e:
+        logger.error(f"Exception is:{e}")
         return EMPTY_PO
 
 
@@ -869,7 +918,7 @@ def normalize_po_date_ddmmyyyy(date_str: Optional[str]) -> Optional[str]:
         try:
             dt = datetime.strptime(date_str, fmt)
             return dt.strftime("%Y-%m-%d")
-        except ValueError:
+        except ValueError as ve:
             continue
 
     return None
@@ -1071,8 +1120,9 @@ async def fetch_and_save_mails_by_folders(
                 headers=headers
             )
             folder_resp.raise_for_status()
+            logger.info(f"folder response:{folder_resp}")
         except Exception as e:
-            logger.error("Failed to fetch folders: %s", e)
+            logger.error(f"Failed to fetch folders:{e}")
             return []
 
         folders = folder_resp.json().get("value", [])
@@ -1111,6 +1161,7 @@ async def fetch_and_save_mails_by_folders(
 
 
                 keywords = await mails_repo.fetch_keywords()
+                logger.info(f"keywords are:{keywords}")
             # ---------------- PROCESS EACH MESSAGE ----------------
             for msg in messages:
                 graph_mail_id = msg.get("id")
@@ -1138,6 +1189,7 @@ async def fetch_and_save_mails_by_folders(
                     body_clean,
                     keywords
                 )
+                logger.info(f"Matched Keywords are:{matched_keywords}")
 
                 if not matched_keywords:
                     continue  #skip mail
@@ -1166,6 +1218,7 @@ async def fetch_and_save_mails_by_folders(
                     graph_mail_id=graph_mail_id,
                     folder_name=folder_name
                 )
+                    logger.info(f"Mail id:{mail_id}")
                 except Exception as e:
                     logger.error("DB insert failed for mail %s: %s", graph_mail_id, e)
                     continue
@@ -1180,6 +1233,7 @@ async def fetch_and_save_mails_by_folders(
                             f"{GRAPH_API}/me/messages/{graph_mail_id}/attachments",
                             headers=headers
                         )
+                        logger.info(f"attchment response:{att_resp}")
                         att_resp.raise_for_status()
                         att_list = att_resp.json().get("value", [])
                     except Exception as e:
@@ -1194,7 +1248,7 @@ async def fetch_and_save_mails_by_folders(
                             continue
 
                         file_hash = compute_file_hash(content_bytes)
-                        if await mails_repo.attachment_exists(file_hash, user_id):
+                        if await mails_repo.attachment_exists(file_hash,user_id):
                             continue
 
                         # Save File
@@ -1217,7 +1271,7 @@ async def fetch_and_save_mails_by_folders(
                             continue
 
                         try:
-                            await mails_repo.insert_attachment(
+                            response = await mails_repo.insert_attachment(
                                 mail_dtl_id=mail_id,
                                 user_id=user_id,
                                 attach_name=filename,
@@ -1228,6 +1282,7 @@ async def fetch_and_save_mails_by_folders(
                                 is_active=1,
                                 file_hash=file_hash,
                             )
+                            logger.info(f"response is:{response}")
                             saved_attachments.append(filename)
                         except Exception as e:
                             logger.error("Attachment insert failed (%s): %s", filename, e)
@@ -1235,6 +1290,7 @@ async def fetch_and_save_mails_by_folders(
                 
                 # ---------------- Insert PO data from email body ----------------
                 po_data_body = await extract_po_fields(body_clean)
+                logger.info(f"PO Body Data:{po_data_body}")
                 if po_data_body.get("po_number") and po_data_body.get("customer_name"):
                     po_det_id = await mails_repo.insert_po_details(
                         mail_dtl_id=mail_id,
@@ -1256,6 +1312,7 @@ async def fetch_and_save_mails_by_folders(
                         gold_lock=po_data_body.get("gold_lock")
                     )
                     extracted_po_ids.append(po_det_id)
+                    logger.info(f"Inserted Mail PO Extracted IDs:{extracted_po_ids}")
                 # ----------------Insert PO data from attachments ----------------
                 for att_text in attachment_texts:
                     normalized_text = normalize_attachment_text(att_text)
@@ -1267,6 +1324,7 @@ async def fetch_and_save_mails_by_folders(
 
                     # ---------------- PO ITEMS FROM ATTACHMENT ----------------
                     items = extract_po_items(normalized_text)
+                    logger.info(f"Items:{items}")
 
                     # Fallback: if no items found, insert header-only
                     if not items:
@@ -1290,6 +1348,7 @@ async def fetch_and_save_mails_by_folders(
                             gold_lock=header.get("gold_lock")
                         )
                         extracted_po_ids.append(po_det_id)
+                        logger.info(f"Inserted Attchment PO Extracted IDs:{extracted_po_ids}")
                     else:
                         # MULTIPLE ROW INSERTS
                         for item in items:
@@ -1313,6 +1372,7 @@ async def fetch_and_save_mails_by_folders(
                                 gold_lock=header.get("gold_lock")
                             )
                             extracted_po_ids.append(po_det_id)
+                            logger.info(f"Inserted Attachment PO Extracted IDs:{extracted_po_ids}")
                 # ---------------- COLLECT RESULT ----------------
                 results.append({
                     "mail_dtl_id": mail_id,
@@ -2075,139 +2135,151 @@ async def generate_missing_po_report_service(
     po_det_ids: list[int],
     mails_repo: "MailsRepository"
 ):
+    try:
+        # -------------------- Fetch data -------------------- #
+        scanned_pos = await mails_repo.get_po_details_by_ids(po_det_ids)
 
-    # -------------------- Fetch data -------------------- #
-    scanned_pos = await mails_repo.get_po_details_by_ids(po_det_ids)
+        if not scanned_pos:
+            return {"status": "success", "message": "No scanned POs found for comparison"}
 
-    if not scanned_pos:
-        return {"status": "success", "message": "No scanned POs found for comparison"}
+        scanned_po_numbers = list({
+            po["po_number"] for po in scanned_pos if po.get("po_number")
+        })
 
-    scanned_po_numbers = list({
-        po["po_number"] for po in scanned_pos if po.get("po_number")
-    })
+        system_pos = await mails_repo.get_system_pos_by_po_numbers(scanned_po_numbers)
 
-    system_pos = await mails_repo.get_system_pos_by_po_numbers(scanned_po_numbers)
+        scanned_pos = [{k: make_json_safe(v) for k, v in po.items()} for po in scanned_pos]
+        system_pos = [{k: make_json_safe(v) for k, v in po.items()} for po in system_pos]
+        logger.info(f"Scanned PO s:{scanned_pos}")
+        logger.info(f"system POs:{system_pos}")
 
-    scanned_pos = [{k: make_json_safe(v) for k, v in po.items()} for po in scanned_pos]
-    system_pos = [{k: make_json_safe(v) for k, v in po.items()} for po in system_pos]
+        matched_scanned_ids = set()
+        matched_system_ids = set()
 
-    matched_scanned_ids = set()
-    matched_system_ids = set()
+        # -------------------- Matching & comparison -------------------- #
+        for scanned_batch in chunk(scanned_pos, 25):
 
-    # -------------------- Matching & comparison -------------------- #
-    for scanned_batch in chunk(scanned_pos, 25):
+            matches = await llm_batch_match(scanned_batch, system_pos)
+            matched_pairs = []
 
-        matches = await llm_batch_match(scanned_batch, system_pos)
-        matched_pairs = []
+            for m in matches:
+                scanned = next(
+                    (p for p in scanned_batch if p["po_det_id"] == m["scanned_po_det_id"]),
+                    None
+                )
+                if not scanned or not m["system_po_id"] or m["confidence"] < 0.85:
+                    continue
 
-        for m in matches:
-            scanned = next(
-                (p for p in scanned_batch if p["po_det_id"] == m["scanned_po_det_id"]),
-                None
-            )
-            if not scanned or not m["system_po_id"] or m["confidence"] < 0.85:
-                continue
+                if m["system_po_id"] in matched_system_ids:
+                    continue
 
-            if m["system_po_id"] in matched_system_ids:
-                continue
+                system = next(
+                    (p for p in system_pos if p["system_po_id"] == m["system_po_id"]),
+                    None
+                )
+                if not system:
+                    continue
 
-            system = next(
-                (p for p in system_pos if p["system_po_id"] == m["system_po_id"]),
-                None
-            )
-            if not system:
-                continue
+                matched_scanned_ids.add(scanned["po_det_id"])
+                matched_system_ids.add(system["system_po_id"])
 
-            matched_scanned_ids.add(scanned["po_det_id"])
-            matched_system_ids.add(system["system_po_id"])
+                matched_pairs.append({
+                    "po_det_id": scanned["po_det_id"],
+                    "system_po_id": system["system_po_id"],
+                    "scanned": {f: scanned.get(f) for f in FIELDS_TO_COMPARE},
+                    "system": {f: system.get(f) for f in FIELDS_TO_COMPARE}
+                })
 
-            matched_pairs.append({
-                "po_det_id": scanned["po_det_id"],
-                "system_po_id": system["system_po_id"],
-                "scanned": {f: scanned.get(f) for f in FIELDS_TO_COMPARE},
-                "system": {f: system.get(f) for f in FIELDS_TO_COMPARE}
-            })
+            # ======================================================================
+            # Rule: If PO + customer matched → ALL fields must exist in scanned data
+            # ======================================================================
+            for pair in matched_pairs:
+                for field in FIELDS_TO_COMPARE:
+                    scanned_val = pair["scanned"].get(field)
+                    system_val = pair["system"].get(field)
 
-        # ======================================================================
-        # Rule: If PO + customer matched → ALL fields must exist in scanned data
-        # ======================================================================
-        for pair in matched_pairs:
-            for field in FIELDS_TO_COMPARE:
-                scanned_val = pair["scanned"].get(field)
-                system_val = pair["system"].get(field)
+                    if system_val not in (None, "") and scanned_val in (None, ""):
+                        exists = await mails_repo.mismatch_exists(
+                            user_id=user_id,
+                            po_det_id=pair["po_det_id"],
+                            system_po_id=pair["system_po_id"],
+                            mismatch_attribute=field,
+                            scanned_value="",
+                            system_value=str(system_val)
+                        )
 
-                if system_val not in (None, "") and scanned_val in (None, ""):
+                        if not exists:
+                            await mails_repo.insert_mismatch(
+                                po_det_id=pair["po_det_id"],
+                                user_id=user_id,
+                                system_po_id=pair["system_po_id"],
+                                field=field,
+                                system_value=str(system_val),
+                                scanned_value="",
+                                comment=f"{field} missing in scanned data"
+                            )
+            # ======================================================================
+
+            # -------------------- LLM value comparison (only when both present) -------------------- #
+            if matched_pairs:
+                mismatches = await llm_batch_compare(matched_pairs)
+
+                for mm in mismatches:
                     exists = await mails_repo.mismatch_exists(
                         user_id=user_id,
-                        po_det_id=pair["po_det_id"],
-                        system_po_id=pair["system_po_id"],
-                        mismatch_attribute=field,
-                        scanned_value="",
-                        system_value=str(system_val)
+                        po_det_id=mm["po_det_id"],
+                        system_po_id=mm["system_po_id"],
+                        mismatch_attribute=mm["field"],
+                        scanned_value=str(mm["scanned_value"]),
+                        system_value=str(mm["system_value"])
                     )
 
                     if not exists:
                         await mails_repo.insert_mismatch(
-                            po_det_id=pair["po_det_id"],
+                            po_det_id=mm["po_det_id"],
                             user_id=user_id,
-                            system_po_id=pair["system_po_id"],
-                            field=field,
-                            system_value=str(system_val),
-                            scanned_value="",
-                            comment=f"{field} missing in scanned data"
+                            system_po_id=mm["system_po_id"],
+                            field=mm["field"],
+                            system_value=str(mm["system_value"]),
+                            scanned_value=str(mm["scanned_value"]),
+                            comment=f"{mm['field']} mismatch"
                         )
-        # ======================================================================
 
-        # -------------------- LLM value comparison (only when both present) -------------------- #
-        if matched_pairs:
-            mismatches = await llm_batch_compare(matched_pairs)
+        # -------------------- Missing scanned POs -------------------- #
+        for po in scanned_pos:
+            if po["po_det_id"] not in matched_scanned_ids:
 
-            for mm in mismatches:
-                exists = await mails_repo.mismatch_exists(
+                exists = await mails_repo.po_missing_exists(
                     user_id=user_id,
-                    po_det_id=mm["po_det_id"],
-                    system_po_id=mm["system_po_id"],
-                    mismatch_attribute=mm["field"],
-                    scanned_value=str(mm["scanned_value"]),
-                    system_value=str(mm["system_value"])
+                    po_det_id=po["po_det_id"],
+                    system_po_id=None,
+                    mismatch_attribute="po_missing",
+                    scanned_value=po.get("po_number"),
+                    system_value=""
                 )
 
                 if not exists:
-                    await mails_repo.insert_mismatch(
-                        po_det_id=mm["po_det_id"],
+                    await mails_repo.insert_po_missing(
+                        po_det_id=po["po_det_id"],
                         user_id=user_id,
-                        system_po_id=mm["system_po_id"],
-                        field=mm["field"],
-                        system_value=str(mm["system_value"]),
-                        scanned_value=str(mm["scanned_value"]),
-                        comment=f"{mm['field']} mismatch"
+                        system_po_id=None,
+                        attribute="po_missing",
+                        system_value="",
+                        scanned_value=po.get("po_number"),
+                        comment="PO not found in system (or low confidence match)"
                     )
 
-    # -------------------- Missing scanned POs -------------------- #
-    for po in scanned_pos:
-        if po["po_det_id"] not in matched_scanned_ids:
+        return {
+            "status": "success",
+            "message": "PO comparison completed: missing & mismatches processed successfully"
+        }
+    except Exception as e:
+        logger.exception(
+            f"Error in generate_missing_po_report_service | user_id={user_id}"
+        )
 
-            exists = await mails_repo.po_missing_exists(
-                user_id=user_id,
-                po_det_id=po["po_det_id"],
-                system_po_id=None,
-                mismatch_attribute="po_missing",
-                scanned_value=po.get("po_number"),
-                system_value=""
-            )
-
-            if not exists:
-                await mails_repo.insert_po_missing(
-                    po_det_id=po["po_det_id"],
-                    user_id=user_id,
-                    system_po_id=None,
-                    attribute="po_missing",
-                    system_value="",
-                    scanned_value=po.get("po_number"),
-                    comment="PO not found in system (or low confidence match)"
-                )
-
-    return {
-        "status": "success",
-        "message": "PO comparison completed: missing & mismatches processed successfully"
-    }
+        return {
+            "status": "error",
+            "message": "Failed to generate PO report",
+            "error": str(e)
+        }

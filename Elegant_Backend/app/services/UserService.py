@@ -10,13 +10,6 @@ from app.models.schemas.users import BusinessAdminSearchRequest
 from loguru import logger
 from fastapi.responses import StreamingResponse
 
-#Total R&D Effort On User Dashboard
-# async def get_total_user_effort_by_user_id(user_id: int, from_date: str, to_date: str, request: Request):
-#     try:
-#         return await UserRepo.fetch_total_user_effort_by_id(user_id, from_date, to_date, request)
-#     except Exception as e:
-#         return None
-
 
 #Fetching Total Numbers of Emails on User Dashboard
 async def get_emails_processed_by_user_id(user_id: int, request: Request):
@@ -26,10 +19,24 @@ async def get_emails_processed_by_user_id(user_id: int, request: Request):
         return None
 
 
+async def get_total_emails_fetch_by_user_id(user_id: int, request: Request):
+    try:
+        return await UserRepo.get_total_emails_fetch_by_user_id(user_id, request)
+    except Exception as e:
+        return None
+    
+
 #Fetching Total Numbers of Attachments on User Dashboard
 async def get_documents_analyzed_by_user_id(user_id: int, request: Request):
     try:
         return await UserRepo.fetch_documents_analyzed_by_user_id(user_id,  request)
+    except Exception as e:
+        return None
+
+
+async def get_all_documents_fetch_by_user_id(user_id: int, request: Request):
+    try:
+        return await UserRepo.get_all_documents_fetch_by_user_id(user_id,  request)
     except Exception as e:
         return None
 
@@ -69,8 +76,6 @@ async def download_missing_po_report(
         raise HTTPException(status_code=400, detail="Invalid file format")
 
 
-
-
 async def download_mismatch_po_report(
     request: Request,
     user_id: int,
@@ -105,7 +110,7 @@ async def download_mismatch_po_report(
         raise HTTPException(status_code=400, detail="Invalid file format")
     
   
- #For Business admin Dashboard download all missing pos    
+#For Business admin Dashboard download all missing pos    
 async def download_all_missing_po_report(
         request: Request,
         format: str
@@ -137,8 +142,9 @@ async def download_all_missing_po_report(
 
         except Exception as e:
             raise e
-        
-  #For Business admin Dashboard download all mismatch pos       
+
+
+#For Business admin Dashboard download all mismatch pos       
 async def download_all_mismatch_po_report(
         request: Request,
         format: str
@@ -170,7 +176,8 @@ async def download_all_mismatch_po_report(
 
         except Exception as e:
             raise e
-        
+
+
 async def download_all_selected_po_report(
         request,
         payload: dict,
@@ -230,7 +237,7 @@ async def download_all_selected_po_report(
             raise HTTPException(status_code=500, detail=str(e))      
 
         
-    #On Business admin dashboard    
+#On Business admin dashboard    
 async def download_combined_all_po_report(
         request: Request,
         user_id: int,
@@ -327,8 +334,9 @@ def _generate_po_pdf(df, filename_prefix):
         f"{filename_prefix}.pdf",
         "application/pdf"
     )
-    
-    #Adding and Update comment for po missing and po mismatch from UI
+
+
+#Adding and Update comment for po missing and po mismatch from UI
 async def save_po_comment(
     report_type: str,
     record_id: int,
@@ -387,76 +395,18 @@ async def ignore_po(
         else:
             raise ValueError("Invalid report type")
 
-# async def create_po_comment(
-#     report_type: str,
-#     record_id: int,
-#     comment: str,
-#     request: Request
-# ):
-#     if report_type == "missing":
-#         return await UserRepo.create_po_missing_comment(
-#             record_id, comment, request
-#         )
-
-#     elif report_type == "mismatch":
-#         return await UserRepo.create_po_mismatch_comment(
-#             record_id, comment, request
-#         )
-    
-# #Update the PO Comment On UI 
-# async def update_po_comment(
-#     report_type: str,
-#     record_id: int,
-#     comment: str,
-#     request: Request
-# ):
-#     if report_type == "missing":
-#         return await UserRepo.update_po_missing_comment(
-#             record_id, comment, request
-#         )
-
-#     elif report_type == "mismatch":
-#         return await UserRepo.update_po_mismatch_comment(
-#             record_id, comment, request
-#         )
-
-#     else:
-#         raise ValueError("Invalid report type")
-    
-
-# async def missing_po_data_fetch(request: Request):
-#         data = await UserRepo.fetch_missing_po_data(request)
-#         return {
-#             "status": "success",
-#             "count": len(data),
-#             "data": data
-#         }
-        
-# async def mismatch_po_data_fetch(request: Request):
-#         data = await UserRepo.fetch_mismatch_po_data(request)
-#         return {
-#             "status": "success",
-#             "count": len(data),
-#             "data": data
-#         }
-        
-# async def matched_po_data_fetch(request: Request):
-#         data = await UserRepo.fetch_matched_po_data(request)
-#         return {
-#             "status": "success",
-#             "count": len(data),
-#             "data": data
-#         }
 
 async def missing_po_data_fetch(request: Request, frontendRequest):
     data = await UserRepo.fetch_missing_po_data(request, frontendRequest)
     # FIX: Return empty list if None, and return the LIST directly (no wrapper object)
     return data if data else []
         
+
 async def mismatch_po_data_fetch(request: Request, frontendRequest):
     data = await UserRepo.fetch_mismatch_po_data(request, frontendRequest)
     return data if data else []
         
+
 async def matched_po_data_fetch(request: Request, frontendRequest):
     data = await UserRepo.fetch_matched_po_data(request, frontendRequest)
     return data if data else []
@@ -481,6 +431,7 @@ async def get_all_users_by_role_id_business_admin(request):
         except Exception as e:
             raise Exception(f"Service error while fetching users: {str(e)}")
 
+
 async def get_vendors_business_admin(request):
         try:
             vendors = await UserRepo.get_vendors_business_admin(request)
@@ -499,6 +450,7 @@ async def get_vendors_business_admin(request):
         except Exception as e:
             raise Exception(f"Service error while fetching vendors: {str(e)}")  
         
+
 #----------------Search PO for Business Admin Dashboard-----------------#
 async def search_pos_business_admin(request: Request, filters: BusinessAdminSearchRequest):
         
@@ -508,45 +460,6 @@ async def search_pos_business_admin(request: Request, filters: BusinessAdminSear
 
         result = await UserRepo.search_pos_business_admin(request, filters)
         return result
-
- #Fetching Total Numbers of Meeting on User Dashboard   
-# async def get_meetings_processed_by_user_id(user_id: int, from_date: str, to_date: str, request: Request):
-#     try:
-#         return await UserRepo.fetch_meetings_processed_by_user_id(user_id, from_date, to_date, request)
-#     except Exception as e:
-#         return None
-
-
-
-### This code is used to fetch calculateing one month to current date data week wise
-# async def get_weekly_hours_previous_month(
-
-#     request,from_date:str,to_date:str,org_id: int, user_id: int
-# ) -> List[Dict[str, Any]]:
-#     try:
-#         return await UserRepo.get_weekly_hours_previous_month(request, from_date,to_date,org_id, user_id,)
-#     except Exception as e:
-#         return None
-
-
-
-# #Fetching Top Keywords On User Dashboard 
-# async def get_top_keywords(request, org_id: int, user_id: int,from_date:str,to_date:str, limit: int = 5):
-#     try:
-#         rows = await UserRepo.fetch_keywords_by_userId(request, org_id, user_id,from_date,to_date)
-
-#         # Flatten keywords (split by comma, strip spaces)
-#         all_keywords = []
-#         for (kw,) in rows:
-#             if kw:
-#                 parts = [k.strip().lower() for k in kw.split(",")]
-#                 all_keywords.extend(parts)
-
-#         # Count top N
-#         counter = Counter(all_keywords)
-#         return counter.most_common(limit)
-#     except Exception as e:
-#         return []
     
 
 # #Last Sync On User Dashboard
@@ -609,50 +522,43 @@ async def save_folder_mapping_service(
 
     except Exception as e:
         raise Exception(f"Service error while saving folder mapping: {str(e)}")
-    
-# #Update Term Condition Fleg When User login once
-# async def update_term_condition_flag(user_id: int, role_id: int, org_id: int, request: Request):
-#     try:
-#         return await UserRepo.update_term_condition_flag(user_id, role_id, org_id, request)
-#     except Exception as e:
-#         raise Exception(f"Error updating terms flag: {str(e)}")
 
 
-
-#---------------Soft Delete and Hard Delete User and all related tables-----------------#
-async def deactivate_or_delete_user(request_obj, user_id: int, action: str):
+#---------------Soft Delete and Hard Delete User and all related tables by System Admin start-----------------#
+async def deactivate_or_delete_user_by_system_admin(request_obj, user_id: int, action: str):
     """
     Delete or inactivate user based on action
     action: 'inactive' or 'delete'
     """
     if action == "inactive":
-        success = await UserRepo.soft_delete_user(request_obj, user_id)
+        success = await UserRepo.soft_delete_user_by_system_admin(request_obj, user_id)
         msg = "User inactivated successfully" if success else "Failed to inactivate user"
     elif action == "delete":
-        success = await UserRepo.hard_delete_user(request_obj, user_id)
+        success = await UserRepo.hard_delete_user_by_system_admin(request_obj, user_id)
         msg = "User deleted successfully" if success else "Failed to delete user"
     else:
         raise ValueError("Invalid action. Must be 'inactive' or 'delete'.")
 
     logger.info(f"Action '{action}' on user {user_id}: {msg}")
     return {"user_id": user_id, "action": action, "success": success, "message": msg}
+# ------------------Soft Delete and Hard Delete User and all related tables by System Admin end-----------------#
 
 
-
-#---------------Soft Delete and Hard Delete PO By Business Admin-----------------#
-async def delete_or_deactivate_po_by_business_admin(request_obj, record_id: int, action: str, source: str, record_type: str):
+#-------------------Soft Delete and Hard Delete PO By Business Admin or User it self start----------------------#
+async def delete_or_deactivate_po_by_business_admin_or_user(request_obj, record_id: int, action: str, source: str, record_type: str):
     """
     Delete or inactivate user based on action
     action: 'inactive' or 'delete'
     """
     if action == "inactive":
-        success = await UserRepo.soft_delete_po_by_business_admin(request_obj, record_id, source, record_type)
+        success = await UserRepo.soft_delete_po_by_business_admin_or_user(request_obj, record_id, source, record_type)
         msg = "PO inactivated successfully" if success else "Failed to inactivate PO"
     elif action == "delete":
-        success = await UserRepo.hard_delete_po_by_business_admin(request_obj, record_id, source, record_type)
+        success = await UserRepo.hard_delete_po_by_business_admin_or_user(request_obj, record_id, source, record_type)
         msg = "PO deleted successfully" if success else "Failed to delete PO"
     else:
         raise ValueError("Invalid action. Must be 'inactive' or 'delete'.")
 
     logger.info(f"Action '{action}' on user {record_id}: {msg}")
     return {"user_id": record_id, "action": action, "success": success, "message": msg}
+# -------------------Soft Delete and Hard Delete PO By Business Admin or User it self end----------------------#

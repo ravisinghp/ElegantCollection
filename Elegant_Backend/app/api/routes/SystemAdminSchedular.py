@@ -1,5 +1,5 @@
 from starlette.requests import Request
-from app.models.domain.AdminDomain import SchedulerRequest 
+from app.models.domain.AdminDomain import SchedulerRequest,FetchSchedulerRequest,DeleteSchedulerRequest
 from fastapi import APIRouter, HTTPException,Query,Depends
 from app.core.security import get_current_user
 from app.services.SystemAdminSchedularService import SchedulerService
@@ -34,24 +34,52 @@ async def save_schedule(
         raise HTTPException(status_code=400, detail=str(ve))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
-
-# -------------------Scheduler for testing by postman-------------------
-#Scheduler
-#@router.post("/configure-scheduler")
-# async def configure_scheduler(
-#     request: Request,
-#     current_user: dict = Depends(get_current_user)
-# ):
-#     if current_user["role_id"] != 2:
-#         raise HTTPException(403, "Only system admin allowed")
     
-#     await SchedulerService.run_job(request)
+  
+#Display all active  Scheduler ON UI  
+@router.post("/fetch_all_schedulers")
+async def fetch_all_scheduler(request: Request, payload: FetchSchedulerRequest):
+    try:
+        role_id = payload.role_id
 
+        data = await SchedulerService.fetch_all_scheduler(
+            request=request,
+            role_id=role_id
+           # user_id=user_id
+        )
 
-#     await SchedulerService.configure(request)
+        return {
+            "status": "success",
+            "data": data
+        }
 
-#     return {
-#         "status": "success",
-#         "message": "Scheduler configured successfully"
-#     }
+    except HTTPException as http_err:
+        raise http_err
+
+    except Exception as e:
+        print("Controller Error:", e)
+        raise HTTPException(status_code=500, detail=str(e))
+    
+    
+@router.post("/delete_scheduler")
+async def delete_scheduler(request: Request, payload: DeleteSchedulerRequest):
+    try:
+        task_sd_id = payload.task_sd_id
+
+        data = await SchedulerService.delete_scheduler(
+            request=request,
+            task_sd_id=task_sd_id
+           # user_id=user_id
+        )
+
+        return {
+            "status": "success",
+            "data": data
+        }
+
+    except HTTPException as http_err:
+        raise http_err
+
+    except Exception as e:
+        print("Controller Error:", e)
+        raise HTTPException(status_code=500, detail=str(e))

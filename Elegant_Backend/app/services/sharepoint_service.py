@@ -482,7 +482,7 @@ class SharepointService:
     EMPTY_PO = {k: None for k in PO_FIELD_NAMES}
 
     
-    #--------------------Regex-----------------------------
+    
     #--------------------Regex-----------------------------
     PO_REGEX_PATTERNS = {
 
@@ -504,6 +504,7 @@ class SharepointService:
 
         # ---------------- CUSTOMER NAME ----------------
         "customer_name": [
+            # Or combine both:
             r"Ship\s*To\s*:\s*([A-Za-z0-9 &.,\-]+)(?=\n\s*(?:FOB|Terms|Vendor|Contact|Phone|$))",
             r"Ship\s+To:\s*\n\s*([A-Za-z0-9 &.,\-]+(?:\n\s*[A-Za-z0-9 &.,\-]+){1,4})",
             r"Ship\s+To:\s*\n\s*([A-Za-z0-9 &.,\-]+(?:\n\s*[A-Za-z0-9 &.,\-]+){1,3})",
@@ -701,7 +702,7 @@ class SharepointService:
 
         return out
     
-    MANDATORY_FIELDS = ["po_number", "customer_name"]
+    MANDATORY_FIELDS = ["po_number", "customer_name", "vendor_number", "po_date", "delivery_date", "quantity"]
     
     # def strip_item_sections(self, text: str) -> str:
     #     # Remove ONLY table header line
@@ -748,8 +749,12 @@ class SharepointService:
             if f not in regex_data or regex_data[f] is None:
                 regex_data[f] = None
 
-        if all(regex_data.get(f) for f in self.MANDATORY_FIELDS):
+        if all(regex_data.get(f) for f in self.MANDATORY_FIELDS) and len(text.strip()) >= 100:
             return regex_data
+        
+        # Skip LLM if text too short or mandatory field names not present literally
+        if len(text.strip()) <100: 
+            return self.EMPTY_PO
 
         llm_data = await self.extract_po_fields_from_llm(text)
 
@@ -764,7 +769,7 @@ class SharepointService:
 
     
     
-    async def extract_po_fields_from_llm(text: str) -> dict:
+    async def extract_po_fields_from_llm(self,text: str) -> dict:
         prompt = f"""
     You are a document extraction engine for Jewelry Purchase Orders.
 
@@ -832,7 +837,7 @@ class SharepointService:
     OUTPUT FORMAT
     --------------------
     Return a valid JSON object with EXACTLY these keys:
-    {PO_FIELD_NAMES}
+    {self.PO_FIELD_NAMES}
 
     TEXT:
     {text}
@@ -852,19 +857,19 @@ class SharepointService:
 
             match = re.search(r"\{.*\}", raw, re.S)
             if not match:
-                return EMPTY_PO
+                return self.EMPTY_PO
 
             data = json.loads(match.group())
 
             result = {}
-            for k in PO_FIELD_NAMES:
+            for k in self.PO_FIELD_NAMES:
                 v = data.get(k)
                 result[k] = v if v not in ("", None, "null", "N/A") else None
 
             return result
 
         except Exception:
-            return EMPTY_PO
+            return self.EMPTY_PO
         
     def normalize_po_date_ddmmyyyy(self,date_str: Optional[str]) -> Optional[str]:
         """

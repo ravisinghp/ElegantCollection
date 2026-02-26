@@ -38,7 +38,6 @@ conf = ConnectionConfig(
 # from app.db.repositories.AdminRepo import get_users, get_users_count
 
 
-
 #----------------register User----------------------
 async def register_user(request: Request, user: UserCreate) -> int:
     # Check if user exists by email
@@ -139,6 +138,7 @@ async def update_user(request: Request, user_id: int, user: UserUpdate):
     role_id = user.role_id if user.role_id else None
     await admin_repo.update_user_in_db(request, user_id, user, role_id)
 
+
 ##------------------delete user--------------------
 async def delete_user(request, user_id: int):
     return await admin_repo.delete_user(request, user_id)
@@ -184,6 +184,7 @@ async def get_all_roles(request: Request) -> list[RoleResponse]:
     except Exception as e:
         return None
 
+
 #-------------Fetch all Source-----------------
 async def get_all_sources(request: Request) -> list[SourceResponse]:
     try:
@@ -192,8 +193,6 @@ async def get_all_sources(request: Request) -> list[SourceResponse]:
     except Exception as e:
         return None
     
-    
-
 
 # total effort time on admin dashboard
 async def get_total_effort(request, from_date: str, to_date: str, org_id: int):
@@ -201,7 +200,6 @@ async def get_total_effort(request, from_date: str, to_date: str, org_id: int):
         return await AdminRepo.fetch_total_effort(request, from_date, to_date, org_id)
     except Exception as e:
         return None
-
 
 
 # total active user on admin dashboard
@@ -226,13 +224,13 @@ async def get_emails_processed(request, from_date: str, to_date: str, org_id: in
     except Exception as e:
         return None
     
+
 # total meeting processed on admin dashboard 
 async def get_meetings_processed(request, from_date: str, to_date: str, org_id: int):
     try:
         return await admin_repo.fetch_meetings_processed(request, from_date, to_date, org_id)
     except Exception as e:
         return None
-
 
 
 
@@ -278,7 +276,7 @@ async def get_top_keywords(request, org_id: int, user_id: int,from_date:str,to_d
 
 
 
-    # Update User Status
+# Update User Status
 async def update_user_status(request, user_id: int, is_active: int, org_id: int):
     try:
         return await admin_repo.update_user_status(request, user_id, is_active, org_id)
@@ -298,18 +296,17 @@ async def update_keyword_status(
     except Exception as e:
         return None
 
+
 #find Last sync of each user
 async def get_last_sync_by_users(org_id: int,request: Request):
     try:
         last_sync_data = await admin_repo.fetch_last_sync_by_users(org_id,request)
         return last_sync_data
     except Exception as e:
-        raise Exception(f"Error fetching last sync data: {str(e)}")
+        raise Exception(f"Error fetching last sync data: {str(e)}")   
     
     
-    
-    
-    #Check is email is present ?
+#Check is email is present ?
 async def check_email_exists(email: str, request):
     
     # get_user_by_email_id
@@ -318,6 +315,7 @@ async def check_email_exists(email: str, request):
         # raise HTTPException(status_code=HTTP_400_BAD_REQUEST, detail="Email not found")
         return None
     return user
+
 
 #Password Reset Based on user id and org id 
 async def reset_password(request: Request, user_id: int,  new_password: str) -> bool:

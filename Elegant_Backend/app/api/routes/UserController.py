@@ -1,6 +1,5 @@
 from fastapi import APIRouter, HTTPException,Query, status
 from starlette.requests import Request
-
 from app.services import UserService 
 from typing import List, Dict, Any
 # from pydantic import BaseModel
@@ -19,21 +18,22 @@ async def get_dashboard_stats(request: Request,userId:int):
     if not user_id:
         raise HTTPException(status_code=401, detail="User not authenticated")
     try:
-        # user_id = int(user_id)
-       #total_effort = await UserService.get_total_user_effort_by_user_id(user_id, from_date, to_date, request)
-        emails_processed = await UserService.get_emails_processed_by_user_id(user_id, request)
-        documents_analyzed = await UserService.get_documents_analyzed_by_user_id(user_id, request)
-        #meetings_processed = await UserService.get_meetings_processed_by_user_id(user_id, from_date, to_date, request)
+        Total_emails_processed = await UserService.get_emails_processed_by_user_id(user_id, request)
+        Total_emails_fetch=await UserService.get_total_emails_fetch_by_user_id(user_id,request)
+        Total_documents_analyzed = await UserService.get_documents_analyzed_by_user_id(user_id, request)
+        Total_documents_fetch = await UserService.get_all_documents_fetch_by_user_id(user_id,request)
         return {
-       # "total_effort": total_effort,
-        "emails_processed": emails_processed,
-        "documents_analyzed": documents_analyzed,
-        #"meetings_processed":meetings_processed,
-        }
+        "Total_emails_processed": Total_emails_processed,
+        "Total_emails_fetch": Total_emails_fetch,
+        "Total_documents_analyzed": Total_documents_analyzed,
+        "Total_documents_fetch": Total_documents_fetch,
+    }
     except Exception as e :
-        return None
+        logger.error(f"Error fetching dashboard stats: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch dashboard stats")
     
-    #Donwload Missing Report and Missmatch Report 
+    
+#Download Missing Report and Mismatch Report 
 @router.post("/download_missing_po_report")
 async def download_missing_po_report(
     request: Request,
@@ -90,7 +90,6 @@ async def download_mismatch_po_report(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-
 #For Business admin Dashboard download all missing pos 
 @router.post("/download_All_missing_po_report")
 async def download_all_missing_po_report(
@@ -112,6 +111,7 @@ async def download_all_missing_po_report(
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
 
 #For Business admin Dashboard download all mismatch pos 
 @router.post("/download_All_mismatch_po_report")
@@ -150,6 +150,7 @@ async def download_all_selected_po_report(
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
 
 #On Business admin dashboard
 @router.post("/download_combined_all_po_report")
@@ -285,90 +286,6 @@ async def ignore_po(
     }
 
 
-# @router.post("/createPoComment")
-# async def create_po_comment(
-#     request: Request,
-#     payload: UpdatePoCommentRequest,
-#     report_type: str = Query(..., regex="^(missing|mismatch)$")
-# ):
-#     if report_type == "missing":
-#         if not payload.po_missing_id:
-#             raise HTTPException(400, "po_missing_id is required")
-#         record_id = payload.po_missing_id
-
-#     elif report_type == "mismatch":
-#         if not payload.po_mismatch_id:
-#             raise HTTPException(400, "po_mismatch_id is required")
-#         record_id = payload.po_mismatch_id
-
-#     created = await UserService.create_po_comment(
-#         report_type=report_type,
-#         record_id=record_id,
-#         comment=payload.comment,
-#         request=request
-#     )
-
-#     if not created:
-#         raise HTTPException(404, "Record not found or inactive")
-
-#     return {
-#         "status": "success",
-#         "message": "Comment added successfully"
-#     }
-
-# #Update the PO Comment On UI 
-# @router.put("/updatePoComment")
-# async def update_po_comment(
-#     request: Request,
-#     payload: UpdatePoCommentRequest,
-#     report_type: str = Query(..., regex="^(missing|mismatch)$")
-# ):
-
-#     if report_type == "missing":
-#         if not payload.po_missing_id:
-#             raise HTTPException(
-#                 status_code=400,
-#                 detail="po_missing_id is required for missing report"
-#             )
-#         record_id = payload.po_missing_id
-
-#     elif report_type == "mismatch":
-#         if not payload.po_mismatch_id:
-#             raise HTTPException(
-#                 status_code=400,
-#                 detail="po_mismatch_id is required for mismatch report"
-#             )
-#         record_id = payload.po_mismatch_id
-
-#     updated = await UserService.update_po_comment(
-#         report_type=report_type,
-#         record_id=record_id,
-#         comment=payload.comment,
-#         request=request
-#     )
-
-#     if not updated:
-#         raise HTTPException(status_code=404, detail="Record not found or inactive")
-
-#     return {
-#         "status": "success",
-#         "message": "Comment updated successfully"
-#     }
-
-
-
-# @router.get("/missing-po")
-# async def missing_po_data_fetch(request: Request):
-#     return await UserService.missing_po_data_fetch(request)
-
-
-# @router.get("/mismatch-po")
-# async def mismatch_po_data_fetch(request: Request):
-#     return await UserService.mismatch_po_data_fetch(request)
-
-# @router.get("/matched-po")
-# async def matched_po_data_fetch(request: Request):
-#     return await UserService.matched_po_data_fetch(request)
 #table Data ON User Dashboard 
 @router.post("/missing_po")
 async def missing_po_data_fetch(request: Request, frontendRequest: FetchMissingMismatchReport):
@@ -380,6 +297,7 @@ async def missing_po_data_fetch(request: Request, frontendRequest: FetchMissingM
         print(f"Error fetching Missing POs: {e}")
         return []
 
+
 @router.post("/mismatch_po")
 async def mismatch_po_data_fetch(request: Request, frontendRequest: FetchMissingMismatchReport):
     try:
@@ -388,6 +306,7 @@ async def mismatch_po_data_fetch(request: Request, frontendRequest: FetchMissing
     except Exception as e:
         print(f"Error fetching Mismatch POs: {e}")
         return []
+
 
 @router.post("/matched_po")
 async def matched_po_data_fetch(request: Request, frontendRequest: FetchMissingMismatchReport):
@@ -428,6 +347,7 @@ async def get_vendors_business_admin(request: Request):
             detail=f"Failed to fetch vendor list: {str(e)}"
         )
     
+
 #----------------Search PO for Business Admin Dashboard-----------------#
 @router.post("/business_admin_search_pos")
 async def search_pos_business_admin(
@@ -448,38 +368,6 @@ async def search_pos_business_admin(
 
     except Exception as e:
         return {"success": False, "message": f"Search failed: {str(e)}", "data": []}
-
-
-### This code is used to fetch calculateing one month to current date data week wise
-# @router.get("/weekly-hours-previous-month")
-# async def get_weekly_hours_previous_month(
-#     request: Request,  
-#     org_id: int,
-#     user_id: int,
-#     from_date: str = Query(...),  # Expecting 'YYYY-MM-DD'
-#     to_date: str = Query(...),
-   
-# ) -> List[Dict[str, Any]]:
-#     try:
-#         return await UserService.get_weekly_hours_previous_month(
-#             request, from_date,to_date,org_id, user_id,
-#         )
-#     except Exception as e:
-#         raise HTTPException(status_code=500, detail=str(e))
-
-
-
-
-# #Fetching Top Keywords On User Dashboard 
-# @router.get("/top-keywords")
-# async def get_top_keywords(request: Request,org_id: int, user_id: int,from_date: str = Query(...),to_date: str = Query(...),):
-#     try:
-#         top_5 = await UserService.get_top_keywords(request, org_id, user_id,from_date,to_date)
-#         return {"org_id": org_id, "top_keywords": top_5}
-#     except Exception as e:
-#         raise HTTPException(status_code=500, detail=str(e))
-#         # print(e)
-#         # return []
         
         
 # #Last Sync On User Dashboard        
@@ -545,15 +433,15 @@ async def save_folder_mapping(payload: FolderMappingRequest, request: Request ):
 #         raise HTTPException(status_code=500, detail=str(e))
 
 
-#--------------Soft Delete and Hard Delete User and all related tables--------------
-@router.post("/deactivate_or_delete_user")
-async def deactivate_or_delete_user(
+#--------------Soft Delete and Hard Delete User and all related tables by System Admin start--------------
+@router.post("/deactivate_or_delete_user_by_system_admin")
+async def deactivate_or_delete_user_by_system_admin(
     request: DeleteUserPayload,
     request_obj: Request 
 ):
     service = UserService
     try:
-        result = await service.deactivate_or_delete_user(request_obj, request.user_id, request.action)
+        result = await service.deactivate_or_delete_user_by_system_admin(request_obj, request.user_id, request.action)
         if not result["success"]:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -574,16 +462,19 @@ async def deactivate_or_delete_user(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to delete user"
         )
+# ------------------Soft Delete and Hard Delete User and all related tables by System Admin end-----------------#
 
-# ---------------Soft Delete and Hard Delete PO for Business Admin-----------------#
-@router.post("/delete_or_deactivate_po_by_business_admin")
-async def delete_or_deactivate_po_by_business_admin(
+
+
+# ---------------Soft Delete and Hard Delete PO for Business Admin or User it self start-----------------#
+@router.post("/delete_or_deactivate_po_by_business_admin_or_user")
+async def delete_or_deactivate_po_by_business_admin_or_user(
     request: DeletePOByBusinessAdminPayload,
     request_obj: Request 
 ):
     service = UserService
     try:
-        result = await service.delete_or_deactivate_po_by_business_admin(request_obj, request.record_id, request.action, request.source, request.record_type)
+        result = await service.delete_or_deactivate_po_by_business_admin_or_user(request_obj, request.record_id, request.action, request.source, request.record_type)
         if not result["success"]:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -599,8 +490,9 @@ async def delete_or_deactivate_po_by_business_admin(
             detail=str(ve)
         )
     except Exception as e:
-        logger.exception(f"Unexpected error deleting Pos {request.user_id}")
+        logger.exception(f"Unexpected error deleting Pos {request.record_id}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to delete POs"
         )
+# -----------------------Soft Delete and Hard Delete PO for Business Admin or User it self end------------------------

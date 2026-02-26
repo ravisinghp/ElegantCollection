@@ -460,7 +460,7 @@ class SharepointRepo(BaseRepository):
                 'MISSING' AS po_status,
 
                 CASE
-                    WHEN pm.sharepoint_po_det_id IS NOT NULL THEN 'SCANNED'
+                    WHEN pm.sharepoint_po_det_id IS NOT NULL THEN 'NORMAL'
                     ELSE 'SYSTEM'
                 END AS source
             FROM sharepoint_po_missing_report pm

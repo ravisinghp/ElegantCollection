@@ -18,6 +18,7 @@ from datetime import datetime, timedelta
 import requests, json, time, os
 from dotenv import load_dotenv
 import asyncio
+from loguru import logger
 
 load_dotenv()
 
@@ -66,6 +67,8 @@ def get_device_code(user_id: int):
         "interval": res.get("interval")
     }
 
+
+# ---------------- POLL OUTLOOK TOKEN ----------------
 @router.get("/outlook/poll")
 async def poll_token(
     user_id: int,
@@ -84,12 +87,14 @@ async def poll_token(
         "isTriggered": True,   # set True to allow polling
         "isFirstLogin": False   # set True to allow polling
     }
+    logger.info(f"user flegs:{user_flags}")
     #user_flags =  {"isTriggered": false, "isFirstLogin": bool}# Implement: returns {"isTriggered": bool, "isFirstLogin": bool}
     if not user_flags.get("isTriggered") and not user_flags.get("isFirstLogin"):
         return {"status": "skipped", "message": "Polling not triggered or not first login."}
 
     # Step 1: Check if token already exists (prevents re-polling)
     token = await repo.get_outlook_token(user_id)
+    logger.info(f"token is:{token}")
     if token and token.access_token and token.refresh_token:
         return {
             "status": "connected",
@@ -100,6 +105,7 @@ async def poll_token(
 
     # Step 2: Get device info from Redis
     device_data = redis_client.get(f"device:{user_id}")
+    logger.info(f"device data:{device_data}")
     if not device_data:
         raise HTTPException(status_code=400, detail="Call /outlook/device-code first")
 
@@ -121,6 +127,7 @@ async def poll_token(
                 },
             ).json()
         )
+        logger.info(f"token reponse:{token_res}")
 
         if "access_token" in token_res:
             access_token = token_res["access_token"]
@@ -140,20 +147,23 @@ async def poll_token(
 
             # Step 5: Save token in DB (insert or update)
             exists = await repo.user_token_exists(user_id)
+            logger.info(f"Status of Exists:{exists}")
             if exists:
-                await repo.update_outlook_token(
+                response = await repo.update_outlook_token(
                     user_id=user_id,
                     access_token=access_token,
                     refresh_token=refresh_token,
                     token_expiry=token_expiry
                 )
+                logger.info(f"response:{response}")
             else:
-                await repo.insert_outlook_token(
+                response = await repo.insert_outlook_token(
                     user_id=user_id,
                     access_token=access_token,
                     refresh_token=refresh_token,
                     token_expiry=token_expiry
                 )
+                logger.info(f"response:{response}")
                 await repo.update_first_login_flag(user_id)  # Marks first login done
 
             # Step 6: Polling stops here — return immediately
@@ -183,9 +193,12 @@ async def outlook_status(
     """Check if user has a valid token"""
     try:
         token = await get_valid_outlook_token(user_id, repo)
+        logger.info(f"token :{token}")
         return {"connected": bool(token)}
-    except Exception:
+    except Exception as e:
+        logger.error(f"Exception :{e}")
         return {"connected": False}
+
 
 
 # ---------------- FETCH EMAILS ----------------
@@ -216,11 +229,13 @@ async def get_emails(
             response = await fetch_and_save_mails_by_folders(
                 token, folders, user_id, from_date, to_date, mails_repo
             )
+            logger.info(f"response after sync:{response}")
             po_det_ids = response.get("extracted_po_ids", [])
             if po_det_ids:
-                await generate_missing_po_report_service(
+                response = await generate_missing_po_report_service(
                     user_id=user_id, po_det_ids=po_det_ids, mails_repo=mails_repo
                 )
+                logger.info(f"response after compare:{response}")
             return {"status": "success"}
 
         elif provider == "google":
@@ -229,8 +244,10 @@ async def get_emails(
             )
 
     except HTTPException as http_exc:
+        logger.error(f"Exception :{http_exc}")
         raise http_exc
     except Exception as e:
+        logger.error(f"Exception:{e}")
         raise HTTPException(status_code=500, detail={"error": str(e)})
 
 
@@ -258,8 +275,10 @@ async def get_emails_folders(
             return await fetch_all_folders(token)
 
     except HTTPException as http_exc:
+        logger.error(f"Exception :{http_exc}")
         raise http_exc
     except Exception as e:
+        logger.error(f"Exception :{e}")
         raise HTTPException(status_code=500, detail={"error": str(e)})
 
 
@@ -272,10 +291,13 @@ async def get_outlook_token(
     """Return stored token for a user"""
     try:
         token = await get_valid_outlook_token(user_id, repo)
+        logger.info(f"token:{token}")
+        
         if not token:
             raise HTTPException(status_code=404, detail="Token not found")
         return {"access_token": token}
     except Exception as e:
+        logger.error(f"Exception :{e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

@@ -55,6 +55,13 @@ class SchedulerRequest(BaseModel):
     minute: int
 
 
+class FetchSchedulerRequest(BaseModel):
+    role_id: int
+   
+   
+class DeleteSchedulerRequest(BaseModel):
+    task_sd_id: int
+
 class DownloadMissingMismatchRequest(BaseModel):
     user_id: int
     role_id: int

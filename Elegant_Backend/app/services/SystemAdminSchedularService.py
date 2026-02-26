@@ -3,7 +3,7 @@ from app.services import usersmailservice
 from app.db.repositories import UserRepo
 import asyncio
 from datetime import date,datetime,time,timedelta
-from fastapi import Request
+from fastapi import Request,HTTPException
 from app.db.repositories.mails import MailsRepository
 #from app.main import app  # import your FastAPI app instance
 from app.api.routes.users import get_valid_outlook_token
@@ -144,7 +144,7 @@ class SchedulerService:
                                 await usersmailservice.generate_missing_po_report_service(
                                     user_id=user_id, po_det_ids=po_det_ids, mails_repo=repo
                                 )
-                            return {"status": "success"}
+                            
                             
                             # #Generate PO missing & mismatch report
                             # await usersmailservice.generate_missing_po_report_service(
@@ -156,7 +156,7 @@ class SchedulerService:
 
                 except Exception as user_err:
                     print(f"User {user_id} failed:", user_err)
-
+            return {"status": "success"}
         except Exception as e:
             print("Scheduler crashed:", e)
 
@@ -181,9 +181,10 @@ class SchedulerService:
             )
  
             if is_duplicate:
-                raise ValueError(
-                    f"Scheduler already exists for {day} at "
-                    f"{schedule_time.strftime('%Y-%m-%d %H:%M')}"
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Scheduler already exists for {day} at "
+                        f"{schedule_time.strftime('%Y-%m-%d %H:%M')}"
                 )
  
         for day in payload.days:
@@ -204,3 +205,33 @@ class SchedulerService:
  
         return True
  
+    #Display all active  Scheduler ON UI
+    async def fetch_all_scheduler(request: Request, role_id: int):
+        try:
+
+            data = await UserRepo.fetch_all_scheduler(
+                request=request,
+                role_id=role_id
+                #user_id=user_id
+            )
+
+            return data if data else []
+
+        except Exception as e:
+            print("Service Error:", e)
+            raise e
+        
+    async def delete_scheduler(request: Request, task_sd_id: int):
+        try:
+
+            data = await UserRepo.delete_scheduler(
+                request=request,
+                task_sd_id=task_sd_id
+                #user_id=user_id
+            )
+
+            return data if data else []
+
+        except Exception as e:
+            print("Service Error:", e)
+            raise e

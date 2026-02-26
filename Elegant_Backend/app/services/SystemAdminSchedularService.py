@@ -8,6 +8,7 @@ from app.db.repositories.mails import MailsRepository
 #from app.main import app  # import your FastAPI app instance
 from app.api.routes.users import get_valid_outlook_token
 from asyncmy.cursors import DictCursor
+from loguru import logger
 
 WEEKDAY_MAP = {
     "mon": 0, "monday": 0,
@@ -139,26 +140,22 @@ class SchedulerService:
                                 to_date=to_date,
                                 mails_repo=repo
                             )
+                            logger.info(f"User {user_id} - Emails fetched and saved: {response}")
+
                             po_det_ids = response.get("extracted_po_ids", [])
                             if po_det_ids:
-                                await usersmailservice.generate_missing_po_report_service(
+                                await usersmailservice.compare_scanned_and_system_pos(
                                     user_id=user_id, po_det_ids=po_det_ids, mails_repo=repo
                                 )
-                            
-                            
-                            # #Generate PO missing & mismatch report
-                            # await usersmailservice.generate_missing_po_report_service(
-                            #     repo=repo,
-                            #     user_id=user_id
-                            # )
-
-                    print(f"Done user {user_id}")
+                            logger.info(f"User {user_id} - PO comparison completed for PO IDs: {po_det_ids}")               
 
                 except Exception as user_err:
-                    print(f"User {user_id} failed:", user_err)
+                    logger.exception(f"Error processing user {user_id} in scheduler job")
+
             return {"status": "success"}
+        
         except Exception as e:
-            print("Scheduler crashed:", e)
+            logger.exception(f"Scheduler crashed: {e}")
 
     
       

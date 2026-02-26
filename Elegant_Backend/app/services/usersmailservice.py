@@ -2130,7 +2130,7 @@ def chunk(data, size):
         yield data[i:i + size]
 
 
-async def generate_missing_po_report_service(
+async def compare_scanned_and_system_pos(
     user_id: int,
     po_det_ids: list[int],
     mails_repo: "MailsRepository"
@@ -2275,7 +2275,7 @@ async def generate_missing_po_report_service(
         }
     except Exception as e:
         logger.exception(
-            f"Error in generate_missing_po_report_service | user_id={user_id}"
+            f"Error in compare_scanned_and_system_pos | user_id={user_id}"
         )
 
         return {

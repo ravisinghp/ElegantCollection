@@ -11,7 +11,7 @@ from app.services.usersmailservice import (
     fetch_all_folders,
     fetch_all_labels,
     fetch_and_save_mails_by_labels,
-    generate_missing_po_report_service,
+    compare_scanned_and_system_pos,
     get_valid_outlook_token
 )
 from datetime import datetime, timedelta
@@ -232,7 +232,7 @@ async def get_emails(
             logger.info(f"response after sync:{response}")
             po_det_ids = response.get("extracted_po_ids", [])
             if po_det_ids:
-                response = await generate_missing_po_report_service(
+                response = await compare_scanned_and_system_pos(
                     user_id=user_id, po_det_ids=po_det_ids, mails_repo=mails_repo
                 )
                 logger.info(f"response after compare:{response}")

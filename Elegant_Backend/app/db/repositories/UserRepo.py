@@ -1405,8 +1405,8 @@ async def get_all_active_schedule(request):
     async with request.app.state.pool.acquire() as conn:
         async with conn.cursor(DictCursor) as cursor:
             await cursor.execute(query)
-            return await cursor.fetchone()
- 
+            return await cursor.fetchall()   
+        
 
 async def get_schedule_by_id(request, task_id):
     query = """
@@ -1423,6 +1423,7 @@ async def get_schedule_by_id(request, task_id):
         async with conn.cursor(DictCursor) as cursor:
             await cursor.execute(query, (task_id,))
             return await cursor.fetchone()
+       
        
 async def update_schedule_time(request, task_id, next_datetime):
     query = """

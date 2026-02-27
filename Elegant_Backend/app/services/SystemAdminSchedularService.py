@@ -54,10 +54,10 @@ class SchedulerService:
     
     # ----------------bridge between APScheduler and async code-----------------
     @staticmethod 
-    def job_wrapper():
+    def job_wrapper(task_id):
         fake_request = create_scheduler_request(SchedulerService.app)
         asyncio.run_coroutine_threadsafe(
-            SchedulerService.run_job(fake_request),
+            SchedulerService.run_job(fake_request,task_id),
             SchedulerService.loop
         )
 
@@ -67,35 +67,41 @@ class SchedulerService:
         scheduler.remove_all_jobs() #remove old jobs
 
         fake_request = create_scheduler_request(SchedulerService.app)
-        schedule = await UserRepo.get_active_schedule(fake_request) #getting an active schedule
+        schedules = await UserRepo.get_all_active_schedule(fake_request) #getting an active schedule
 
         # VERY IMPORTANT CHECK
-        if not schedule:
+        if not schedules:
             print("No active schedule found. Scheduler not started.")
             return
         
         #add the job in cron
-        scheduler.add_job(
-            SchedulerService.job_wrapper,
-            trigger="cron",
-            day_of_week=schedule["day"],
-            hour=schedule["time"].hour,
-            minute=schedule["time"].minute,
-            id="mail_scheduler",
-            replace_existing=True
-        )
+        for schedule in schedules:
+            scheduler.add_job(
+                SchedulerService.job_wrapper,
+                trigger="cron",
+                day_of_week=schedule["day"],
+                hour=schedule["time"].hour,
+                minute=schedule["time"].minute,
+                id=f"mail_scheduler_{schedule['task_sd_id']}",
+                replace_existing=True,
+                args=[schedule["task_sd_id"]]
+            )
 
-        if not scheduler.running:
-            scheduler.start()
+            if not scheduler.running:
+                scheduler.start()
 
-        print("Scheduler running automatically")
+            print(f"{len(schedules)}Scheduler running automatically")
      
     #-------------------Scheduler is running-------------------    
-    async def run_job(request):
-        print("Scheduler triggered")
+    async def run_job(request,task_id):
+        print(f"Scheduler triggered for task{task_id}")
 
         try:
-            schedule = await UserRepo.get_active_schedule(request)
+            schedule = await UserRepo.get_schedule_by_id(request, task_id)
+
+            if not schedule:
+                logger.error(f"No schedule found for task_id {task_id}")
+                return
 
             schedule_datetime = schedule["time"]  # TIMESTAMP from DB
 
@@ -150,8 +156,15 @@ class SchedulerService:
                             logger.info(f"User {user_id} - PO comparison completed for PO IDs: {po_det_ids}")               
 
                 except Exception as user_err:
-                    logger.exception(f"Error processing user {user_id} in scheduler job")
+                    logger.exception(f"Error processing user {user_id} in scheduler job : {user_err}")
+                    
+            next_run_datetime = schedule_datetime + timedelta(days=7)
 
+            await UserRepo.update_schedule_time(
+                request,
+                task_id,
+                next_run_datetime
+            )    
             return {"status": "success"}
         
         except Exception as e:
@@ -179,7 +192,7 @@ class SchedulerService:
  
             if is_duplicate:
                 raise HTTPException(
-                    status_code=400,
+                    status_code="duplicates",
                     detail=f"Scheduler already exists for {day} at "
                         f"{schedule_time.strftime('%Y-%m-%d %H:%M')}"
                 )

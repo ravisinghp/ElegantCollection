@@ -193,7 +193,7 @@ async def outlook_status(
     """Check if user has a valid token"""
     try:
         token = await get_valid_outlook_token(user_id, repo)
-        logger.info(f"token :{token}")
+        # logger.info(f"token :{token}")
         return {"connected": bool(token)}
     except Exception as e:
         logger.error(f"Exception :{e}")
@@ -291,7 +291,7 @@ async def get_outlook_token(
     """Return stored token for a user"""
     try:
         token = await get_valid_outlook_token(user_id, repo)
-        logger.info(f"token:{token}")
+        # logger.info(f"token:{token}")
         
         if not token:
             raise HTTPException(status_code=404, detail="Token not found")

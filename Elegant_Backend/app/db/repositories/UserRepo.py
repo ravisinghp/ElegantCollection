@@ -692,23 +692,25 @@ async def get_vendors_business_admin(request):
         except Exception as e:
             raise Exception(f"DB error while fetching vendors: {str(e)}")
 
-        
+
+# -----------------fetch all missing pos------------------------------
 async def fetch_missing_po_data(request: Request, frontendRequest):
 
     base_query = """
         SELECT
-            pm.po_missing_id,
-            pm.po_det_id,
-            pm.system_po_id,
-            COALESCE(pd.po_number, sp.po_number) AS po_number,
-            COALESCE(pd.po_date, sp.po_date) AS po_date,
-            COALESCE(pd.vendor_number, sp.vendor_number) AS vendor_code,
-            COALESCE(pd.customer_name, sp.customer_name) AS customer_name,
-            COALESCE(pd.created_on, sp.created_on) AS created_on,
-            um.user_name AS username,
-            md.date_time AS emailDate,
-            md.mail_from AS emailFrom,
-            md.subject,
+            pd.mail_dtl_id,
+            MAX(pm.po_missing_id) AS po_missing_id,
+            MAX(pm.po_det_id) AS po_det_id,
+            MAX(pm.system_po_id) AS system_po_id,
+            MAX(COALESCE(pd.po_number, sp.po_number)) AS po_number,
+            MAX(COALESCE(pd.po_date, sp.po_date)) AS po_date,
+            MAX(COALESCE(pd.vendor_number, sp.vendor_number)) AS vendor_code,
+            MAX(COALESCE(pd.customer_name, sp.customer_name)) AS customer_name,
+            MAX(COALESCE(pd.created_on, sp.created_on)) AS created_on,
+            MAX(um.user_name) AS username,
+            MAX(md.date_time) AS emailDate,
+            MAX(md.mail_from) AS emailFrom,
+            MAX(md.subject) AS subject,
             'MISSING' AS po_status,
             'email' AS source
         FROM po_missing_report pm
@@ -721,12 +723,11 @@ async def fetch_missing_po_data(request: Request, frontendRequest):
 
     params = []
 
-    # Apply condition only when user_id == 1
     if frontendRequest.role_id == 1:
         base_query += " AND pm.user_id = %s"
         params.append(frontendRequest.user_id)
 
-    base_query += " ORDER BY pm.po_missing_id DESC"
+    base_query += " GROUP BY pd.mail_dtl_id ORDER BY po_missing_id DESC"
 
     async with request.app.state.pool.acquire() as conn:
         async with conn.cursor() as cursor:
@@ -736,32 +737,32 @@ async def fetch_missing_po_data(request: Request, frontendRequest):
 
     return [dict(zip(cols, r)) for r in rows]
         
-        
+
+# ---------------fetch all mismatched pos-------------------------
 async def fetch_mismatch_po_data(request: Request, frontendRequest):
+
     base_query = """
         SELECT
-            mm.po_mismatch_id,
-            mm.po_det_id,
-            mm.system_po_id,
-            pd.po_number,
-            pd.po_date,
-            pd.vendor_number AS vendor_code,
-            pd.customer_name,
-            um.user_name AS username,
-            mm.mismatch_attribute,
-            mm.scanned_value,
-            mm.system_value,
-            mm.created_on,
-            md.date_time AS emailDate,
-            md.mail_from AS emailFrom,
-            md.subject,
+            pd.mail_dtl_id,
+            MAX(mm.po_mismatch_id) AS po_mismatch_id,
+            MAX(mm.po_det_id) AS po_det_id,
+            MAX(pd.po_number) AS po_number,
+            MAX(pd.po_date) AS po_date,
+            MAX(pd.vendor_number) AS vendor_code,
+            MAX(pd.customer_name) AS customer_name,
+            GROUP_CONCAT(mm.mismatch_attribute) AS mismatch_attributes,
+            GROUP_CONCAT(mm.scanned_value) AS scanned_values,
+            GROUP_CONCAT(mm.system_value) AS system_values,
+            MAX(mm.created_on) AS created_on,
+            MAX(um.user_name) AS username,
+            MAX(md.date_time) AS emailDate,
+            MAX(md.mail_from) AS emailFrom,
+            MAX(md.subject) AS subject,
+            MAX(mm.mismatch_attribute) AS mismatch_attribute,
             'MISMATCH' AS po_status,
             'email' AS source
         FROM po_mismatch_report mm
-        LEFT JOIN po_details pd 
-            ON mm.po_det_id = pd.po_det_id
-        LEFT JOIN system_po_details sp
-            ON mm.system_po_id = sp.system_po_id
+        LEFT JOIN po_details pd ON mm.po_det_id = pd.po_det_id
         LEFT JOIN users_master um ON mm.user_id = um.user_id
         LEFT JOIN mail_details md ON md.mail_dtl_id = pd.mail_dtl_id
         WHERE mm.active = 1
@@ -773,7 +774,7 @@ async def fetch_mismatch_po_data(request: Request, frontendRequest):
         base_query += " AND mm.user_id = %s"
         params.append(frontendRequest.user_id)
 
-    base_query += " ORDER BY mm.po_mismatch_id DESC"
+    base_query += " GROUP BY pd.mail_dtl_id ORDER BY po_mismatch_id DESC"
 
     async with request.app.state.pool.acquire() as conn:
         async with conn.cursor() as cursor:
@@ -782,44 +783,62 @@ async def fetch_mismatch_po_data(request: Request, frontendRequest):
             rows = await cursor.fetchall()
 
     return [dict(zip(cols, r)) for r in rows]
-        
 
+
+# ---------------fetch all matched pos-----------------------
 async def fetch_matched_po_data(request: Request, frontendRequest):
 
-    base_query = """            
-            SELECT pd.*,
+    base_query = """
+        SELECT
+            pd.mail_dtl_id,
+            pd.po_det_id,
+            pd.po_number,
+            pd.po_date,
+            pd.vendor_number AS vendor_code,
+            pd.customer_name,
+            pd.created_on,
             um.user_name AS username,
             md.date_time AS emailDate,
             md.mail_from AS emailFrom,
             md.subject,
             'normal' AS po_status,
             'email' AS source
-            FROM po_details pd
-            INNER JOIN system_po_details sp
-                ON pd.po_number <=> sp.po_number
-                AND pd.customer_name <=> sp.customer_name
-                AND pd.vendor_number <=> sp.vendor_number
-                AND pd.po_date <=> sp.po_date
-                AND pd.delivery_date <=> sp.delivery_date
-                AND pd.cancel_date <=> sp.cancel_date
-                AND pd.ec_style_number <=> sp.ec_style_number
-                AND pd.customer_style_number <=> sp.customer_style_number
-                AND pd.quantity <=> sp.quantity
-                AND pd.gold_karat <=> sp.gold_karat
-                AND pd.color <=> sp.color
-                AND pd.description <=> sp.description
-                AND pd.gold_lock <=> sp.gold_lock
-                LEFT JOIN mail_details md ON md.mail_dtl_id = pd.mail_dtl_id 
-                LEFT JOIN users_master um ON um.user_id = pd.user_id
-            WHERE pd.active = 1
+        FROM po_details pd
+        JOIN (
+            SELECT mail_dtl_id, MAX(po_det_id) AS latest_po_det_id
+            FROM po_details
+            WHERE active = 1
+            GROUP BY mail_dtl_id
+        ) latest ON latest.latest_po_det_id = pd.po_det_id
+        LEFT JOIN users_master um ON um.user_id = pd.user_id
+        LEFT JOIN mail_details md ON md.mail_dtl_id = pd.mail_dtl_id
+        WHERE pd.active = 1
+        AND EXISTS (
+            SELECT 1
+            FROM system_po_details sp
+            WHERE pd.po_number <=> sp.po_number
+            AND pd.customer_name <=> sp.customer_name
+            AND pd.vendor_number <=> sp.vendor_number
+            AND pd.po_date <=> sp.po_date
+            AND pd.delivery_date <=> sp.delivery_date
+            AND pd.cancel_date <=> sp.cancel_date
+            AND pd.ec_style_number <=> sp.ec_style_number
+            AND pd.customer_style_number <=> sp.customer_style_number
+            AND pd.quantity <=> sp.quantity
+            AND pd.gold_karat <=> sp.gold_karat
+            AND pd.color <=> sp.color
+            AND pd.description <=> sp.description
+            AND pd.gold_lock <=> sp.gold_lock
+        )
     """
 
     params = []
 
-    # Apply user filter only when user_id == 1
     if frontendRequest.role_id == 1:
         base_query += " AND pd.user_id = %s"
         params.append(frontendRequest.user_id)
+
+    base_query += " ORDER BY pd.po_det_id DESC"
 
     async with request.app.state.pool.acquire() as conn:
         async with conn.cursor() as cursor:
@@ -828,7 +847,7 @@ async def fetch_matched_po_data(request: Request, frontendRequest):
             rows = await cursor.fetchall()
 
     return [dict(zip(cols, r)) for r in rows]
-        
+
 
 #for schedular we are getting all users 
 async def get_active_users(request: Request):
@@ -1370,9 +1389,9 @@ async def delete_scheduler(request: Request, task_sd_id: int):
         print("Repository Error:", e)
         raise
 
-    
+
 #---------------------Get Active Schedule From task_sd_master_table-------------
-async def get_active_schedule(request):
+async def get_all_active_schedule(request):
     query = """
         SELECT
             task_sd_id,
@@ -1381,13 +1400,41 @@ async def get_active_schedule(request):
         FROM sd_task_master_table
         WHERE is_active = 1
         ORDER BY created_on DESC
-        LIMIT 1
     """
 
     async with request.app.state.pool.acquire() as conn:
         async with conn.cursor(DictCursor) as cursor:
             await cursor.execute(query)
             return await cursor.fetchone()
+ 
+
+async def get_schedule_by_id(request, task_id):
+    query = """
+        SELECT
+            task_sd_id,
+            day,
+            time
+        FROM sd_task_master_table
+        WHERE task_sd_id = %s
+          AND is_active = 1
+    """
+ 
+    async with request.app.state.pool.acquire() as conn:
+        async with conn.cursor(DictCursor) as cursor:
+            await cursor.execute(query, (task_id,))
+            return await cursor.fetchone()
+       
+async def update_schedule_time(request, task_id, next_datetime):
+    query = """
+        UPDATE sd_task_master_table
+        SET time = %s
+        WHERE task_sd_id = %s
+    """
+ 
+    async with request.app.state.pool.acquire() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(query, (next_datetime, task_id))
+            await conn.commit()
  
 
 #--------------------Get All Active Users with refresh Token------------           

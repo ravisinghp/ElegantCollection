@@ -66,14 +66,15 @@ try:
 except Exception:
     docx = None  # type: ignore
 
-# this code is used for outlook
-# def get_auth_url():
-#     return (
-#         f"https://login.microsoftonline.com/{TENANT_ID}/oauth2/v2.0/authorize?"
-#         f"client_id={CLIENT_ID}&response_type=code&redirect_uri={REDIRECT_URI}"
-#         f"&response_mode=query&scope=offline_access%20Mail.Read%20Mail.ReadWrite"
-#         f"&prompt=login"   # ðŸ”‘ This forces login screen every time
-#     )
+
+#------------------Block domain------------------
+BLOCKED_DOMAINS = {
+    domain.strip().lower()
+    for domain in os.getenv("BLOCKED_MAIL_DOMAINS", "").split(",")
+    if domain.strip()
+}
+#------------------Block domain------------------
+
 
 def get_auth_url(provider: str, user_id: int):
 
@@ -88,13 +89,7 @@ def get_auth_url(provider: str, user_id: int):
       
     if provider == "outlook":
         return (
-            # f"https://login.microsoftonline.com/{TENANT_ID}/oauth2/v2.0/authorize?"
-            # f"client_id={CLIENT_ID}&response_type=code&redirect_uri={REDIRECT_URI}"
-            # # f"&response_mode=query&scope=offline_access%20Mail.Read%20Mail.ReadWrite%20Calendars.Read"
-            # f"&response_mode=query&scope=offline_access%20Mail.Read"
-            # f"&prompt=login"   # ðŸ”‘ This forces login screen every time
-
-             f"https://login.microsoftonline.com/{TENANT_ID}/oauth2/v2.0/authorize?"
+            f"https://login.microsoftonline.com/{TENANT_ID}/oauth2/v2.0/authorize?"
             f"client_id={CLIENT_ID}"
             f"&response_type=code"
             f"&redirect_uri={REDIRECT_URI}"
@@ -117,35 +112,7 @@ def get_auth_url(provider: str, user_id: int):
         raise ValueError("Invalid provider")
 
 
-# async def exchange_code_for_token(code: str):
-#     url = f"https://login.microsoftonline.com/{TENANT_ID}/oauth2/v2.0/token"
-#     data = {
-#         'client_id': CLIENT_ID,
-#         # 'scope': 'Mail.Read Mail.ReadWrite offline_access Calendars.Read Calendars.ReadWrite',
-#         'scope': 'Mail.Read Mail.ReadWrite',
-#         'code': code,
-#         'redirect_uri': REDIRECT_URI,
-#         'grant_type': 'authorization_code',
-#         'client_secret': CLIENT_SECRET
-#     }
-#     timeout = httpx.Timeout(connect=10.0, read=30.0, write=30.0, pool=30.0)
-#     async with httpx.AsyncClient(timeout=timeout) as client:
-#         # response = await client.post(url, data=data)
-#         headers = {
-#             "Content-Type": "application/x-www-form-urlencoded"
-#         }
-#         response = await client.post(url, data=data, headers=headers)
-
-#         token_json = response.json()
-    
-#     access_token = token_json.get("access_token")
-#     if access_token:
-#         # Redirect to frontend with token in query (or better, store in cookie or session)
-#         return f"{success_url}?mail_token={access_token}"
-#         # return f"http://localhost:3000//dashboard/user?mail_token={access_token}" # use in local system
-#         #return f"http://139.144.4.191:3000//dashboard/user?mail_token={access_token}" # use in server
-#     return {"error": "Token exchange failed"}
-
+# ------------------- token exchange -----------------------
 async def exchange_code_for_token(code: str):
     url = f"https://login.microsoftonline.com/{TENANT_ID}/oauth2/v2.0/token"
     data = {
@@ -171,22 +138,6 @@ async def exchange_code_for_token(code: str):
         "expires_in": token_json.get("expires_in"),
         "url": f"{success_url}?mail_token={token_json.get('access_token')}"
     }
-
-
-    
-    access_token = token_json.get("access_token")
-    if access_token:
-        # Redirect to frontend with token in query (or better, store in cookie or session)
-        # 1. Build the destination URL (your React route)
-        # This points to: http://localhost:5173//dashboard/user?mail_token=...
-        destination_url = f"{success_url}?mail_token={access_token}"
-        
-        # 2. Force the browser to go there
-        # This loads your React app, and React Router will take over from there.
-        return RedirectResponse(url=destination_url, status_code=303)
-        # return f"http://localhost:3000//dashboard/user?mail_token={access_token}" # use in local system
-        #return f"http://139.144.4.191:3000//dashboard/user?mail_token={access_token}" # use in server
-    return {"error": "Token exchange failed"}
     
     
 # this code is used to generate token for gmail(Google api)
@@ -267,29 +218,6 @@ async def refresh_outlook_access_token(refresh_token: str) -> dict:
 
 
 # mansi --------------------------------------------------------------------------------------------------------
-# async def get_valid_outlook_token(
-#     user_id: int,
-#     repo: MailsRepository,
-# ) -> str:
-#     token = await repo.get_outlook_token(user_id)
-
-#     if token.token_expiry > datetime.utcnow() + timedelta(minutes=2):
-#         return token.access_token
-
-#     new_tokens = await refresh_outlook_access_token(token.refresh_token)
-
-#     new_expiry = datetime.utcnow() + timedelta(
-#         seconds=int(new_tokens["expires_in"])
-#     )
-
-#     await repo.update_outlook_token(
-#         user_id=user_id,
-#         access_token=new_tokens["access_token"],
-#         refresh_token=new_tokens.get("refresh_token", token.refresh_token),
-#         token_expiry=new_expiry,
-#     )
-
-#     return new_tokens["access_token"]
 async def get_valid_outlook_token(
     user_id: int,
     repo: MailsRepository,
@@ -1177,6 +1105,17 @@ async def fetch_and_save_mails_by_folders(
                 if await mails_repo.mail_exists(graph_mail_id, user_id):
                     continue
 
+                # ------------- CHECK DOMAIN FIRST -------------
+                from_email = (msg.get('from') or {}).get('emailAddress', {}).get('address')
+
+                if from_email and "@" in from_email:
+                    sender_domain = from_email.split("@")[-1].lower()
+
+                    if sender_domain in BLOCKED_DOMAINS:
+                        logger.info(f"Skipping mail from blocked domain: {from_email}")
+                        continue
+
+                #-----------process body-----------
                 subject = msg.get('subject', '')
                 body_obj = msg.get('body') or {}
                 body_content = body_obj.get('content') or msg.get('bodyPreview', '')
@@ -2008,8 +1947,8 @@ async def fetch_and_save_past_events_google(access_token: str, user_id: int, org
 
     return results
 
-# -------------------------- data comparison logic start -------------------------- #
 
+# -------------------------- data comparison logic start -------------------------- #
 FIELDS_TO_COMPARE = [
     "customer_name",
     "vendor_number",
@@ -2025,6 +1964,7 @@ FIELDS_TO_COMPARE = [
     "quantity",
     "description",
 ]
+
 
 def make_json_safe(obj):
     if isinstance(obj, (date, datetime)):
@@ -2086,8 +2026,9 @@ You are an expert PO field comparison engine.
 Compare ONLY the following fields:
 {FIELDS_TO_COMPARE}
 
-Your goal is to detect **real business mismatches**.
-DO NOT report differences caused by minor spelling mistakes, abbreviations, word order, or formatting.
+Your goal is to detect real business mismatches.
+DO NOT report differences caused by minor spelling mistakes,
+abbreviations, word order, or formatting.
 
 IMPORTANT:
 - Missing vs present values are ALREADY handled by backend logic.
@@ -2136,117 +2077,128 @@ async def compare_scanned_and_system_pos(
     mails_repo: "MailsRepository"
 ):
     try:
-        # -------------------- Fetch data -------------------- #
+        # -------------------- Fetch scanned POs -------------------- #
         scanned_pos = await mails_repo.get_po_details_by_ids(po_det_ids)
 
         if not scanned_pos:
-            return {"status": "success", "message": "No scanned POs found for comparison"}
+            return {
+                "status": "success",
+                "message": "No scanned POs found for comparison"
+            }
+
+        scanned_pos = [
+            {k: make_json_safe(v) for k, v in po.items()}
+            for po in scanned_pos
+        ]
 
         scanned_po_numbers = list({
             po["po_number"] for po in scanned_pos if po.get("po_number")
         })
 
+        # -------------------- Fetch system POs -------------------- #
         system_pos = await mails_repo.get_system_pos_by_po_numbers(scanned_po_numbers)
 
-        scanned_pos = [{k: make_json_safe(v) for k, v in po.items()} for po in scanned_pos]
-        system_pos = [{k: make_json_safe(v) for k, v in po.items()} for po in system_pos]
-        logger.info(f"Scanned PO s:{scanned_pos}")
-        logger.info(f"system POs:{system_pos}")
+        system_pos = [
+            {k: make_json_safe(v) for k, v in po.items()}
+            for po in system_pos
+        ]
 
+        # -------------------- Backend Matching -------------------- #
+        # Match strictly on po number + customer name
+
+        system_lookup = {
+            (sp.get("po_number"), sp.get("customer_name")): sp
+            for sp in system_pos
+        }
+
+        matched_pairs = []
         matched_scanned_ids = set()
-        matched_system_ids = set()
 
-        # -------------------- Matching & comparison -------------------- #
-        for scanned_batch in chunk(scanned_pos, 25):
+        for scanned in scanned_pos:
 
-            matches = await llm_batch_match(scanned_batch, system_pos)
-            matched_pairs = []
+            key = (scanned.get("po_number"), scanned.get("customer_name"))
+            system = system_lookup.get(key)
 
-            for m in matches:
-                scanned = next(
-                    (p for p in scanned_batch if p["po_det_id"] == m["scanned_po_det_id"]),
-                    None
-                )
-                if not scanned or not m["system_po_id"] or m["confidence"] < 0.85:
-                    continue
+            if not system:
+                continue
 
-                if m["system_po_id"] in matched_system_ids:
-                    continue
+            matched_scanned_ids.add(scanned["po_det_id"])
 
-                system = next(
-                    (p for p in system_pos if p["system_po_id"] == m["system_po_id"]),
-                    None
-                )
-                if not system:
-                    continue
+            matched_pairs.append({
+                "po_det_id": scanned["po_det_id"],
+                "system_po_id": system["system_po_id"],
+                "scanned": {f: scanned.get(f) for f in FIELDS_TO_COMPARE},
+                "system": {f: system.get(f) for f in FIELDS_TO_COMPARE}
+            })
 
-                matched_scanned_ids.add(scanned["po_det_id"])
-                matched_system_ids.add(system["system_po_id"])
+        # -------------------- FIELD CHECKING -------------------- #
 
-                matched_pairs.append({
-                    "po_det_id": scanned["po_det_id"],
-                    "system_po_id": system["system_po_id"],
-                    "scanned": {f: scanned.get(f) for f in FIELDS_TO_COMPARE},
-                    "system": {f: system.get(f) for f in FIELDS_TO_COMPARE}
-                })
+        for pair in matched_pairs:
 
-            # ======================================================================
-            # Rule: If PO + customer matched → ALL fields must exist in scanned data
-            # ======================================================================
-            for pair in matched_pairs:
-                for field in FIELDS_TO_COMPARE:
-                    scanned_val = pair["scanned"].get(field)
-                    system_val = pair["system"].get(field)
+            po_has_issue = False
 
-                    if system_val not in (None, "") and scanned_val in (None, ""):
-                        exists = await mails_repo.mismatch_exists(
-                            user_id=user_id,
-                            po_det_id=pair["po_det_id"],
-                            system_po_id=pair["system_po_id"],
-                            mismatch_attribute=field,
-                            scanned_value="",
-                            system_value=str(system_val)
-                        )
+            # -------- Missing field check -------- #
+            for field in FIELDS_TO_COMPARE:
 
-                        if not exists:
-                            await mails_repo.insert_mismatch(
-                                po_det_id=pair["po_det_id"],
-                                user_id=user_id,
-                                system_po_id=pair["system_po_id"],
-                                field=field,
-                                system_value=str(system_val),
-                                scanned_value="",
-                                comment=f"{field} missing in scanned data"
-                            )
-            # ======================================================================
+                scanned_val = pair["scanned"].get(field)
+                system_val = pair["system"].get(field)
 
-            # -------------------- LLM value comparison (only when both present) -------------------- #
-            if matched_pairs:
-                mismatches = await llm_batch_compare(matched_pairs)
+                if system_val not in (None, "") and scanned_val in (None, ""):
+                    po_has_issue = True
 
-                for mm in mismatches:
                     exists = await mails_repo.mismatch_exists(
                         user_id=user_id,
-                        po_det_id=mm["po_det_id"],
-                        system_po_id=mm["system_po_id"],
-                        mismatch_attribute=mm["field"],
-                        scanned_value=str(mm["scanned_value"]),
-                        system_value=str(mm["system_value"])
+                        po_det_id=pair["po_det_id"],
+                        system_po_id=pair["system_po_id"],
+                        mismatch_attribute=field,
+                        scanned_value="",
+                        system_value=str(system_val)
                     )
 
                     if not exists:
                         await mails_repo.insert_mismatch(
-                            po_det_id=mm["po_det_id"],
+                            po_det_id=pair["po_det_id"],
                             user_id=user_id,
-                            system_po_id=mm["system_po_id"],
-                            field=mm["field"],
-                            system_value=str(mm["system_value"]),
-                            scanned_value=str(mm["scanned_value"]),
-                            comment=f"{mm['field']} mismatch"
+                            system_po_id=pair["system_po_id"],
+                            field=field,
+                            system_value=str(system_val),
+                            scanned_value="",
+                            comment=f"{field} missing in scanned data"
                         )
 
-        # -------------------- Missing scanned POs -------------------- #
+            # -------- LLM Value Comparison (Only if no missing fields) -------- #
+            if not po_has_issue:
+
+                mismatches = await llm_batch_compare([pair])
+
+                if mismatches:
+
+                    for mm in mismatches:
+
+                        exists = await mails_repo.mismatch_exists(
+                            user_id=user_id,
+                            po_det_id=mm["po_det_id"],
+                            system_po_id=mm["system_po_id"],
+                            mismatch_attribute=mm["field"],
+                            scanned_value=str(mm["scanned_value"]),
+                            system_value=str(mm["system_value"])
+                        )
+
+                        if not exists:
+                            await mails_repo.insert_mismatch(
+                                po_det_id=mm["po_det_id"],
+                                user_id=user_id,
+                                system_po_id=mm["system_po_id"],
+                                field=mm["field"],
+                                system_value=str(mm["system_value"]),
+                                scanned_value=str(mm["scanned_value"]),
+                                comment=f"{mm['field']} mismatch"
+                            )
+
+        # -------------------- PO NOT FOUND IN SYSTEM -------------------- #
+
         for po in scanned_pos:
+
             if po["po_det_id"] not in matched_scanned_ids:
 
                 exists = await mails_repo.po_missing_exists(
@@ -2266,13 +2218,14 @@ async def compare_scanned_and_system_pos(
                         attribute="po_missing",
                         system_value="",
                         scanned_value=po.get("po_number"),
-                        comment="PO not found in system (or low confidence match)"
+                        comment="PO not found in system"
                     )
 
         return {
             "status": "success",
-            "message": "PO comparison completed: missing & mismatches processed successfully"
+            "message": "PO comparison completed successfully"
         }
+
     except Exception as e:
         logger.exception(
             f"Error in compare_scanned_and_system_pos | user_id={user_id}"

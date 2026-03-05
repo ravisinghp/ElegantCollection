@@ -1159,7 +1159,7 @@ async def fetch_and_save_mails_by_folders(
                 )
                     logger.info(f"Mail id:{mail_id}")
                 except Exception as e:
-                    logger.error("DB insert failed for mail %s: %s", graph_mail_id, e)
+                    logger.error(f"DB insert failed: {str(e)}")
                     continue
 
                 saved_attachments = []

@@ -1287,7 +1287,7 @@ async def check_duplicate_schedule(request, day: str, schedule_time):
         SELECT 1
         FROM sd_task_master_table
         WHERE day = %s
-        AND time = %s
+        AND next_scheduler_time = %s
         AND is_active = 1
         LIMIT 1
     """
@@ -1312,7 +1312,7 @@ async def save_schedule(
 
     query = """
         INSERT INTO sd_task_master_table
-        (day, time, created_by)
+        (day, next_scheduler_time, created_by)
         VALUES (%s, %s, %s)
     """
 
@@ -1342,7 +1342,8 @@ async def fetch_all_scheduler(request: Request, role_id: int):
             SELECT
                 task_sd_id,
                 day,
-                time,
+                previous_scheduler_time,
+                next_scheduler_time,
                 created_on
             FROM sd_task_master_table
             WHERE is_active = 1
@@ -1396,7 +1397,7 @@ async def get_all_active_schedule(request):
         SELECT
             task_sd_id,
             day,
-            time
+            next_scheduler_time
         FROM sd_task_master_table
         WHERE is_active = 1
         ORDER BY created_on DESC
@@ -1413,7 +1414,7 @@ async def get_schedule_by_id(request, task_id):
         SELECT
             task_sd_id,
             day,
-            time
+            next_scheduler_time
         FROM sd_task_master_table
         WHERE task_sd_id = %s
           AND is_active = 1
@@ -1425,16 +1426,19 @@ async def get_schedule_by_id(request, task_id):
             return await cursor.fetchone()
        
        
-async def update_schedule_time(request, task_id, next_datetime):
+async def update_pre_next_schedule_time(request, task_id):
     query = """
         UPDATE sd_task_master_table
-        SET time = %s
+        SET
+            previous_scheduler_time = next_scheduler_time,
+            next_scheduler_time = DATE_ADD(next_scheduler_time, INTERVAL 7 DAY)
         WHERE task_sd_id = %s
+        AND is_active = 1
     """
- 
+
     async with request.app.state.pool.acquire() as conn:
         async with conn.cursor() as cursor:
-            await cursor.execute(query, (next_datetime, task_id))
+            await cursor.execute(query, (task_id,))
             await conn.commit()
  
 
@@ -1728,13 +1732,13 @@ async def soft_delete_po_by_business_admin_or_user(
                         (mail_dtl_id,)
                     )
 
-                else:  # 🔵 SHAREPOINT FLOW
+                else:  # SHAREPOINT FLOW
                     detail_table = "sharepoint_po_details"
                     detail_col = "sharepoint_po_det_id"
                     missing_table = "sharepoint_po_missing_report"
                     mismatch_table = "sharepoint_po_mismatch_report"
 
-                    # 1️⃣ Get sharepoint_file_id (PARENT ID)
+                    # Get sharepoint_file_id (PARENT ID)
                     await cursor.execute(
                         f"SELECT sharepoint_file_id FROM {detail_table} WHERE {detail_col} = %s",
                         (detail_id,)
@@ -1745,13 +1749,13 @@ async def soft_delete_po_by_business_admin_or_user(
                     if not sharepoint_file_id:
                         raise Exception("sharepoint_file_id not found")
 
-                    # 2️⃣ Inactivate ALL related details
+                    # Inactivate ALL related details
                     await cursor.execute(
                         f"UPDATE {detail_table} SET active = 0 WHERE sharepoint_file_id = %s",
                         (sharepoint_file_id,)
                     )
 
-                    # 3️⃣ Inactivate ALL related missing
+                    # Inactivate ALL related missing
                     await cursor.execute(
                         f"""
                         UPDATE {missing_table}
@@ -1765,7 +1769,7 @@ async def soft_delete_po_by_business_admin_or_user(
                         (sharepoint_file_id,)
                     )
 
-                    # 4️⃣ Inactivate ALL related mismatch
+                    # Inactivate ALL related mismatch
                     await cursor.execute(
                         f"""
                         UPDATE {mismatch_table}
@@ -1779,7 +1783,7 @@ async def soft_delete_po_by_business_admin_or_user(
                         (sharepoint_file_id,)
                     )
 
-                    # 5️⃣ Inactivate parent file
+                    #  Inactivate parent file
                     await cursor.execute(
                         "UPDATE sharepoint_files SET is_active = 0 WHERE sharepoint_file_id = %s",
                         (sharepoint_file_id,)
@@ -1861,13 +1865,13 @@ async def hard_delete_po_by_business_admin_or_user(
                         (mail_dtl_id,)
                     )
 
-                else:  # 🔵 SHAREPOINT FLOW
+                else:  # SHAREPOINT FLOW
                     detail_table = "sharepoint_po_details"
                     detail_col = "sharepoint_po_det_id"
                     missing_table = "sharepoint_po_missing_report"
                     mismatch_table = "sharepoint_po_mismatch_report"
 
-                    # 1️⃣ Get sharepoint_file_id
+                    #  Get sharepoint_file_id
                     await cursor.execute(
                         f"SELECT sharepoint_file_id FROM {detail_table} WHERE {detail_col} = %s",
                         (detail_id,)
@@ -1878,7 +1882,7 @@ async def hard_delete_po_by_business_admin_or_user(
                     if not sharepoint_file_id:
                         raise Exception("sharepoint_file_id not found")
 
-                    # 2️⃣ Delete children first
+                    #  Delete children first
                     await cursor.execute(
                         f"""
                         DELETE FROM {missing_table}
@@ -1903,13 +1907,13 @@ async def hard_delete_po_by_business_admin_or_user(
                         (sharepoint_file_id,)
                     )
 
-                    # 3️⃣ Delete details
+                    #  Delete details
                     await cursor.execute(
                         f"DELETE FROM {detail_table} WHERE sharepoint_file_id = %s",
                         (sharepoint_file_id,)
                     )
 
-                    # 4️⃣ Delete parent file
+                    # Delete parent file
                     await cursor.execute(
                         "DELETE FROM sharepoint_files WHERE sharepoint_file_id = %s",
                         (sharepoint_file_id,)

@@ -66,6 +66,11 @@ async def login(
         raise wrong_login_error
 
 
+@router.post("/logout")
+async def logout():
+    return {"message": "Logged out successfully"}
+ 
+
 @router.post(
     "/register",
     status_code=HTTP_201_CREATED,
@@ -180,13 +185,14 @@ async def forgot_password(
     try:
         user = await check_email_exists(email, request)
         if user is None:
-            raise HTTPException(status_code=404, detail="Email not found")
+            raise HTTPException(status_code=404, detail="Email not Registered")
 
         expire = datetime.utcnow() + timedelta(minutes=15)
         token_data = {"user_id": user["user_id"], "exp": expire}
         reset_token = jwt.encode(token_data, SECRET_KEY, algorithm=ALGORITHM)
 
-        reset_link = f"http://localhost:5173/reset-password?token={reset_token}"
+        reset_link = f"http://192.168.0.106:5173/reset-password?token={reset_token}"
+        # reset_link = f"http://172.105.34.172:5000/reset-password?token={reset_token}"    
         
         email_service = EmailService()
         try:

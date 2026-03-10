@@ -893,11 +893,12 @@ def build_conditions(date_col, vendor_col, user_col, po_col, params, filters):
 
 
 async def search_pos_business_admin(request: Request, filters):
+
     params = []
 
     query = f"""
     SELECT * FROM (
-
+        
         /* ================= EMAIL : MISSING ================= */
         SELECT
             pm.po_missing_id,
@@ -915,6 +916,9 @@ async def search_pos_business_admin(request: Request, filters):
             COALESCE(pd.customer_name, sp.customer_name) AS customer_name,
             COALESCE(pd.created_on, sp.created_on) AS created_on,
             um.user_name AS username,
+            md.date_time AS emailDate,
+            md.mail_from AS emailFrom,
+            md.subject AS subject,
 
             pm.comment,
             NULL AS mismatch_attribute,
@@ -928,6 +932,8 @@ async def search_pos_business_admin(request: Request, filters):
         LEFT JOIN po_details pd ON pm.po_det_id = pd.po_det_id
         LEFT JOIN system_po_details sp ON pm.system_po_id = sp.system_po_id
         LEFT JOIN users_master um ON pm.user_id = um.user_id
+        LEFT JOIN mail_details md ON md.mail_dtl_id = pd.mail_dtl_id
+
         WHERE pm.active = 1
         {build_conditions(
             "COALESCE(pd.po_date, sp.po_date)",
@@ -957,6 +963,9 @@ async def search_pos_business_admin(request: Request, filters):
             pd.customer_name,
             mm.created_on,
             um.user_name,
+            md.date_time AS emailDate,
+            md.mail_from AS emailFrom,
+            md.subject AS subject,
 
             NULL,
             mm.mismatch_attribute,
@@ -969,6 +978,8 @@ async def search_pos_business_admin(request: Request, filters):
         FROM po_mismatch_report mm
         LEFT JOIN po_details pd ON mm.po_det_id = pd.po_det_id
         LEFT JOIN users_master um ON mm.user_id = um.user_id
+        LEFT JOIN mail_details md ON md.mail_dtl_id = pd.mail_dtl_id
+
         WHERE mm.active = 1
         {build_conditions(
             "pd.po_date",
@@ -998,6 +1009,9 @@ async def search_pos_business_admin(request: Request, filters):
             pd.customer_name,
             pd.created_on,
             u.user_name,
+            md.date_time AS emailDate,
+            md.mail_from AS emailFrom,
+            md.subject AS subject,
 
             NULL, NULL, NULL, NULL,
 
@@ -1010,6 +1024,8 @@ async def search_pos_business_admin(request: Request, filters):
         LEFT JOIN po_mismatch_report mm
             ON mm.po_det_id = pd.po_det_id AND mm.active = 1
         LEFT JOIN users_master u ON u.user_id = pd.user_id
+        LEFT JOIN mail_details md ON md.mail_dtl_id = pd.mail_dtl_id
+
         WHERE pd.active = 1
           AND pm.po_det_id IS NULL
           AND mm.po_det_id IS NULL
@@ -1041,6 +1057,9 @@ async def search_pos_business_admin(request: Request, filters):
             COALESCE(pd.customer_name, sp.customer_name),
             COALESCE(pd.created_on, sp.created_on),
             um.user_name,
+            NULL AS emailDate,
+            NULL AS emailFrom,
+            NULL AS subject,
 
             pm.comment,
             NULL, NULL, NULL,
@@ -1055,6 +1074,7 @@ async def search_pos_business_admin(request: Request, filters):
             ON pm.system_po_id = sp.system_po_id
         LEFT JOIN users_master um
             ON pm.user_id = um.user_id
+
         WHERE pm.active = 1
         {build_conditions(
             "COALESCE(pd.po_date, sp.po_date)",
@@ -1084,6 +1104,9 @@ async def search_pos_business_admin(request: Request, filters):
             pd.customer_name,
             mm.created_on,
             um.user_name,
+            NULL,
+            NULL,
+            NULL,
 
             NULL,
             mm.mismatch_attribute,
@@ -1098,6 +1121,7 @@ async def search_pos_business_admin(request: Request, filters):
             ON mm.sharepoint_po_det_id = pd.sharepoint_po_det_id
         LEFT JOIN users_master um
             ON mm.user_id = um.user_id
+
         WHERE mm.active = 1
         {build_conditions(
             "pd.po_date",
@@ -1127,6 +1151,9 @@ async def search_pos_business_admin(request: Request, filters):
             pd.customer_name,
             pd.created_on,
             u.user_name,
+            NULL,
+            NULL,
+            NULL,
 
             NULL, NULL, NULL, NULL,
 
@@ -1140,6 +1167,7 @@ async def search_pos_business_admin(request: Request, filters):
             ON mm.sharepoint_po_det_id = pd.sharepoint_po_det_id AND mm.active = 1
         LEFT JOIN users_master u
             ON u.user_id = pd.user_id
+
         WHERE pd.active = 1
           AND pm.sharepoint_po_det_id IS NULL
           AND mm.sharepoint_po_det_id IS NULL

@@ -208,10 +208,7 @@ class SchedulerService:
             )
              #Validate past date/time
             if schedule_time <= current_time:
-                raise HTTPException(
-                    status_code="error",
-                    detail="Cannot schedule a task for a past date or time. Please select a future time."
-                )
+                schedule_time = schedule_time + timedelta(days=7)
  
             await UserRepo.save_schedule(
                 request=request,

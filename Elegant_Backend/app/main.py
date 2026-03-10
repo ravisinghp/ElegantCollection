@@ -28,8 +28,8 @@ def get_application() -> FastAPI:
         "http://localhost:5173",
         "http://localhost:8080"
 
-        "http://172.105.34.172:5173",
-        "http://172.105.34.172:8080",
+        "http://172.105.34.172:5000", #server ip
+        "http://172.105.34.172:8080", #server ip
     ]
  
     # If your config has extra hosts (like production domains), add them to the list
@@ -94,5 +94,4 @@ async def websocket_endpoint(websocket: WebSocket):
         while True:
             await websocket.receive_text()
     except:
-        manager. Disconnect(websocket)
- 
+        manager.disconnect(websocket)

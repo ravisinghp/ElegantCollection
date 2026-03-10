@@ -26,6 +26,8 @@ HOST:str = config("HOST",cast=str,default="127.0.0.1")
 PORT:int = config("PORT",cast=int,default=3306)
 USER:str = config("USER",cast=str,default="root")
 PWD:str = config("PWD",cast=str,default="")
+# USER = "rnd_dev"      #---------for server 
+# PWD = "rndus3r_2025"      #---------for server 
 DB:str = config("DB",cast=str,default="")
 
 # ----------------- EMR Database Config start------------------#

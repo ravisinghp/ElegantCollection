@@ -26,7 +26,7 @@ def get_application() -> FastAPI:
  
     origins = [
         "http://localhost:5173",
-        "http://localhost:8080"
+        "http://localhost:8080",
 
         "http://172.105.34.172:5000", #server ip
         "http://172.105.34.172:8080", #server ip

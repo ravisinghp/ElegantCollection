@@ -233,7 +233,7 @@ async def get_emails(
             po_det_ids = response.get("extracted_po_ids", [])
             if po_det_ids:
                 response = await compare_scanned_and_system_pos(
-                    user_id=user_id, po_det_ids=po_det_ids, mails_repo=mails_repo
+                    request, user_id=user_id, po_det_ids=po_det_ids, mails_repo=mails_repo
                 )
                 logger.info(f"response after compare:{response}")
             return {"status": "success"}

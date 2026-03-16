@@ -1,28 +1,34 @@
 from app.db.repositories.base import BaseRepository
 from loguru import logger
 
+
 class MSSQLRepo(BaseRepository):
 
-    #-------------------po list from mssql-------------------#
-    async def get_po_list(self, limit: int = None):
-        """
-        Fetch POs from MSSQL directly, no ORDER BY.
-        - limit: maximum number of rows to fetch (None = all)
-        """
+    # ------------------- PO list from MSSQL ------------------- #
+    @staticmethod
+    async def get_po_list(app, start_date):
+
         try:
-            # Direct query
-            if limit:
-                query = f"SELECT TOP {limit} * FROM client_po_details_data"
-            else:
-                query = "SELECT * FROM client_po_details_data"
+            async with app.state.mssql_pool.acquire() as conn:
+                async with conn.cursor() as cur:
 
-            await self._cur.execute(query)
+                    query = """
+                    SELECT *
+                    FROM ClientDB.dbo.PO_details_data
+                    WHERE order_date BETWEEN ? AND GETDATE()
+                    ORDER BY order_date ASC
+                    """
 
-            columns = [col[0] for col in self._cur.description]
-            rows = await self._cur.fetchall()
+                    await cur.execute(query, (start_date,))
 
-            logger.info(f"Fetched {len(rows)} rows from MSSQL")
-            return [dict(zip(columns, row)) for row in rows]
+                    columns = [col[0] for col in cur.description]
+                    rows = await cur.fetchall()
+
+                    logger.info(
+                        f"Fetched {len(rows)} rows from MSSQL from {start_date} to current date"
+                    )
+
+                    return [dict(zip(columns, row)) for row in rows]
 
         except Exception as e:
             logger.exception("Error fetching PO list from MSSQL")

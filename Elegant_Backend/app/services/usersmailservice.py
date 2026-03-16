@@ -11,6 +11,8 @@ from datetime import date, datetime
 from openai import OpenAI
 import asyncio
 from app.utils.image_ocr import extract_text_from_image_bytes
+from app.db.repositories.sync_client_po_repo import MSSQLRepo
+from collections import defaultdict
 
 # Load the .env file
 load_dotenv()
@@ -2019,20 +2021,26 @@ System POs:
     return json.loads(raw)
 
 
-async def llm_batch_compare(matched_pairs):
+async def llm_batch_compare(pairs_for_llm):
+
     prompt = f"""
 You are an expert PO field comparison engine.
 
-Compare ONLY the following fields:
-{FIELDS_TO_COMPARE}
+Determine if the scanned value and system value represent the SAME meaning.
 
-Your goal is to detect real business mismatches.
-DO NOT report differences caused by minor spelling mistakes,
-abbreviations, word order, or formatting.
+Rules:
+- Treat spelling mistakes as SAME
+- Treat abbreviations as SAME
+- Treat casing differences as SAME
+- Treat punctuation differences as SAME
+- Treat word order differences as SAME
 
-IMPORTANT:
-- Missing vs present values are ALREADY handled by backend logic.
-- Compare ONLY when BOTH values are present.
+Examples considered SAME:
+"yellow color" vs "color yellow"
+"intl corp" vs "international corporation"
+"ring size 7" vs "size 7 ring"
+
+Only report mismatches if the meaning is clearly different.
 
 Return ONLY JSON:
 [
@@ -2045,8 +2053,8 @@ Return ONLY JSON:
   }}
 ]
 
-Matched PO pairs:
-{json.dumps(matched_pairs, indent=2)}
+PO field data:
+{json.dumps(pairs_for_llm, indent=2)}
 """
 
     resp = openai_client.chat.completions.create(
@@ -2064,20 +2072,68 @@ Matched PO pairs:
     except Exception as e:
         print(f"LLM parsing error: {e}")
         return []
-
+    
 
 def chunk(data, size):
     for i in range(0, len(data), size):
         yield data[i:i + size]
 
+def normalize_po(po):
+    if not po:
+        return ""
+    return re.sub(r'[^A-Za-z0-9]', '', po).lower()
+
+
+def normalize_value(v):
+    if v is None:
+        return ""
+
+    v = str(v).lower().strip()
+
+    # remove punctuation
+    v = re.sub(r'[^a-z0-9\s]', '', v)
+
+    # collapse spaces
+    v = re.sub(r'\s+', ' ', v)
+
+    return v
+
+
+def find_best_system_match(scanned, candidates):
+
+    best_candidate = None
+    best_score = -1
+
+    for system in candidates:
+        score = 0
+
+        for field in FIELDS_TO_COMPARE:
+
+            scanned_val = normalize_value(scanned.get(field))
+            system_val = normalize_value(system.get(field))
+
+            if not scanned_val or not system_val:
+                continue
+
+            if scanned_val == system_val:
+                score += 1
+
+        if score > best_score:
+            best_score = score
+            best_candidate = system
+
+    return best_candidate
+
 
 async def compare_scanned_and_system_pos(
+    request,
     user_id: int,
     po_det_ids: list[int],
-    mails_repo: "MailsRepository"
+    mails_repo
 ):
     try:
-        # -------------------- Fetch scanned POs -------------------- #
+
+        # ---------------- Fetch scanned POs ---------------- #
         scanned_pos = await mails_repo.get_po_details_by_ids(po_det_ids)
 
         if not scanned_pos:
@@ -2091,60 +2147,143 @@ async def compare_scanned_and_system_pos(
             for po in scanned_pos
         ]
 
+        # ---------------- Fetch system POs ---------------- #
         scanned_po_numbers = list({
             po["po_number"] for po in scanned_pos if po.get("po_number")
         })
 
         # -------------------- Fetch system POs -------------------- #
-        system_pos = await mails_repo.get_system_pos_by_po_numbers(scanned_po_numbers)
+        # system_pos = await mails_repo.get_system_pos_by_po_numbers(scanned_po_numbers)
+
+        oldest_date = await mails_repo.get_oldest_report_date()
+
+        if oldest_date:
+            system_pos = await MSSQLRepo.get_po_list(request.app, oldest_date)
+        else:
+            system_pos = []
+
+        # ---- imaginary PK for system_pos ---- #
+        for idx, po in enumerate(system_pos, start=1):
+            po["system_po_id"] = idx
 
         system_pos = [
             {k: make_json_safe(v) for k, v in po.items()}
             for po in system_pos
         ]
 
-        # -------------------- Backend Matching -------------------- #
-        # Match strictly on po number + customer name
+        # ---------------- Create system PO lookup (FIXED) ---------------- #
+        system_po_map = defaultdict(list)
 
-        system_lookup = {
-            (sp.get("po_number"), sp.get("customer_name")): sp
-            for sp in system_pos
-        }
+        for po in system_pos:
+            po_number = po.get("po_number")
+            if not po_number:
+                continue
+            key = normalize_po(po_number)
+            system_po_map[key].append(po)
 
         matched_pairs = []
-        matched_scanned_ids = set()
+        missing_pos = []
 
+        # ---------------- Match scanned with system ---------------- #
         for scanned in scanned_pos:
 
-            key = (scanned.get("po_number"), scanned.get("customer_name"))
-            system = system_lookup.get(key)
+            scanned_po = scanned.get("po_number")
+            normalized_po = normalize_po(scanned_po)
 
-            if not system:
+            candidates = system_po_map.get(normalized_po)
+
+            if not candidates:
+                missing_pos.append(scanned)
                 continue
 
-            matched_scanned_ids.add(scanned["po_det_id"])
+            # choose best candidate
+            system = find_best_system_match(scanned, candidates)
+
+            if not system:
+                missing_pos.append(scanned)
+                continue
 
             matched_pairs.append({
                 "po_det_id": scanned["po_det_id"],
                 "system_po_id": system["system_po_id"],
                 "scanned": {f: scanned.get(f) for f in FIELDS_TO_COMPARE},
-                "system": {f: system.get(f) for f in FIELDS_TO_COMPARE}
+                "system": {f: system.get(f) for f in FIELDS_TO_COMPARE},
+                "raw_scanned": scanned
             })
 
-        # -------------------- FIELD CHECKING -------------------- #
+        # ---------------- Prepare pairs for OpenAI ---------------- #
+        pairs_for_llm = []
 
         for pair in matched_pairs:
 
-            po_has_issue = False
+            for field in FIELDS_TO_COMPARE:
 
-            # -------- Missing field check -------- #
+                scanned_val = pair["scanned"].get(field)
+                system_val = pair["system"].get(field)
+
+                if scanned_val in (None, "") or system_val in (None, ""):
+                    continue
+
+                scanned_norm = normalize_value(scanned_val)
+                system_norm = normalize_value(system_val)
+
+                if scanned_norm == system_norm:
+                    continue
+
+                pairs_for_llm.append({
+                    "po_det_id": pair["po_det_id"],
+                    "system_po_id": pair["system_po_id"],
+                    "field": field,
+                    "scanned_value": str(scanned_val),
+                    "system_value": str(system_val)
+                })
+
+        # ---------------- Call OpenAI ---------------- #
+        mismatches = []
+
+        if pairs_for_llm:
+            mismatches = await llm_batch_compare(pairs_for_llm)
+
+        mismatch_pairs = set()
+
+        # ---------------- Insert mismatches ---------------- #
+        for mm in mismatches:
+
+            scanned_value = "" if mm["scanned_value"] is None else str(mm["scanned_value"])
+            system_value = "" if mm["system_value"] is None else str(mm["system_value"])
+
+            exists = await mails_repo.mismatch_exists(
+                user_id=user_id,
+                po_det_id=mm["po_det_id"],
+                system_po_id=mm["system_po_id"],
+                mismatch_attribute=mm["field"],
+                scanned_value=scanned_value,
+                system_value=system_value
+            )
+
+            if not exists:
+
+                await mails_repo.insert_mismatch(
+                    po_det_id=mm["po_det_id"],
+                    user_id=user_id,
+                    system_po_id=mm["system_po_id"],
+                    field=mm["field"],
+                    system_value=system_value,
+                    scanned_value=scanned_value,
+                    comment=f"{mm['field']} mismatch"
+                )
+
+            mismatch_pairs.add((mm["po_det_id"], mm["system_po_id"]))
+
+        # ---------------- Insert missing fields ---------------- #
+        for pair in matched_pairs:
+
             for field in FIELDS_TO_COMPARE:
 
                 scanned_val = pair["scanned"].get(field)
                 system_val = pair["system"].get(field)
 
                 if system_val not in (None, "") and scanned_val in (None, ""):
-                    po_has_issue = True
 
                     exists = await mails_repo.mismatch_exists(
                         user_id=user_id,
@@ -2156,6 +2295,7 @@ async def compare_scanned_and_system_pos(
                     )
 
                     if not exists:
+
                         await mails_repo.insert_mismatch(
                             po_det_id=pair["po_det_id"],
                             user_id=user_id,
@@ -2166,60 +2306,53 @@ async def compare_scanned_and_system_pos(
                             comment=f"{field} missing in scanned data"
                         )
 
-            # -------- LLM Value Comparison (Only if no missing fields) -------- #
-            if not po_has_issue:
+                    mismatch_pairs.add((pair["po_det_id"], pair["system_po_id"]))
 
-                mismatches = await llm_batch_compare([pair])
+        # ---------------- Insert matched records ---------------- #
+        for pair in matched_pairs:
 
-                if mismatches:
+            key = (pair["po_det_id"], pair["system_po_id"])
 
-                    for mm in mismatches:
+            if key in mismatch_pairs:
+                continue
 
-                        exists = await mails_repo.mismatch_exists(
-                            user_id=user_id,
-                            po_det_id=mm["po_det_id"],
-                            system_po_id=mm["system_po_id"],
-                            mismatch_attribute=mm["field"],
-                            scanned_value=str(mm["scanned_value"]),
-                            system_value=str(mm["system_value"])
-                        )
+            scanned = pair["raw_scanned"]
 
-                        if not exists:
-                            await mails_repo.insert_mismatch(
-                                po_det_id=mm["po_det_id"],
-                                user_id=user_id,
-                                system_po_id=mm["system_po_id"],
-                                field=mm["field"],
-                                system_value=str(mm["system_value"]),
-                                scanned_value=str(mm["scanned_value"]),
-                                comment=f"{mm['field']} mismatch"
-                            )
+            await mails_repo.insert_matched_po(
+                po_det_id=pair["po_det_id"],
+                system_po_id=pair["system_po_id"],
+                mail_dtl_id=scanned.get("mail_dtl_id"),
+                user_id=user_id,
+                po_number=scanned.get("po_number"),
+                po_date=scanned.get("po_date"),
+                vendor_number=scanned.get("vendor_number"),
+                customer_name=scanned.get("customer_name"),
+                created_by="system"
+            )
 
-        # -------------------- PO NOT FOUND IN SYSTEM -------------------- #
+        # ---------------- Insert PO missing ---------------- #
+        for po in missing_pos:
 
-        for po in scanned_pos:
+            exists = await mails_repo.po_missing_exists(
+                user_id=user_id,
+                po_det_id=po["po_det_id"],
+                system_po_id=None,
+                mismatch_attribute="po_missing",
+                scanned_value=po.get("po_number"),
+                system_value=""
+            )
 
-            if po["po_det_id"] not in matched_scanned_ids:
+            if not exists:
 
-                exists = await mails_repo.po_missing_exists(
-                    user_id=user_id,
+                await mails_repo.insert_po_missing(
                     po_det_id=po["po_det_id"],
+                    user_id=user_id,
                     system_po_id=None,
-                    mismatch_attribute="po_missing",
+                    attribute="po_missing",
+                    system_value="",
                     scanned_value=po.get("po_number"),
-                    system_value=""
+                    comment="PO not found in system"
                 )
-
-                if not exists:
-                    await mails_repo.insert_po_missing(
-                        po_det_id=po["po_det_id"],
-                        user_id=user_id,
-                        system_po_id=None,
-                        attribute="po_missing",
-                        system_value="",
-                        scanned_value=po.get("po_number"),
-                        comment="PO not found in system"
-                    )
 
         return {
             "status": "success",

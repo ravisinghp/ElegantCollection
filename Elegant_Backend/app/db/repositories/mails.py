@@ -3,6 +3,7 @@ import token
 from typing import Optional, List, Dict, Any
 from app.db.repositories.base import BaseRepository
 from app.models.outlook_token import OutlookToken
+from loguru import logger
 
 # Insert into your existing mail_details table (including `keyword`, `repeated_keyword`, and `graph_mail_id` columns)
 INSERT_MAIL_DETAILS = """
@@ -452,20 +453,20 @@ class MailsRepository(BaseRepository):
         return await self._cur.fetchall()
     
     
-    async def get_system_pos_by_po_numbers(self, po_numbers: list[str]):
-        if not po_numbers:
-            return []
+    # async def get_system_pos_by_po_numbers(self, po_numbers: list[str]):
+    #     if not po_numbers:
+    #         return []
 
-        placeholders = ", ".join(["%s"] * len(po_numbers))
+    #     placeholders = ", ".join(["%s"] * len(po_numbers))
 
-        query = f"""
-            SELECT *
-            FROM system_po_details
-            WHERE po_number IN ({placeholders})
-        """
+    #     query = f"""
+    #         SELECT *
+    #         FROM system_po_details
+    #         WHERE po_number IN ({placeholders})
+    #     """
 
-        await self._log_and_execute(query, po_numbers)
-        return await self._cur.fetchall()
+    #     await self._log_and_execute(query, po_numbers)
+    #     return await self._cur.fetchall()
     
 
     async def check_po_exists(self, po_number: str) -> bool:
@@ -640,3 +641,73 @@ class MailsRepository(BaseRepository):
             ]
         )
         return await self._cur.fetchone()
+
+    # insert match po 
+    async def insert_matched_po(
+        self,
+        po_det_id,
+        system_po_id,
+        mail_dtl_id,
+        user_id,
+        po_number,
+        po_date,
+        vendor_number,
+        customer_name,
+        created_by
+    ):
+
+        query = """
+            INSERT INTO po_matched_report
+            (po_det_id, system_po_id, mail_dtl_id, user_id,
+            po_number, po_date, vendor_number, customer_name, created_by)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
+        """
+
+        await self._log_and_execute(
+            query,
+            (
+                po_det_id,
+                system_po_id,
+                mail_dtl_id,
+                user_id,
+                po_number,
+                po_date,
+                vendor_number,
+                customer_name,
+                created_by
+            )
+        )
+
+
+    # -----------get created on from po_missing_report and po_mismatch_report table--------------
+    async def get_oldest_report_date(self):
+        """
+        Returns the oldest created_on date from po_missing_report and po_mismatch_report.
+        Returns None if both tables are empty.
+        """
+
+        try:
+            query = """
+                SELECT MIN(created_on) AS oldest_date
+                FROM (
+                    SELECT created_on FROM po_missing_report
+                    UNION ALL
+                    SELECT created_on FROM po_mismatch_report
+                ) AS reports
+            """
+
+            await self._log_and_execute(query)
+
+            row = await self._cur.fetchone()
+
+            # Handle NULL when tables are empty
+            if not row or row[0] is None:
+                logger.info("No records found in po_missing_report and po_mismatch_report")
+                return None
+
+            logger.info(f"Oldest report date found: {row[0]}")
+            return row[0]
+
+        except Exception as e:
+            logger.exception("Error fetching oldest report date")
+            raise

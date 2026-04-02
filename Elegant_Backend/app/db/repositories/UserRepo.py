@@ -1908,7 +1908,7 @@ async def soft_delete_po_by_business_admin_or_user(
                     await cursor.execute(
                         f"""
                         UPDATE {matched_table}
-                        SET active = 0
+                        SET is_active = 0
                         WHERE {detail_col} IN (
                             SELECT {detail_col} FROM {detail_table}
                             WHERE mail_dtl_id = %s

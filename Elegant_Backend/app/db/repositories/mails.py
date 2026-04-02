@@ -690,9 +690,9 @@ class MailsRepository(BaseRepository):
             query = """
                 SELECT MIN(created_on) AS oldest_date
                 FROM (
-                    SELECT created_on FROM po_missing_report
+                    SELECT created_on FROM po_missing_report WHERE active = 1
                     UNION ALL
-                    SELECT created_on FROM po_mismatch_report
+                    SELECT created_on FROM po_mismatch_report WHERE active = 1
                 ) AS reports
             """
 
@@ -700,14 +700,162 @@ class MailsRepository(BaseRepository):
 
             row = await self._cur.fetchone()
 
-            # Handle NULL when tables are empty
-            if not row or row[0] is None:
-                logger.info("No records found in po_missing_report and po_mismatch_report")
+            # handling
+            if not row:
+                logger.info("No result returned from query")
+                return None
+            
+
+            if isinstance(row, dict):
+                oldest_date = row.get("oldest_date")
+            else:
+                oldest_date = row[0]
+
+            # No data case
+            if oldest_date is None:
+                logger.info("No active records found in po_missing_report and po_mismatch_report")
                 return None
 
-            logger.info(f"Oldest report date found: {row[0]}")
-            return row[0]
+            logger.info(f"Oldest report date found: {oldest_date}")
+            return oldest_date
 
         except Exception as e:
-            logger.exception("Error fetching oldest report date")
-            raise
+            logger.exception(f"Error fetching oldest report date: {str(e)}")
+            return None
+
+
+    # -----------------Functions to support reconciliation process-------------------- #
+    async def get_all_active_mismatches(self, user_id: int) -> list[dict]:
+        query = """
+            SELECT po_mismatch_id, po_det_id, system_po_id, mismatch_attribute,
+                scanned_value, system_value
+            FROM po_mismatch_report
+            WHERE user_id = %s
+            AND active = 1
+        """
+
+        await self._log_and_execute(query, [user_id])
+        rows = await self._cur.fetchall()
+
+        return rows or []
+    
+
+    async def get_all_active_missing(self, user_id: int) -> list[dict]:
+        query = """
+            SELECT po_missing_id, po_det_id, system_po_id, mismatch_attribute,
+                scanned_value, system_value
+            FROM po_missing_report
+            WHERE user_id = %s
+            AND active = 1
+        """
+
+        await self._log_and_execute(query, [user_id])
+        rows = await self._cur.fetchall()
+
+        return rows or []
+    
+
+    async def deactivate_mismatches(self, user_id: int, mismatch_ids: list[int]) -> None:
+        if not mismatch_ids:
+            return
+
+        placeholders = ", ".join(["%s"] * len(mismatch_ids))
+
+        query = f"""
+            UPDATE po_mismatch_report
+            SET active = 0
+            WHERE user_id = %s
+            AND active = 1
+            AND po_mismatch_id IN ({placeholders})
+        """
+
+        await self._log_and_execute(query, [user_id, *mismatch_ids])
+        await self._cur.connection.commit()
+
+
+    async def deactivate_missing_pos(self, user_id: int, missing_ids) -> None:
+
+        if not missing_ids:
+            return
+
+        # convert int → list
+        if isinstance(missing_ids, int):
+            missing_ids = [missing_ids]
+
+        placeholders = ", ".join(["%s"] * len(missing_ids))
+
+        query = f"""
+            UPDATE po_missing_report
+            SET active = 0
+            WHERE user_id = %s
+            AND active = 1
+            AND po_missing_id IN ({placeholders})
+        """
+
+        await self._log_and_execute(query, [user_id, *missing_ids])
+        await self._cur.connection.commit()
+
+
+    async def matched_po_exists(self, user_id: int, po_det_id: int, system_po_id: int) -> bool:
+        query = """
+            SELECT COUNT(1) AS cnt
+            FROM po_matched_report
+            WHERE user_id = %s
+            AND po_det_id = %s
+            AND system_po_id = %s
+        """
+
+        await self._log_and_execute(query, [user_id, po_det_id, system_po_id])
+        row = await self._cur.fetchone()
+
+        return (row["cnt"] if row else 0) > 0
+
+    
+    async def get_active_mismatches_by_po_numbers(
+        self, user_id: int, po_numbers: list[str]
+    ) -> list[dict]:
+
+        if not po_numbers:
+            return []
+
+        placeholders = ", ".join(["%s"] * len(po_numbers))
+
+        query = f"""
+            SELECT r.po_mismatch_id, r.po_det_id, r.system_po_id,
+                r.mismatch_attribute, r.scanned_value, r.system_value
+            FROM po_mismatch_report r
+            JOIN po_details d ON d.po_det_id = r.po_det_id
+            WHERE r.user_id = %s
+            AND r.active = 1
+            AND d.po_number IN ({placeholders})
+        """
+
+        await self._log_and_execute(query, [user_id, *po_numbers])
+        rows = await self._cur.fetchall()
+
+        return rows or []
+    
+
+    async def get_active_mismatches_by_po_numbers(
+        self, user_id: int, po_numbers: list[str]
+    ) -> list[dict]:
+
+        if not po_numbers:
+            return []
+
+        placeholders = ", ".join(["%s"] * len(po_numbers))
+
+        query = f"""
+            SELECT r.po_mismatch_id, r.po_det_id, r.system_po_id,
+                r.mismatch_attribute, r.scanned_value, r.system_value
+            FROM po_mismatch_report r
+            JOIN po_details d ON d.po_det_id = r.po_det_id
+            WHERE r.user_id = %s
+            AND r.active = 1
+            AND d.po_number IN ({placeholders})
+        """
+
+        await self._log_and_execute(query, [user_id, *po_numbers])
+        rows = await self._cur.fetchall()
+
+        return rows or []

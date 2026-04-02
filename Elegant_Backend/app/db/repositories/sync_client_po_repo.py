@@ -33,3 +33,32 @@ class MSSQLRepo(BaseRepository):
         except Exception as e:
             logger.exception("Error fetching PO list from MSSQL")
             raise RuntimeError(f"MSSQL fetch failed: {e}") from e
+
+
+    #-------------------po list from mssql-------------------#
+    async def get_po_list_without_oldest_date(app, limit: int = 9000):
+        """
+        Fetch POs from MSSQL directly, no ORDER BY.
+        - limit: maximum number of rows to fetch (None = all)
+        """
+        try:
+            async with app.state.mssql_pool.acquire() as conn:
+                async with conn.cursor() as cur:
+
+                    if limit:
+                        query = f"SELECT TOP {limit} * FROM ClientDB.dbo.PO_details_data"
+                        await cur.execute(query)
+                    else:
+                        query = "SELECT * FROM ClientDB.dbo.PO_details_data"
+                        await cur.execute(query)
+
+                    columns = [col[0] for col in cur.description]
+                    rows = await cur.fetchall()
+
+                    logger.info(f"Fetched {len(rows)} rows from MSSQL")
+
+                    return [dict(zip(columns, row)) for row in rows]
+
+        except Exception as e:
+            logger.exception("Error fetching PO list from MSSQL")
+            raise RuntimeError(f"MSSQL fetch failed: {e}") from e

@@ -495,7 +495,7 @@ async def save_folder_mapping_service(
                 "message": "Folder name cannot be empty"
             }
 
-        # 🔍 Check duplicate
+        # Check duplicate
         exists = await UserRepo.check_folder_mapping_exists_repo(
             request=request,
             user_id=user_id,

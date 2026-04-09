@@ -1807,8 +1807,10 @@ async def resolve_detail_id(cursor, record_id: int, source: str, record_type: st
         detail_col = "sharepoint_po_det_id"
         missing_table = "sharepoint_po_missing_report"
         mismatch_table = "sharepoint_po_mismatch_report"
+        matched_table = "sharepoint_po_matched_report"
         missing_pk = "sharepoint_po_missing_id"
         mismatch_pk = "sharepoint_po_mismatch_id"
+        matched_pk = "sharepoint_po_matched_id"
 
     # If coming from missing table
     if record_type == "missing":
@@ -1927,6 +1929,7 @@ async def soft_delete_po_by_business_admin_or_user(
                     detail_col = "sharepoint_po_det_id"
                     missing_table = "sharepoint_po_missing_report"
                     mismatch_table = "sharepoint_po_mismatch_report"
+                    matched_table = "sharepoint_po_matched_report"
 
                     # Get sharepoint_file_id (PARENT ID)
                     await cursor.execute(
@@ -1973,6 +1976,19 @@ async def soft_delete_po_by_business_admin_or_user(
                         (sharepoint_file_id,)
                     )
 
+                    await cursor.execute(
+                        f"""
+                        UPDATE {matched_table}
+                        SET active = 0
+                        WHERE {detail_col} IN (
+                            SELECT {detail_col}
+                            FROM {detail_table}
+                            WHERE sharepoint_file_id = %s
+                        )
+                        """,
+                        (sharepoint_file_id,)
+                    )
+                    
                     #  Inactivate parent file
                     await cursor.execute(
                         "UPDATE sharepoint_files SET is_active = 0 WHERE sharepoint_file_id = %s",
@@ -2071,6 +2087,7 @@ async def hard_delete_po_by_business_admin_or_user(
                     detail_col = "sharepoint_po_det_id"
                     missing_table = "sharepoint_po_missing_report"
                     mismatch_table = "sharepoint_po_mismatch_report"
+                    matched_table = "sharepoint_po_matched_report"
 
                     #  Get sharepoint_file_id
                     await cursor.execute(
@@ -2099,6 +2116,18 @@ async def hard_delete_po_by_business_admin_or_user(
                     await cursor.execute(
                         f"""
                         DELETE FROM {mismatch_table}
+                        WHERE {detail_col} IN (
+                            SELECT {detail_col}
+                            FROM {detail_table}
+                            WHERE sharepoint_file_id = %s
+                        )
+                        """,
+                        (sharepoint_file_id,)
+                    )
+
+                    await cursor.execute(
+                        f"""
+                        DELETE FROM {matched_table}
                         WHERE {detail_col} IN (
                             SELECT {detail_col}
                             FROM {detail_table}

@@ -117,23 +117,6 @@ async def get_dashboard_stats(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-
-@router.get("/weekly-hours-previous-month")
-async def get_weekly_hours_previous_month(
-    request: Request,
-    org_id: int,
-    from_date: str = Query(...),  # Expecting 'YYYY-MM-DD'
-    to_date: str = Query(...)
-) -> List[Dict[str, Any]]:
-    try:
-        return await admin_service.get_weekly_hours_previous_month(
-            request, org_id,from_date, to_date
-        )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-
 # This code is used to fetch top 5 keywords for a given organization
 @router.get("/top-keywords")
 async def get_top_keywords(org_id: int, user_id: int, request: Request,from_date: str = Query(...),to_date: str = Query(...)):
@@ -170,19 +153,6 @@ async def update_user_status(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-
-#find Last sync of each user
-@router.get("/lastSyncEachUser")
-async def get_last_sync(org_id: int,request: Request):
-    try: 
-        result = await admin_service.get_last_sync_by_users(org_id,request)
-        return {"data": result}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-    
-    
-    
-    
 
 @router.get("/searchUser")
 async def search_user(

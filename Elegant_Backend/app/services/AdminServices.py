@@ -244,18 +244,6 @@ async def get_documents_analyzed(request, from_date: str, to_date: str, org_id: 
         return None
 
 
-
-# Getting weekly hours
-async def get_weekly_hours_previous_month(
-    request, org_id: int,from_date: str,  # Expecting 'YYYY-MM-DD'
-    to_date: str 
-) -> List[Dict[str, Any]]:
-    try:
-        return await AdminRepo.get_weekly_hours_previous_month(request, org_id,from_date,to_date)
-    except Exception as e:
-        return None
-
-
 # get Top Keywords
 async def get_top_keywords(request, org_id: int, user_id: int,from_date:str,to_date:str, limit: int = 5):
     try:
@@ -296,15 +284,6 @@ async def update_keyword_status(
     except Exception as e:
         return None
 
-
-#find Last sync of each user
-async def get_last_sync_by_users(org_id: int,request: Request):
-    try:
-        last_sync_data = await admin_repo.fetch_last_sync_by_users(org_id,request)
-        return last_sync_data
-    except Exception as e:
-        raise Exception(f"Error fetching last sync data: {str(e)}")   
-    
     
 #Check is email is present ?
 async def check_email_exists(email: str, request):

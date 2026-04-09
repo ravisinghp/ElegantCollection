@@ -1,6 +1,14 @@
 from app.db.repositories.base import BaseRepository
 from loguru import logger
+import os
+from dotenv import load_dotenv
 
+load_dotenv()
+
+try:
+    MSSQL_PO_FETCH_LIMIT = int(os.getenv("MSSQL_PO_FETCH_LIMIT"))
+except ValueError:
+    MSSQL_PO_FETCH_LIMIT = 500
 
 class MSSQLRepo(BaseRepository):
 
@@ -36,26 +44,31 @@ class MSSQLRepo(BaseRepository):
 
 
     #-------------------po list from mssql-------------------#
-    async def get_po_list_without_oldest_date(app, limit: int = 9000):
+    async def get_po_list_without_oldest_date(app):
         """
-        Fetch POs from MSSQL directly, no ORDER BY.
-        - limit: maximum number of rows to fetch (None = all)
+        Fetch POs from MSSQL using env-based limit.
         """
         try:
+            # validate env limit once before query
+            if not isinstance(MSSQL_PO_FETCH_LIMIT, int) or MSSQL_PO_FETCH_LIMIT <= 0:
+                raise ValueError("MSSQL_PO_FETCH_LIMIT must be a positive integer")
+
             async with app.state.mssql_pool.acquire() as conn:
                 async with conn.cursor() as cur:
 
-                    if limit:
-                        query = f"SELECT TOP {limit} * FROM ClientDB.dbo.PO_details_data"
-                        await cur.execute(query)
-                    else:
-                        query = "SELECT * FROM ClientDB.dbo.PO_details_data"
-                        await cur.execute(query)
+                    query = f"""
+                    SELECT TOP ({MSSQL_PO_FETCH_LIMIT}) *
+                    FROM ClientDB.dbo.PO_details_data
+                    """
+
+                    await cur.execute(query)
 
                     columns = [col[0] for col in cur.description]
                     rows = await cur.fetchall()
 
-                    logger.info(f"Fetched {len(rows)} rows from MSSQL")
+                    logger.info(
+                        f"Fetched {len(rows)} rows from MSSQL (limit={MSSQL_PO_FETCH_LIMIT})"
+                    )
 
                     return [dict(zip(columns, row)) for row in rows]
 

@@ -590,7 +590,12 @@ KEYWORD_REGEX_MAP = {
     "po_number": [
         r"\bpo\s*(no|number|#|id)\b",
         r"\bp\.o\.\s*(no|number|#)?\b",
-        r"\bpurchase\s*order\s*(no|number)?\b"
+        r"\bpurchase\s*order\s*(no|number)?\b",
+        r"\b(po)\s*(?:no|number|#|id)?\s*\d+\b",
+        r"\b(po)\d+\b",
+        r"\b(p\.o\.)\s*(?:no|number|#)?\s*\d*\b",
+        r"\b(purchase\s*order)\s*(?:no|number)?\s*\d*\b",
+        r"\b(order)\s*(?:no|number|#|id)?\s*\d+\b"
     ],
 
     "customer_name": [
@@ -1979,7 +1984,9 @@ async def fetch_and_save_past_events_google(access_token: str, user_id: int, org
     return results
 
 
-# -------------------------- data comparison logic start -------------------------- #
+# ============================================================
+# data comparison logic start
+# ============================================================
 FIELDS_TO_COMPARE = [
     "customer_name",
     "vendor_number",
@@ -2153,39 +2160,26 @@ def find_best_system_match(scanned, candidates):
 
     return best_candidate
 
-
-# ---------------------------------PO Recomparison start----------------------------------------
+# ============================================================
+# PO Recomparison start
+# ============================================================
 import hashlib
 
-def _rows_to_safe(rows: list[dict]) -> list[dict]:
-    return [{k: make_json_safe(v) for k, v in row.items()} for row in rows]
-
-
-def _chunk(data: list, size: int):
-    for i in range(0, len(data), size):
-        yield data[i: i + size]
-
-# ---------------------------------------------
-# STABLE SYSTEM PO ID
-# ---------------------------------------------
+# ----------------STABLE SYSTEM PO ID-----------------------
 def make_stable_system_po_id(po: dict) -> int:
     raw = "|".join([
         normalize_po(str(po.get("po_number") or "")),
-        normalize_value(str(po.get("vendor_number") or "")),
-        normalize_value(str(po.get("po_date") or "")),
+        normalize_value(str(po.get("customer_number") or "")),
     ])
     full_hash = hashlib.sha256(raw.encode()).digest()
     return int.from_bytes(full_hash[:4], byteorder="big")
 
 
-# ---------------------------------------------
-# PO Recomparison ENTRY POINT
-# ---------------------------------------------
+# ------------PO Recomparison ENTRY POINT-------------------------
 def is_strong_match(scanned, system):
     return (
         normalize_po(scanned.get("po_number")) == normalize_po(system.get("po_number"))
-        and normalize_value(scanned.get("vendor_number")) == normalize_value(system.get("vendor_number"))
-        and normalize_value(scanned.get("po_date")) == normalize_value(system.get("po_date"))
+        and normalize_value(scanned.get("customer_number")) == normalize_value(system.get("customer_number"))
     )
 
 
@@ -2200,7 +2194,7 @@ async def reconcile_all_pos(user_id, mails_repo, system_pos, batch_size=500):
     }
 
     try:
-        # 🔥 Build system lookup
+        # Build system lookup
         system_po_map = defaultdict(list)
         for po in system_pos:
             key = normalize_po(po.get("po_number"))
@@ -2218,7 +2212,6 @@ async def reconcile_all_pos(user_id, mails_repo, system_pos, batch_size=500):
         stats["errors"].append(str(e))
 
     return stats
-
 
 # ============================================================
 # MISMATCH RECONCILIATION
@@ -2312,8 +2305,11 @@ async def reconcile_mismatches(user_id, mails_repo, system_po_map, batch_size):
 # MISSING RECONCILIATION
 # ============================================================
 async def reconcile_missing(user_id, mails_repo, system_po_map, batch_size):
-
-    stats = {"missing_checked": 0, "missing_resolved": 0}
+    stats = {
+        "missing_checked": 0,
+        "missing_resolved": 0,
+        "mismatch_created": 0
+    }
 
     active = await mails_repo.get_all_active_missing(user_id)
     if not active:
@@ -2348,40 +2344,112 @@ async def reconcile_missing(user_id, mails_repo, system_po_map, batch_size):
             if not system:
                 continue
 
-            # 🔥 STRICT MATCH
-            if not is_strong_match(scanned, system):
-                continue
+            # ============================================================
+            # BASE MATCH (PO + Customer)
+            # ============================================================
+            base_match = (
+                normalize_po(scanned.get("po_number")) == normalize_po(system.get("po_number")) and
+                normalize_value(scanned.get("customer_name")) == normalize_value(system.get("customer_name"))
+            )
+
+            if not base_match:
+                continue  
 
             try:
-                await mails_repo.deactivate_missing_pos(user_id, missing_id)
+                # ============================================================
+                # CHECK ALL FIELDS
+                # ============================================================
+                mismatches = []
 
-                exists = await mails_repo.matched_po_exists(
-                    user_id, po_det_id, system["system_po_id"]
-                )
+                for field in FIELDS_TO_COMPARE:  # all 13 fields
 
-                if not exists:
-                    await mails_repo.insert_matched_po(
-                        po_det_id=po_det_id,
-                        system_po_id=system["system_po_id"],
-                        mail_dtl_id=scanned.get("mail_dtl_id"),
-                        user_id=user_id,
-                        po_number=scanned.get("po_number"),
-                        po_date=scanned.get("po_date"),
-                        vendor_number=scanned.get("vendor_number"),
-                        customer_name=scanned.get("customer_name"),
-                        created_by="reconciliation"
+                    scanned_val = scanned.get(field)
+                    system_val = system.get(field)
+
+                    scanned_norm = normalize_value(str(scanned_val or ""))
+                    system_norm = normalize_value(str(system_val or ""))
+
+                    if scanned_norm != system_norm:
+                        mismatches.append({
+                            "field": field,
+                            "scanned": scanned_norm,
+                            "system": system_norm
+                        })
+
+                # ============================================================
+                # FULL MATCH
+                # ============================================================
+                if not mismatches:
+
+                    await mails_repo.deactivate_missing_pos(user_id, missing_id)
+
+                    exists = await mails_repo.matched_po_exists(
+                        user_id, po_det_id, system["system_po_id"]
                     )
 
-                stats["missing_resolved"] += 1
+                    if not exists:
+                        await mails_repo.insert_matched_po(
+                            po_det_id=po_det_id,
+                            system_po_id=system["system_po_id"],
+                            mail_dtl_id=scanned.get("mail_dtl_id"),
+                            user_id=user_id,
+                            po_number=scanned.get("po_number"),
+                            po_date=scanned.get("po_date"),
+                            vendor_number=scanned.get("vendor_number"),
+                            customer_name=scanned.get("customer_name"),
+                            created_by="reconciliation"
+                        )
+
+                    stats["missing_resolved"] += 1
+
+                # ============================================================
+                # PARTIAL MATCH → INSERT MISMATCH
+                # ============================================================
+                else:
+
+                    mismatch_inserted = False
+
+                    for mm in mismatches:
+
+                        exists = await mails_repo.mismatch_exists(
+                            user_id=user_id,
+                            po_det_id=po_det_id,
+                            system_po_id=system["system_po_id"],
+                            mismatch_attribute=mm["field"],
+                            scanned_value=mm["scanned"],
+                            system_value=mm["system"]
+                        )
+
+                        if not exists:
+                            await mails_repo.insert_mismatch(
+                                po_det_id=po_det_id,
+                                user_id=user_id,
+                                system_po_id=system["system_po_id"],
+                                field=mm["field"],
+                                scanned_value=mm["scanned"],
+                                system_value=mm["system"],
+                                comment=f"{mm['field']} mismatch"
+                            )
+
+                            mismatch_inserted = True
+
+                    # deactivate missing only if mismatch inserted
+                    if mismatch_inserted:
+                        await mails_repo.deactivate_missing_pos(user_id, missing_id)
+                        stats["mismatch_created"] += 1
 
             except Exception as e:
-                print(f"Missing resolve error: {e}")
+                print(f"Reconcile error: {e}")
 
     return stats
-# ---------------------------------PO Recomparison end----------------------------------------
+# ============================================================
+# PO Recomparison end
+# ============================================================
 
 
-# -----------------------compare data between scanned and system POs-----------------------
+# ============================================================
+# compare data between scanned and system POs Start
+# ============================================================
 async def compare_scanned_and_system_pos(
     request=None,
     app=None,
@@ -2421,8 +2489,6 @@ async def compare_scanned_and_system_pos(
         })
 
         # -------------------- Fetch system POs -------------------- #
-        # system_pos = await mails_repo.get_system_pos_by_po_numbers(scanned_po_numbers)
-
         oldest_date = await mails_repo.get_oldest_report_date()
 
         if oldest_date:
@@ -2439,14 +2505,14 @@ async def compare_scanned_and_system_pos(
             for po in system_pos
         ]
 
-        #-----------NEW: reconcile OLD mismatches/missing BEFORE processing new POs----------
+        #-----------reconcile OLD mismatches/missing BEFORE processing new POs----------
         await reconcile_all_pos(
             user_id=user_id,
             mails_repo=mails_repo,
             system_pos=system_pos
         )
         
-        # ---------------- Create system PO lookup (FIXED) ---------------- #
+        # ------------------ Create system PO lookup ------------------ #
         system_po_map = defaultdict(list)
 
         for po in system_pos:
@@ -2644,3 +2710,6 @@ async def compare_scanned_and_system_pos(
             "message": "Failed to generate PO report",
             "error": str(e)
         }
+# ============================================================
+# compare data between scanned and system POs End
+# ============================================================

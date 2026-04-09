@@ -10,7 +10,7 @@ from app.models.schemas.sharepoint_schema import FolderRequestParams,SharepointS
 from fastapi.responses import JSONResponse
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import StreamingResponse
-from app.models.domain.AdminDomain import GenerateMissingSharepointPoReport,SharepointFetchMissingMismatchReport,DownloadSharepointMissingMismatchRequest,UpdateSharepointPoCommentRequest,DownloadAllSelectedSharepointPORequest
+from app.models.domain.AdminDomain import SharepointFetchMissingMismatchReport,DownloadSharepointMissingMismatchRequest,UpdateSharepointPoCommentRequest,DownloadAllSelectedSharepointPORequest
 
 
 router = APIRouter()
@@ -18,6 +18,7 @@ router = APIRouter()
 # Setup logger
 logger = logging.getLogger("sharepoint")
 logger.setLevel(logging.INFO)
+
 
 @router.get("/sharepoint_dashboard_card_data")
 async def get_sharepoint_dashboard_stats(request: Request,userId:int):
@@ -32,6 +33,7 @@ async def get_sharepoint_dashboard_stats(request: Request,userId:int):
     except Exception as e :
         return None
     
+
 @router.post("/sharepoint_sites")
 async def get_sharepoint_sites(
     request: SharepointSitesRequest,
@@ -177,7 +179,8 @@ async def sync_sharepoint_files(
         )
         sharepoint_po_det_ids = response.get("extracted_sharepoint_po_ids", [])
         if sharepoint_po_det_ids:
-                await service.generate_sharepoint_missing_po_report_service(
+                await service.compare_sharepoint_scanned_and_system_pos(
+                    request=request,
                     user_id=user_id,
                     sharepoint_po_det_ids=sharepoint_po_det_ids,
                     sp_repo=sp_repo
@@ -196,17 +199,6 @@ async def sync_sharepoint_files(
             status_code=500,
             detail="Internal server error while syncing SharePoint files",
         )
-    
-# CONTROLLER ENDPOINT (IN SAME FILE)
-# ---------------------------------------------------------------------
-# @router.post("/generate_sharepoint_missing_po_report")
-# async def generate_missing_po_report(
-#     request : GenerateMissingSharepointPoReport,
-#     sp_repo: SharepointRepo = Depends(get_repository(SharepointRepo))
-# ):
-#     service = SharepointService(sp_repo)
-#     result = await service.generate_sharepoint_missing_po_report_service(request.user_id)
-#     return JSONResponse(content=jsonable_encoder(result))
 
 #----------------------Sharepoint Table Data-------------------------
 @router.post("/sharepoint_missing_po")
@@ -238,7 +230,7 @@ async def matched_po_data_fetch(request: Request, frontendRequest: SharepointFet
         return []
     
     
- #Donwload Missing Report and Missmatch Report 
+#Download Missing Report and Mismatch Report 
 @router.post("/download_sharepoint_missing_po_report")
 async def download_sharepoint_missing_po_report(
     request: Request,
@@ -266,7 +258,7 @@ async def download_sharepoint_missing_po_report(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-#Donwload Missing Report and Missmatch Report 
+#Download Missing Report and Mismatch Report 
 @router.post("/download_sharepoint_mismatch_po_report")
 async def download_sharepoint_mismatch_po_report(
     request: Request,

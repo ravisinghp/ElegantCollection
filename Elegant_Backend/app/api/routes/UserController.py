@@ -418,19 +418,6 @@ async def save_folder_mapping(payload: FolderMappingRequest, request: Request ):
             status_code=500,
             detail="Internal server error while saving folder mapping"
         )   
- 
- 
-     
-#Update Term Condition Fleg When User login once   
-# @router.post("/update_term_condition_flag")
-# async def update_term_condition_flag(request: Request, user_id: int, role_id: int, org_id: int):
-#     try:
-#         result = await UserService.update_term_condition_flag(user_id, role_id, org_id, request)
-#         if not result:
-#             raise HTTPException(status_code=400, detail="User not found or update failed")
-#         return {"success": True, "message": "Terms accepted"}
-#     except Exception as e:
-#         raise HTTPException(status_code=500, detail=str(e))
 
 
 #--------------Soft Delete and Hard Delete User and all related tables by System Admin start--------------

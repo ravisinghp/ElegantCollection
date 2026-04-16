@@ -1,10 +1,11 @@
-
+import os
 from collections import defaultdict
 from app.utils.email_sender import send_employee_email
 
 class EscalationService:
     def __init__(self, repo):
         self.repo = repo
+        self.admin_email = os.getenv("ADMIN_EMAIL") 
 
     async def run_escalation(self):
         missing = await self.repo.get_missing_reports()
@@ -25,188 +26,6 @@ class EscalationService:
             grouped[report["user_id"]].append(report)
         return dict(grouped)
 
-
-# for ignore --------------------------------------------------------------------------------------
-
-    # def _send_emails(self, missing, mismatch):
-    #     EMPLOYEE_DAYS = 3
-    #     has_valid_data = False
-
-    #     body = "ESCALATION REPORT\n\n"
-
-    #     if missing:
-    #         body += "MISSING PO\n"
-    #         for r in missing:
-    #             if r.get("working_days") != EMPLOYEE_DAYS:
-    #                 continue
-
-    #             has_valid_data = True   # MARK VALID DATA
-    #             body += (
-    #                 f"User ID: {r['user_id']} | "
-    #                 f"Level: {r['escalation_level']} | "
-    #                 f"Working Days: {r['working_days']}\n"
-    #             )
-
-    #     if mismatch:
-    #         body += "\n MISMATCH PO\n"
-    #         for r in mismatch:
-    #             if r.get("working_days") != EMPLOYEE_DAYS:
-    #                 continue
-
-    #             has_valid_data = True   #  MARK VALID DATA
-    #             body += (
-    #                 f"User ID: {r['user_id']} | "
-    #                 f"Level: {r['escalation_level']} | "
-    #                 f"Working Days: {r['working_days']}\n"
-    #             )
-
-    #     #  NO VALID RECORD → NO EMAIL
-    #     if not has_valid_data:
-    #         return
-
-    #     send_employee_email(
-    #         subject="PO Escalation Alert",
-    #         body=body
-    #     )
-
-   
-
-# fixed the email are send group by  this is working proper
-# ----------------------------------------------------------------------
-    # async def _send_emails(self, missing, mismatch):
-    #     EMPLOYEE_DAYS = 3
-
-    #     #  Group records by user
-    #     missing_by_user = self._group_by_user(
-    #         [r for r in missing if r.get("working_days") == EMPLOYEE_DAYS]
-    #     )
-    #     mismatch_by_user = self._group_by_user(
-    #         [r for r in mismatch if r.get("working_days") == EMPLOYEE_DAYS]
-    #     )
-
-    #     # All users involved
-    #     user_ids = set(missing_by_user.keys()) | set(mismatch_by_user.keys())
-
-    #     if not user_ids:
-    #         return
-
-    #     #  Fetch emails
-    #     user_emails = await self.repo.get_user_emails(list(user_ids))
-    #     email_map = dict(zip(user_ids, user_emails))  # user_id → email
-
-    #     #  Send ONE MAIL PER USER
-    #     for user_id in user_ids:
-    #         email = email_map.get(user_id)
-    #         if not email:
-    #             continue
-
-    #         body = "ESCALATION REPORT\n\n"
-
-    #         if user_id in missing_by_user:
-    #             body += " MISSING PO\n"
-    #             for r in missing_by_user[user_id]:
-    #                 body += (
-    #                     f"PO ID: {r.get('po_missing_id')} | "
-    #                     f"Level: {r['escalation_level']} | "
-    #                     f"Working Days: {r['working_days']}\n"
-    #                 )
-
-    #         if user_id in mismatch_by_user:
-    #             body += "\n MISMATCH PO\n"
-    #             for r in mismatch_by_user[user_id]:
-    #                 body += (
-    #                     f"PO ID: {r.get('po_mismatch_id')} | "
-    #                     f"Level: {r['escalation_level']} | "
-    #                     f"Working Days: {r['working_days']}\n"
-    #                 )
-
-    #         send_employee_email(
-    #             subject="PO Escalation Alert",
-    #             body=body,
-    #             recipients=[email]   # ONLY THIS USER
-    #         )
-
-    # async def _send_emails(self, missing, mismatch):
-    #     EMPLOYEE_DAYS = 3
-    #     SYSTEM_USER_ID = 1  # system / scheduler user
-
-    #     # Group records by user
-    #     missing_by_user = self._group_by_user(
-    #         [r for r in missing if r.get("working_days") == EMPLOYEE_DAYS]
-    #     )
-    #     mismatch_by_user = self._group_by_user(
-    #         [r for r in mismatch if r.get("working_days") == EMPLOYEE_DAYS]
-    #     )
-
-    #     user_ids = set(missing_by_user.keys()) | set(mismatch_by_user.keys())
-    #     if not user_ids:
-    #         return
-
-    #     # Fetch emails
-    #     user_emails = await self.repo.get_user_emails(list(user_ids))
-    #     email_map = dict(zip(user_ids, user_emails))
-
-    #     # ONE MAIL PER USER
-    #     for user_id in user_ids:
-    #         email = email_map.get(user_id)
-    #         if not email:
-    #             continue
-
-    #         body = "ESCALATION REPORT\n\n"
-
-    #         if user_id in missing_by_user:
-    #             body += " MISSING PO\n"
-    #             for r in missing_by_user[user_id]:
-    #                 body += (
-    #                     f"PO ID: {r.get('po_missing_id')} | "
-    #                     f"Level: {r['escalation_level']} | "
-    #                     f"Working Days: {r['working_days']}\n"
-    #                 )
-
-    #         if user_id in mismatch_by_user:
-    #             body += "\n MISMATCH PO\n"
-    #             for r in mismatch_by_user[user_id]:
-    #                 body += (
-    #                     f"PO ID: {r.get('po_mismatch_id')} | "
-    #                     f"Level: {r['escalation_level']} | "
-    #                     f"Working Days: {r['working_days']}\n"
-    #                 )
-
-    #         # SEND MAIL (TRY / EXCEPT HERE 👇)
-    #         try:
-    #             send_employee_email(
-    #                 subject="PO Escalation Alert",
-    #                 body=body,
-    #                 recipients=[email]
-    #             )
-    #             mail_sent = 1
-    #             mail_error = None
-    #         except Exception as e:
-    #             mail_sent = 0
-    #             mail_error = str(e)
-
-    #         # LOG EACH ESCALATED REPORT (DB)
-    #         for r in missing_by_user.get(user_id, []):
-    #             await self.repo.insert_escalation_log(
-    #                 report_id=r["po_missing_id"],
-    #                 report_type="MISSING_PO",
-    #                 escalation_level=r["escalation_level"],
-    #                 escalated_to_role=r["recipient_role"],
-    #                 escalated_to_email=email,
-    #                 created_by=SYSTEM_USER_ID,
-    #                 mail_sent=mail_sent
-    #             )
-
-    #         for r in mismatch_by_user.get(user_id, []):
-    #             await self.repo.insert_escalation_log(
-    #                 report_id=r["po_mismatch_id"],
-    #                 report_type="MISMATCH_PO",
-    #                 escalation_level=r["escalation_level"],
-    #                 escalated_to_role=r["recipient_role"],
-    #                 escalated_to_email=email,
-    #                 created_by=SYSTEM_USER_ID,
-    #                 mail_sent=mail_sent
-    #             )
 
     async def _send_emails(self, missing, mismatch):
         EMPLOYEE_DAYS = 3
@@ -305,3 +124,53 @@ class EscalationService:
                     mail_sent=mail_sent
                 )
 
+        # ================= ADMIN ESCALATION (5+ DAYS OR DB ROLE) =================
+        admin_missing = [
+            r for r in missing
+            if r.get("working_days", 0) >= 5 or r.get("recipient_role") == "ADMIN"
+        ]
+
+        admin_mismatch = [
+            r for r in mismatch
+            if r.get("working_days", 0) >= 5 or r.get("recipient_role") == "ADMIN"
+        ]
+
+        if (admin_missing or admin_mismatch) and self.admin_email:
+
+            body = (
+                "Dear Admin,\n\n"
+                "The following Purchase Orders have crossed SLA and require attention.\n\n"
+                "--------------------------------------------------\n\n"
+            )
+
+            if admin_missing:
+                body += "MISSING PURCHASE ORDERS\n"
+                for r in admin_missing:
+                    body += (
+                        f"PO Number: {r.get('po_number', 'N/A')} | "
+                        f"Pending: {r['working_days']} working days\n"
+                    )
+                body += "\n"
+
+            if admin_mismatch:
+                body += "MISMATCH PURCHASE ORDERS\n"
+                for r in admin_mismatch:
+                    body += (
+                        f"PO Number: {r.get('po_number', 'N/A')} | "
+                        f"Pending: {r['working_days']} working days\n"
+                    )
+                body += "\n"
+
+            body += (
+                "--------------------------------------------------\n\n"
+                "Regards,\nPO Escalation System"
+            )
+
+            try:
+                send_employee_email(
+                    subject="URGENT: Admin Escalation - PO Pending Beyond SLA",
+                    body=body,
+                    recipients=[self.admin_email]
+                )
+            except Exception:
+                pass

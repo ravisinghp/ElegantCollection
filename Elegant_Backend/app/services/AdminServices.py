@@ -311,7 +311,7 @@ async def reset_password(request: Request, user_id: int,  new_password: str) -> 
         # Use shared email service
             email_service = EmailService()
             try:
-                login_link = "http://192.168.0.106:5173/login"
+                login_link = "http://localhost:5173/login"
                 # login_link = "http://172.105.34.172:5000/login"
                 await email_service.send_password_changed_email(
                     user_name=updated[2],

@@ -5,11 +5,10 @@ import os
 
 load_dotenv()
 
-SMTP_SERVER=os.getenv("SMTP_SERVER", "smtp.gmail.com")
-SMTP_PORT=os.getenv("SMTP_PORT")
-SMTP_EMAIL=os.getenv("SMTP_EMAIL")
-SMTP_PASSWORD=os.getenv("SMTP_PASSWORD")
-
+SMTP_SERVER=os.getenv("MAIL_SERVER", "smtp.gmail.com")
+SMTP_PORT=os.getenv("MAIL_PORT")
+SMTP_EMAIL=os.getenv("MAIL_FROM")
+SMTP_PASSWORD=os.getenv("MAIL_PASSWORD")
 
 def send_employee_email(subject: str, body: str, recipients: list[str]):
     print("Recipients:", recipients)

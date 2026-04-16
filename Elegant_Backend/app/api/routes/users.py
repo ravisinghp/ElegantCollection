@@ -6,13 +6,13 @@ from app.api.dependencies.database import get_repository
 from app.db.repositories.mails import MailsRepository
 from app.core.redis import redis_client
 from app.services.usersmailservice import (
+    fetch_system_pos_with_oldest_date,
     get_auth_url,
     fetch_and_save_mails_by_folders,
     fetch_all_folders,
-    fetch_all_labels,
-    fetch_and_save_mails_by_labels,
     compare_scanned_and_system_pos,
-    get_valid_outlook_token
+    get_valid_outlook_token,
+    reconcile_all_pos
 )
 from datetime import datetime, timedelta
 import requests, json, time, os
@@ -226,22 +226,53 @@ async def get_emails(
             )
 
         if provider == "outlook":
+            # ---------------- FETCH MAILS ----------------
             response = await fetch_and_save_mails_by_folders(
                 token, folders, user_id, from_date, to_date, mails_repo
             )
             logger.info(f"response after sync:{response}")
+
+            # ---------------- FETCH SYSTEM POS ----------------
+            system_pos = []
+            try:
+                system_pos = await fetch_system_pos_with_oldest_date(mails_repo, request.app)
+            except Exception as e:
+                logger.warning(f"[RECONCILE] fetch_system_pos failed — skipping reconcile+compare: {e}")
+
+            # ---------------- RECONCILE (INDEPENDENT) ----------------
+            reconcile_stats = {}
+            if system_pos:
+                try:
+                    reconcile_stats = await reconcile_all_pos(
+                        user_id=user_id,
+                        mails_repo=mails_repo,
+                        system_pos=system_pos
+                    )
+                    logger.info(f"reconcile stats: {reconcile_stats}")
+                except Exception as e:
+                    logger.error(f"[RECONCILE] reconcile_all_pos failed (non-fatal): {e}", exc_info=True)
+
+            # ---------------- COMPARE recent id with system pos ----------------
             po_det_ids = response.get("extracted_po_ids", [])
+
             if po_det_ids:
-                response = await compare_scanned_and_system_pos(
-                    request, user_id=user_id, po_det_ids=po_det_ids, mails_repo=mails_repo
+                compare_response = await compare_scanned_and_system_pos(
+                    request,
+                    user_id=user_id,
+                    po_det_ids=po_det_ids,
+                    mails_repo=mails_repo,
+                    system_pos=system_pos 
                 )
-                logger.info(f"response after compare:{response}")
-            return {"status": "success"}
+                logger.info(f"response after compare:{compare_response}")
+
+            return {
+                "status": "success",
+                "message": "Mail sync + reconciliation completed",
+                "reconcile_stats": reconcile_stats
+            }
 
         elif provider == "google":
-            return await fetch_and_save_mails_by_labels(
-                token, folders, user_id, org_id, mails_repo
-            )
+            return 
 
     except HTTPException as http_exc:
         logger.error(f"Exception :{http_exc}")
@@ -270,7 +301,7 @@ async def get_emails_folders(
             )
 
         if provider == "google":
-            return await fetch_all_labels(token)
+            return 
         elif provider == "outlook":
             return await fetch_all_folders(token)
 

@@ -2,14 +2,14 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from datetime import datetime
 import aiomysql
 from fastapi import FastAPI
+import pytz
 
 import app
 from app.db.repositories.escalationRepo import EscalationRepository
 from app.services.EscalationService import EscalationService
 
 
-scheduler = AsyncIOScheduler()
-
+scheduler = AsyncIOScheduler(timezone=pytz.timezone("Asia/Kolkata"))
 
 async def run_escalation_job(app: FastAPI):
     try:

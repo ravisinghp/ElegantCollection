@@ -267,12 +267,17 @@ def clean_email_body(body_text: str) -> str:
     lines = body_text.split("\n")
     cleaned_lines: List[str] = []
     skip_line_starts = [
-        r"^From:", r"^To:", r"^Cc:", r"^CC:", r"^BCC:", r"^Bcc:", r"^Sent:", r"^Subject:", r"^Date:",
-        r"^Reply-To:", r"^Message-ID:", r"^X-.*?:", r"^Content-Type:", r"^Content-Transfer-Encoding:", r"^MIME-Version:",
-        r"^Return-Path:", r"^Delivered-To:", r"^Received:", r"^On .* wrote:", r"^-----Original Message-----",
-        r"^Microsoft Teams$", r"^Need help\?$", r"^Join the meeting now$", r"^Meeting ID:", r"^Passcode:",
-        r"^For organisers:", r"^Meeting options$", r"^_{6,}$",
+        r"^From:", r"^To:", r"^Cc:", r"^CC:", r"^BCC:", r"^Bcc:", r"^Sent:",
+        r"^Subject:", r"^Reply-To:", r"^Message-ID:", r"^X-.*?:",
+        r"^Content-Type:", r"^Content-Transfer-Encoding:", r"^MIME-Version:",
+        r"^Return-Path:", r"^Delivered-To:", r"^Received:",
+        r"^On .* wrote:", r"^-----Original Message-----",
+        r"^Microsoft Teams$", r"^Need help\?$", r"^Join the meeting now$",
+        r"^Meeting ID:", r"^Passcode:", r"^For organisers:",
+        r"^Meeting options$", r"^_{6,}$",
     ]
+    # REMOVED bare "^Date:" — it kills "PO Date: ..." lines.
+    # Email header Date is already handled by the mail graph API fields.
     url_re = re.compile(r"^(https?://|www\.)", re.IGNORECASE)
     skip_res = [re.compile(pat, re.IGNORECASE) for pat in skip_line_starts]
     for raw_line in lines:
@@ -286,6 +291,7 @@ def clean_email_body(body_text: str) -> str:
         cleaned_lines.append(line)
     cleaned_text = " ".join(cleaned_lines)
     return re.sub(r"\s+", " ", cleaned_text).strip() or body_text.strip()
+
 
 
 def iso_to_date(iso_dt: Optional[str]) -> Optional[str]:
@@ -312,34 +318,13 @@ def compute_file_hash(content: bytes) -> str:
 def normalize_text(text: str) -> str:
     if not text:
         return ""
-
-    text = text.replace("\xa0", " ")    
-    text = text.replace("\u200b", " ")   
+    text = text.replace("\xa0", " ")
+    text = text.replace("\u200b", " ")
     text = text.replace("\r", "\n")
-
-    # normalize separators
-    text = re.sub(r"[=]", ":", text)
-
-    # collapse whitespace
+    # REMOVED: re.sub(r"[=]", ":", text) — corrupts style codes and URLs
     text = re.sub(r"\s+", " ", text)
-
     return text.strip()
 
-PO_FIELD_NAMES = [
-    "po_number",
-    "customer_name",
-    "vendor_number",
-    "po_date",
-    "delivery_date",
-    "cancel_date",
-    "ec_style_number",
-    "customer_style_number",
-    "quantity",
-    "gold_karat",
-    "color",
-    "description",
-    "gold_lock"
-]
 
 def extract_po_fields_regex(text: str) -> dict:
     if not text or len(text) < 30:
@@ -397,25 +382,25 @@ MANDATORY_FIELDS = ["po_number", "customer_name", "vendor_number", "po_date", "d
 async def extract_po_fields(text: str) -> dict:
     regex_data_response = extract_po_fields_regex(text)
     regex_data = trim_to_db_limits(regex_data_response)
-    logger.info(f"regex data:{regex_data}")
+    logger.info(f"regex data: {regex_data}")
 
-    # Check if mandatory fields are present
-    if all(regex_data.get(f) for f in MANDATORY_FIELDS) and len(text.strip()) >= 100:
+    if all(regex_data.get(f) for f in MANDATORY_FIELDS) and len(text.strip()) >= 50:
         return regex_data
-    
-    # Skip LLM if text too short or mandatory field names not present literally
-    if len(text.strip()) <100: 
+
+    if len(text.strip()) < 50:
+        logger.info("Skipping LLM — text too short")
         return EMPTY_PO
 
-    # Otherwise call LLM
     llm_data = await extract_po_fields_from_llm(text)
-    logger.info(f"LLM data:{llm_data}")
+    logger.info(f"LLM data: {llm_data}")
 
-    # Merge: LLM always wins
-    final = regex_data.copy()
-    for k, v in llm_data.items():
-        if v not in [None, "", "null", "N/A"]:
-            final[k] = v  # LLM overrides regex
+    # Merge: LLM fills only the fields regex missed — never blanks a regex value
+    final = llm_data
+    # final = regex_data.copy()
+    # for k, v in llm_data.items():
+    #     if v not in (None, "", "null", "N/A"):
+    #         if not final.get(k):          # only fill empty slots
+    #             final[k] = v
 
     return final if any(final.values()) else EMPTY_PO
 
@@ -437,17 +422,12 @@ PO_REGEX_PATTERNS = {
 
     # ---------------- CUSTOMER NAME ----------------
     "customer_name": [
-        # ----- NEW PATTERNS -----
-        r"(?i)ship\s+([A-Za-z0-9&.,\-]+)",
-        r"Ship\s+To:\s*\n\s*([A-Za-z0-9 &.,\-]+(?:\n\s*[A-Za-z0-9 &.,\-]+){1,4})",
-        r"ship\s*to\s*:\s*\n\s*([A-Za-z0-9 &.,\-]+)",
-        r"(?:ship\s*to|deliver\s*to|ship\s|bill\s*to|delivery\s*address)\s*[:\-]?\s*([A-Za-z0-9&.,\-\s]+)",
-        r"(?:customer\s*name|buyer)\s*[:\-]?\s*([A-Za-z0-9&.,\-\s]+)",
-        # ----- OLD WORKING -----
-        r"(?:customer\s*name|customer|buyer|client)\s*[:\-]?\s*([A-Za-z][A-Za-z\s&\.]+?)",
-        r"(?i)customer_name\s*:\s*(.+?)(?=\s+[a-z_]+?\s*:|$)",
-        r"(?i)^customer(?:\s*name)?\s*[:\-]?\s*(.+?)(?=\s+(?:supplier|vendor|po|delivery|cancel|date|quantity|gold|color|description)\s*:|$)",
-        r"(?=\s+(?:vendor|vendor_no|vendor_number|supplier|po|delivery|cancel|date|quantity|gold|color|description)\b|$)",
+        r"(?i)\bcustomer\s*(?:name)?\b\s*\|\s*([A-Za-z0-9&.,\-/ ]{2,})",
+        r"(?i)\bcustomer\s*(?:name)?\s*[:\-]\s*\n\s*([A-Za-z0-9&.,\-/ ]{2,})",
+        r"(?i)\bcustomer\s*(?:name)?\s*[:\-]\s*([A-Za-z0-9&.,\-/ ]{2,})",
+        r"(?i)\bship\s*to\s*:\s*\n\s*([A-Za-z0-9&.,\-/ ]{2,})",
+        r"(?i)(?:ship\s*to|bill\s*to|deliver\s*to)\s*[:\-]\s*([A-Za-z0-9&.,\-/ ]{2,})",
+        r"(?i)(?:customer|buyer|client)\s*[:\-]?\s*([A-Za-z0-9&.,\-/ ]+?)(?=\s+(?:vendor|po|date|delivery|qty|quantity|gold|color|description)\b|$)",
     ],
 
     # ---------------- VENDOR NUMBER ----------------
@@ -595,7 +575,8 @@ KEYWORD_REGEX_MAP = {
         r"\b(po)\d+\b",
         r"\b(p\.o\.)\s*(?:no|number|#)?\s*\d*\b",
         r"\b(purchase\s*order)\s*(?:no|number)?\s*\d*\b",
-        r"\b(order)\s*(?:no|number|#|id)?\s*\d+\b"
+        r"\b(order)\s*(?:no|number|#|id)?\s*\d+\b",
+       r"\b(order|orders|ordered|reorder|re-?order|ordering|purchase|purchases|po|attached|attachment|attachments|enclosed)\b"
     ],
 
     "customer_name": [
@@ -700,126 +681,175 @@ def normalize_keyword(k: str) -> str:
 
 
 # ------------------- Extraction ------------------- #
+PO_FIELD_NAMES = [
+    "po_number",
+    "customer_name",
+    "vendor_number",
+    "po_date",
+    "delivery_date",
+    "cancel_date",
+    "ec_style_number",
+    "customer_style_number",
+    "quantity",
+    "gold_karat",
+    "color",
+    "description",
+    "gold_lock"
+]
 
 EMPTY_PO = {field: None for field in PO_FIELD_NAMES}
 
+
 async def extract_po_fields_from_llm(text: str) -> dict:
+    field_list = json.dumps(PO_FIELD_NAMES, indent=2)
     prompt = f"""
-You are a document extraction engine for Jewelry Purchase Orders.
+You are a precision extraction engine for Jewelry Purchase Orders.
 
-RULES (STRICT):
-- Extract ONLY values explicitly present in the text
-- NEVER merge two fields
-- NEVER include field names inside values
-- NEVER guess or infer
-- If a value contains another field label, SPLIT and keep only the correct value
-- Return null if missing
-- Preserve original text formatting
+Your job is to extract structured data from raw text parsed from files
+(PDFs, Excel sheets, Word docs, images via OCR, or email bodies).
 
---------------------
-FIELD-SPECIFIC RULES
---------------------
+===========================
+GLOBAL RULES (NON-NEGOTIABLE)
+===========================
+- Extract ONLY values that are EXPLICITLY present with a clear label.
+- NEVER infer, guess, or derive values from context.
+- NEVER merge two fields into one value.
+- NEVER include field label names inside field values.
+- If a value is absent, ambiguous, or only implied return null.
+- Preserve original formatting (casing, spacing, units) in extracted values.
+- Do not normalize, rewrite, or clean values.
+
+===========================
+SOURCE-SPECIFIC PARSING RULES
+===========================
+
+[EXCEL / CSV TEXT]
+- Text arrives as row-by-row dumps separated by pipe characters.
+- First row is typically the header row — match column names to fields.
+- If multiple data rows exist extract the FIRST valid row only (unless items list).
+- Ignore "Sheet: name" prefix lines.
+
+[PDF / OCR TEXT]
+- Labels and values may be on separate lines.
+- For key:value pairs the value is text immediately AFTER the colon on the same line,
+  or the first non-empty line below the label.
+
+[EMAIL BODY TEXT]
+- Extract only from the FIRST (top) email block.
+- Ignore quoted previous messages and signatures.
+- Labels may be inline e.g. "PO#: 12345, Customer: ABC Corp" — split correctly.
+
+[IMAGE / OCR TEXT]
+- Apply light OCR error tolerance: "P0 Number" likely means "PO Number".
+- Only extract if you are more than 90 percent certain of the value.
+
+===========================
+FIELD-BY-FIELD RULES
+===========================
+
 PO NUMBER:
-- Extract only if clearly labeled as PO Number, P.O., Purchase Order Number, or similar.
-- Value must look like an actual PO identifier.
-- Also accept labels: PO #, PO#, P.O. #
+- Labels: "PO Number", "P.O.", "PO#", "PO #", "Purchase Order Number", "Order No"
+- Value must look like an alphanumeric PO identifier e.g. "PO-2024-001", "12345A".
+- If multiple PO numbers appear return the FIRST one.
 
 CUSTOMER NAME:
-- Extract only if explicitly labeled as:
-  customer, customer name, buyer, sold to
-- Do NOT treat vendor, supplier, ship-from, or company logo name as customer.
-- If label is missing or unclear, return null.
+- Labels: "Customer", "Customer Name", "Bill To", "Sold To", "Buyer"
+- Customer Name can also be an alphanumeric code (e.g., DM5-GER, ABC-123, XYZ LTD).
+- If a field labeled "Customer" exists, ALWAYS extract its full value exactly as written.
+- Do NOT extract address lines as the customer name.
 
-VENDOR NAME:
-- Extract only if explicitly labeled as:
-  vendor, supplier, sold by
-- Do NOT infer from logos or addresses.
+VENDOR NUMBER:
+- Labels: "Vendor", "Vendor No", "Vendor Number", "Supplier Code", "Vendor ID"
+- Value is typically numeric or alphanumeric e.g. "V-1042", "5583".
 
 PO DATE:
-- Extract only if clearly labeled as PO Date, Order Date, or Purchase Order Date.
-- Also accept label: Date (only if located near PO Number or in PO header section)
+- Labels: "PO Date", "Order Date", "Purchase Order Date", "Date"
+- Accept bare "Date" only if near PO Number or document title.
+- Return date exactly as written.
 
 DELIVERY DATE:
-- Extract only if clearly labeled as Delivery Date, Due Date, or Expected Delivery.
+- Labels: "Delivery Date", "Due Date", "Ship By", "Required By", "Expected Delivery"
+- Return null if only per-item delivery dates exist.
 
-GOLD KARAT / METAL:
-- Extract ONLY if the label appears as a standalone field header.
-- Valid labels (case-insensitive):
-  gold karat, karat, metal, gold purity
-- The label MUST be immediately followed by:
-  • a colon (:)
-  • OR a dash (-)
-  • OR a newline (value on the next line)
-- Extract ONLY the value directly associated with that label.
-- Return the value EXACTLY as written (examples: "14KW", "18K Rose", "22K Yellow", "A W", "18 KT").
-- DO NOT extract if:
-  • the label appears inside a sentence
-  • the label is followed by words like "field", "example", "e.g.", "supports", etc.
-  • the value appears in descriptions, item rows, product lines, or explanatory text
-- If no properly formatted standalone labeled field exists, return null.
-- If multiple valid labeled fields exist, return the first one.
+CANCEL DATE:
+- Labels: "Cancel Date", "Cancellation Date", "Cancel By", "Void After"
 
+GOLD KARAT:
+- Labels: "Gold Karat", "Karat", "Metal", "Gold Purity", "KT", "K"
+- Valid examples: "14KW", "18K", "22K Yellow", "18 KT", "14K Rose Gold"
+- Label MUST be a standalone field header not embedded in a description.
+
+EC STYLE NUMBER:
+- Labels: "EC Style", "EC Style No", "EC Style Number", "Style#", "IDD Style #"
+- Alphanumeric style code. Do NOT extract customer-side style numbers.
+
+CUSTOMER STYLE NUMBER:
+- Labels: "Customer Style", "Cust Style", "Your Style", "Vendor Style #"
+- This is the buyer's own reference number distinct from EC Style.
 
 COLOR:
-- Extract only if explicitly labeled as:
-  color or colour
-- Do NOT extract color from description or product names.
+- Labels: "Color", "Colour", "Metal Color"
+- Do NOT extract color embedded in description sentences.
 
 DESCRIPTION:
-- Extract ONLY if explicitly labeled as:
-  description, item description, desc, particulars, product description, item details
-- The value must be the FULL description exactly as written after the label.
-- Preserve original wording and order.
-- Do NOT truncate, summarize, or rewrite.
-- Do NOT extract description from tables, item rows, or free text without a label.
-- If no explicit description label exists, return null.
+- Labels: "Description", "Item Description", "Particulars", "Goods Description"
+- Extract the FULL value exactly as written.
 
 QUANTITY:
-- Extract only if explicitly labeled as quantity, qty, or pieces.
+- Labels: "Quantity", "Qty", "Pieces", "Pcs", "Ord#"
+- Value must be numeric.
+- Do NOT sum multiple item quantities — return null if only per-item quantities exist.
 
 GOLD LOCK:
-- Extract only if explicitly labeled as gold lock, lock value, or lock percentage.
+- Labels: "Gold Lock", "Lock Value", "Lock %", "Metal Lock"
+- Value may be a percentage or numeric.
 
---------------------
+===========================
+MULTI-ROW ITEM DETECTION
+===========================
+If the text contains a TABLE with multiple product/item rows return:
+  "has_line_items": true
+Still extract all header-level fields. Return null for per-item fields
+(Delivery Date, Gold Karat, Description, Quantity, Color) in the main record.
+
+===========================
 OUTPUT FORMAT
---------------------
-Return a valid JSON object with EXACTLY these keys:
-{PO_FIELD_NAMES}
+===========================
+Return a single valid JSON object with EXACTLY these keys:
+{field_list}
+Plus one optional key: "has_line_items" (boolean, default false).
 
-TEXT:
+Rules:
+- All string values: preserve original casing and formatting.
+- Missing or ambiguous values: null (not empty string, not "N/A").
+- No explanation, preamble, or markdown — JSON only.
+
+===========================
+TEXT TO EXTRACT FROM:
+===========================
 {text}
 """
-
     try:
         resp = openai_client.chat.completions.create(
             model="gpt-4o-mini",
             temperature=0,
             messages=[{"role": "user", "content": prompt}]
         )
-        logger.info(f"response:{resp}")
-
         raw = resp.choices[0].message.content.strip()
-
-        # Remove markdown
-        raw = re.sub(r"^```(?:json)?|```$", "", raw, flags=re.I).strip()
-
-        match = re.search(r"\{.*\}", raw, re.S)
+        raw = re.sub(r"^```(?:json)?|```$", "", raw, flags=re.MULTILINE | re.IGNORECASE).strip()
+        match = re.search(r"\{.*\}", raw, re.DOTALL)
         if not match:
             return EMPTY_PO
-
         data = json.loads(match.group())
-
         result = {}
         for k in PO_FIELD_NAMES:
             v = data.get(k)
             result[k] = v if v not in ("", None, "null", "N/A") else None
-
         return result
-
     except Exception as e:
-        logger.error(f"Exception is:{e}")
+        logger.error(f"LLM extraction failed: {e}")
         return EMPTY_PO
-
+    
 
 from datetime import datetime
 from typing import Optional
@@ -862,35 +892,19 @@ def normalize_po_date_ddmmyyyy(date_str: Optional[str]) -> Optional[str]:
 def normalize_attachment_text(text: str) -> str:
     if not text:
         return ""
-
-    # normalize OCR dashes
     text = text.replace("\u2013", "-").replace("\u2014", "-")
-
-    # fix spaced hyphens in PO numbers and dates
     text = re.sub(r"\s*-\s*", "-", text)
-
-    # fix broken multiline item descriptions
-    text = re.sub(r"(\w+)\s*-\s*\n\s*(\w+)", r"\1 - \2", text)
-
-    # fix broken multiline item descriptions
-    text = re.sub(r"([A-Za-z])\s*-\s*\n\s*([A-Za-z])", r"\1 - \2", text)
-
-    # CRITICAL: flatten remaining newlines
-    text = re.sub(r"\n", " ", text)
-
-    # normalize dates like 2025-07-06
+    # DO NOT flatten newlines — they preserve table row/column structure
+    # Fix broken word-wrap across lines (word- \n word → word - word)
+    text = re.sub(r"([A-Za-z])-\n\s*([A-Za-z])", r"\1-\2", text)
+    # Normalize dates like 2025-07-06
     text = re.sub(
         r"(\d{4})-(\d{1,2})-(\d{1,2})",
         lambda m: f"{m.group(1)}-{int(m.group(2)):02d}-{int(m.group(3)):02d}",
         text,
     )
-
-    # collapse extra spaces
-    text = re.sub(r"[ \t]+", " ", text)
-
-    # clean blank lines
-    text = re.sub(r"\n\s*\n", "\n", text)
-
+    text = re.sub(r"[ \t]+", " ", text)       # collapse horizontal whitespace only
+    text = re.sub(r"\n{3,}", "\n\n", text)    # max 2 consecutive blank lines
     return text.strip()
 
 
@@ -923,49 +937,39 @@ ITEM_BLOCK_REGEX = re.compile(
     re.IGNORECASE | re.DOTALL | re.VERBOSE
 )
 
-def extract_po_items(text: str):
+
+def extract_po_items(text: str) -> list:
+    """
+    Extracts per-row items from structured attachment text.
+    Works on the pipe-delimited row format produced by extract_text_from_attachment.
+    Falls back to an empty list cleanly so the caller inserts a header-only record.
+    """
     items = []
 
-    for match in ITEM_BLOCK_REGEX.finditer(text):
-        block = match.group(1)
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith("Sheet:"):
+            continue
 
-        item = {
-            "description": extract(
-                r"^(.*?)(?:\b\d{2}K\b|\b\d{2}KT\b|\bAG\d{3}\b)",
-                block
-            ),
+        karat_match = re.search(r"\b(\d{2}\s*K[TWY]?|\d{2}\s*KT|AG\d{3})\b", line, re.IGNORECASE)
+        if not karat_match:
+            continue
 
-            "gold_karat": extract(
-                r"(\d{2}K|\d{2}KT|AG\d{3})",
-                block
-            ),
+        qty_match   = re.search(r"(?:qty|quantity|pcs|ord#?)\s*[:\-]?\s*(\d+)|\b(\d+)\s*(?:pcs|pc|ea)\b", line, re.IGNORECASE)
+        date_match  = re.search(r"\b(\d{4}-\d{2}-\d{2}|\d{1,2}[/-]\d{1,2}[/-]\d{2,4})\b", line)
+        color_match = re.search(r"\b(yellow|white|rose)\b", line, re.IGNORECASE)
+        desc_match  = re.search(r"([A-Za-z][A-Za-z0-9 ,\-]{9,})", line)
 
-            "quantity": extract(
-                r"(?:qty|quantity)\s*[:\-]?\s*(\d+)",
-                block
-            ) or extract(r"\b(\d+)\b", block),
+        qty_raw = qty_match.group(1) or qty_match.group(2) if qty_match else None
 
-            "delivery_date": extract(
-                r"(\d{4}-\d{2}-\d{2})",
-                block
-            ),
-
-            "color": extract(
-                r"\b(yellow|white|rose)\b",
-                block
-            ),
-
-            "gold_lock": extract(
-                r"(gold\s*lock\s*[:\-]?\s*(yes|no|true|false))",
-                block
-            )
-        }
-
-        # Convert quantity safely
-        if item["quantity"]:
-            item["quantity"] = int(item["quantity"])
-
-        items.append(item)
+        items.append({
+            "description":    desc_match.group(1).strip() if desc_match else None,
+            "gold_karat":     karat_match.group(1).strip().upper(),
+            "quantity":       int(qty_raw) if qty_raw else None,
+            "delivery_date":  date_match.group(1) if date_match else None,
+            "color":          color_match.group(1).capitalize() if color_match else None,
+            "gold_lock":      None,
+        })
 
     return items
 
@@ -976,55 +980,120 @@ async def extract_po_header(text: str):
 
 IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".bmp", ".tiff", ".webp")
 
+# ---------------- TEXT EXTRACTION ---------------- #
+def xlrd_cell_to_str(cell, workbook) -> str:
+    import xlrd
+    from datetime import datetime
+
+    try:
+        # Proper date handling
+        if cell.ctype == xlrd.XL_CELL_DATE:
+            dt = xlrd.xldate_as_datetime(cell.value, workbook.datemode)
+            return dt.strftime("%Y-%m-%d")
+
+        # Handle numbers that might actually be dates
+        if cell.ctype == xlrd.XL_CELL_NUMBER:
+            # Try converting to date if possible
+            try:
+                dt = xlrd.xldate_as_datetime(cell.value, workbook.datemode)
+                return dt.strftime("%Y-%m-%d")
+            except Exception:
+                return str(cell.value)
+
+        if cell.ctype == xlrd.XL_CELL_EMPTY:
+            return ""
+
+        return str(cell.value)
+
+    except Exception:
+        return str(cell.value)
+
 
 async def extract_text_from_attachment(content_bytes, filename, content_type):
-    """
-    Fast, async-safe text extraction from attachments.
-    Runs heavy parsing in a background thread.
-    """
     ext = (filename or "").lower()
     ct = (content_type or "").lower()
 
     def parse_attachment():
         try:
-            # Text files
             if ct.startswith("text/") or ext.endswith((".txt", ".md", ".csv", ".log")):
                 return content_bytes.decode("utf-8", errors="ignore")
 
-            # PDF files
             elif ct == "application/pdf" or ext.endswith(".pdf"):
+                import PyPDF2
                 reader = PyPDF2.PdfReader(io.BytesIO(content_bytes))
-                return " ".join((p.extract_text() or "") for p in reader.pages)
+                return "\n".join((p.extract_text() or "") for p in reader.pages)
 
-            # Word documents
             elif ct in ("application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                         "application/msword") or ext.endswith((".docx", ".doc")):
+                import docx
                 document = docx.Document(io.BytesIO(content_bytes))
-                return " ".join(p.text for p in document.paragraphs)
+                return "\n".join(p.text for p in document.paragraphs)
 
-            # PowerPoint files
             elif ct in ("application/vnd.openxmlformats-officedocument.presentationml.presentation",
                         "application/vnd.ms-powerpoint") or ext.endswith((".pptx", ".ppt")):
+                from pptx import Presentation
                 prs = Presentation(io.BytesIO(content_bytes))
-                return " ".join(
+                return "\n".join(
                     shape.text
                     for slide in prs.slides
                     for shape in slide.shapes
                     if hasattr(shape, "text")
                 )
-            
-            elif filename.endswith(IMAGE_EXTENSIONS):
-                # IMAGE → OCR
+
+            elif ct in (
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                "application/vnd.ms-excel"
+            ) or ext.endswith((".xlsx", ".xls")):
+                all_text = []
+                if ext.endswith(".xlsx"):
+                    from openpyxl import load_workbook
+                    from datetime import datetime
+
+                    wb = load_workbook(io.BytesIO(content_bytes), data_only=True)
+
+                    for sheet in wb.worksheets:   # FIX
+                        all_text.append(f"Sheet: {sheet.title}")
+
+                        for row in sheet.iter_rows():
+                            values = []
+                            for cell in row:
+                                val = cell.value
+
+                                # Proper date handling
+                                if isinstance(val, datetime):
+                                    val = val.strftime("%Y-%m-%d")
+
+                                values.append(str(val) if val is not None else "")
+
+                            row_text = " | ".join(v for v in values if v.strip())
+                            if row_text:
+                                all_text.append(row_text)
+                elif ext.endswith(".xls"):
+                    import xlrd
+                    wb = xlrd.open_workbook(file_contents=content_bytes)
+                    for sheet in wb.sheets():
+                        all_text.append(f"Sheet: {sheet.name}")
+                        for row_idx in range(sheet.nrows):
+                            row_vals = [
+                                xlrd_cell_to_str(sheet.cell(row_idx, col_idx), wb)
+                                for col_idx in range(sheet.ncols)
+                            ]
+                            row_text = " | ".join(v for v in row_vals if v.strip())
+                            if row_text.strip():
+                                all_text.append(row_text)
+                return "\n".join(all_text)
+
+            elif any(ext.endswith(e) for e in IMAGE_EXTENSIONS):
                 try:
                     return extract_text_from_image_bytes(content_bytes)
                 except Exception as e:
                     logger.error(f"OCR failed for {filename}: {e}")
                     return ""
-            else:
-                return None
 
-        except Exception:
+        except Exception as e:
+            logger.error(f"parse_attachment failed for {filename}: {e}")
             return None
+
     return await asyncio.to_thread(parse_attachment)
 
 
@@ -1106,6 +1175,9 @@ async def fetch_and_save_mails_by_folders(
             messages = []
             next_url = url
 
+            keywords = await mails_repo.fetch_keywords()
+            logger.info(f"keywords are:{keywords}")
+
             # ---------------- PAGINATION ----------------
             while next_url:
                 try:
@@ -1120,8 +1192,6 @@ async def fetch_and_save_mails_by_folders(
                 next_url = data.get("@odata.nextLink")
 
 
-                keywords = await mails_repo.fetch_keywords()
-                logger.info(f"keywords are:{keywords}")
             # ---------------- PROCESS EACH MESSAGE ----------------
             for msg in messages:
                 graph_mail_id = msg.get("id")
@@ -1300,7 +1370,8 @@ async def fetch_and_save_mails_by_folders(
                         continue
 
                     # ---------------- PO ITEMS FROM ATTACHMENT ----------------
-                    items = extract_po_items(normalized_text)
+                    # extract_po_items(normalized_text)
+                    items = None
                     logger.info(f"Items:{items}")
 
                     # Fallback: if no items found, insert header-only
@@ -1367,621 +1438,6 @@ async def fetch_and_save_mails_by_folders(
     "extracted_po_ids": extracted_po_ids
     }
 # ------------------Email + Attachment Fetching + LLM logic end ------------------ #
-
-#### This api is used to fetch past event to current date time events and store counts also
-# keywords = ["analysis", "research", "market"]
-
-async def fetch_and_save_past_events(access_token: str, user_id: int, orgid: int, keywords: str, from_date: str, to_date: str, mails_repo):
-    now = datetime.utcnow().isoformat() + "Z"
-    url = "https://graph.microsoft.com/v1.0/me/events"
-
-    # This code is used to fetch current to past events
-    # params = {
-    #     "$filter": f"end/dateTime le '{now}'",
-    #     # "$filter": f"start/dateTime le '{now}'",
-    #     "$orderby": "start/dateTime DESC",
-    # }
-    # This code is used to fetch events between two dates
-    params = {
-        "$filter": f"start/dateTime ge '{from_date}' and end/dateTime le '{to_date}'",
-        "$orderby": "start/dateTime DESC",
-    }
-    #"$filter": f"start/dateTime le '{now}'"  # it fetch ongoing + past events
-
-    headers = {
-        "Authorization": f"Bearer {access_token}",
-        "Content-Type": "application/json",
-    }
-
-    results = []
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, headers=headers, params=params) as resp:
-                if resp.status != 200:
-                    error_msg = f"Failed to fetch events: {resp.status} {await resp.text()}"
-                    raise Exception(error_msg)
-
-                data = await resp.json()
-                events = data.get("value", [])
-
-                for event in events:
-                    event_id = event.get("id")
-
-                    # Skip if no event id
-                    if not event_id:
-                        continue
-
-                    # âœ… Save into DB only if not exists
-                    exists = await mails_repo.check_event_exists(event_id)
-                    if exists:
-                        continue
-
-                    subject = event.get("subject", "") or ""
-                    body_content = (event.get("body", {}).get("content", "") or "")
-
-                    # âœ… Clean text before counting words
-                    # clean_text = re.sub(r"[_]+", " ", subject + " " + body_content)
-                    # clean_text = re.sub(r"<[^>]+>", " ", clean_text)  # remove HTML tags
-                    # words = re.findall(r"\b\w+\b", clean_text)
-                    # word_count = len(words)
-
-                    # âœ… Clean text before counting words (BODY ONLY)
-                    clean_text = re.sub(r"[_]+", " ", body_content)
-                    clean_text = re.sub(r"<[^>]+>", " ", clean_text)  # remove HTML tags
-                    words = re.findall(r"\b\w+\b", clean_text)
-                    word_count = len(words)
-
-
-                    # âœ… Keyword frequency
-                    keyword_counts = {
-                        k: subject.lower().count(k) + clean_text.lower().count(k)
-                        for k in keywords
-                    }
-                    matched_keywords = {k: c for k, c in keyword_counts.items() if c > 0}
-
-                    if matched_keywords:
-                        organiser = (
-                            event.get("organizer", {})
-                            .get("emailAddress", {})
-                            .get("address", "")
-                        )
-                        attendees = ",".join(
-                            [
-                                a.get("emailAddress", {}).get("address", "")
-                                for a in event.get("attendees", [])
-                            ]
-                        )
-                        description = event.get("bodyPreview", "")
-                        title = subject
-
-                        # âœ… Event start & end datetime
-                        start_str = event.get("start", {}).get("dateTime")
-                        end_str = event.get("end", {}).get("dateTime")
-
-                        start_dt = datetime.fromisoformat(start_str) if start_str else None
-                        end_dt = datetime.fromisoformat(end_str) if end_str else None
-
-                        # âœ… Meeting duration in minutes
-                        duration_minutes = None
-                        if start_dt and end_dt:
-                            duration_minutes = int((end_dt - start_dt).total_seconds() / 60)
-
-                        
-
-                        # âœ… Save into DB
-                        await mails_repo.insert_calendar_event(
-                            event_id=event_id,
-                            user_id=user_id,
-                            organiser=organiser,
-                            attendees=attendees,
-                            title=title,
-                            description=description,
-                            word_count=word_count,
-                            keyword=",".join(matched_keywords.keys()),
-                            repeated_keyword=json.dumps(matched_keywords),
-                            event_start_datetime=start_str,  # store event start
-                            event_end_datetime=end_str,      # store event end
-                            duration_minutes=duration_minutes, # store duration
-                            created_by=user_id,
-                            # updated_by=user_id,
-                        )
-
-                        results.append(
-                            {
-                                "title": title,
-                                "event_start_datetime": start_str,
-                                "event_end_datetime": end_str,
-                                "duration_minutes": duration_minutes,
-                                "word_count": word_count,
-                                "keywords": matched_keywords,
-                            }
-                        )
-    except Exception as e:
-        error_msg = f"Error fetching past events: {str(e)}"
-        print(error_msg)
-        return {"error": error_msg}
-
-    return results
-
-
-## this code is used to fetch gmails form google mails
-
-async def fetch_all_labels(access_token: str) -> List[Dict[str, Any]]:
-    """
-    Fetch all Gmail labels for the authenticated user.
-    """
-    headers = {"Authorization": f"Bearer {access_token}"}
-
-    async with httpx.AsyncClient() as client:
-        resp = await client.get(f"{GMAIL_API}/labels", headers=headers)
-        resp.raise_for_status()
-        labels = resp.json().get("labels", [])
-        
-        label_list = []
-        for label in labels:
-            label_list.append({
-                "id": label.get("id"),
-                "name": label.get("name"),
-            })
-        return label_list
-
-
-# âœ… helper: recursive body extraction
-def extract_body(payload):
-    if "parts" in payload:
-        for part in payload["parts"]:
-            mime_type = part.get("mimeType", "")
-            if mime_type in ["text/html", "text/plain"]:
-                data = part.get("body", {}).get("data")
-                if data:
-                    return base64.urlsafe_b64decode(data).decode("utf-8", errors="ignore")
-            # go deeper if nested multipart
-            if "parts" in part:
-                body = extract_body(part)
-                if body:
-                    return body
-    else:
-        data = payload.get("body", {}).get("data")
-        if data:
-            return base64.urlsafe_b64decode(data).decode("utf-8", errors="ignore")
-    return ""
-
-
-async def fetch_and_save_mails_by_labels(access_token: str, label_names: list[str], user_id: int, org_id: int, mails_repo: "MailsRepository") -> List[Dict[str, Any]]:
-    headers = {"Authorization": f"Bearer {access_token}"}
-    results: List[Dict[str, Any]] = []
-
-    # âœ… reuse your helpers
-    def strip_html_to_text(html_content: Optional[str]) -> str:
-        if not html_content:
-            return ""
-        text = re.sub(r"<[^>]+>", " ", html_content)
-        text = html.unescape(text)
-        text = re.sub(r"\s+", " ", text).strip()
-        return text
-
-    def clean_email_body(body_text: str) -> str:
-        if not body_text:
-            return ""
-        lines = body_text.split("\n")
-        cleaned_lines: List[str] = []
-        skip_line_starts = [
-            r"^From:", r"^To:", r"^Cc:", r"^Subject:", r"^Date:",
-            r"^Reply-To:", r"^Message-ID:", r"^X-.*?:",
-            r"^Content-Type:", r"^MIME-Version:",
-            r"^Received:", r"^On .* wrote:", r"^-----Original Message-----",
-        ]
-        url_re = re.compile(r"^(https?://|www\.)", re.IGNORECASE)
-        skip_res = [re.compile(pat, re.IGNORECASE) for pat in skip_line_starts]
-        for raw_line in lines:
-            line = raw_line.strip()
-            if not line:
-                continue
-            if url_re.match(line):
-                continue
-            if any(rx.match(line) for rx in skip_res):
-                continue
-            cleaned_lines.append(line)
-        cleaned_text = " ".join(cleaned_lines)
-        cleaned_text = re.sub(r"\s+", " ", cleaned_text).strip()
-        return cleaned_text or body_text.strip()
-
-    async with httpx.AsyncClient() as client:
-        # fetch label IDs from names
-        labels_resp = await client.get(f"{GMAIL_API}/labels", headers=headers)
-        labels_resp.raise_for_status()
-        labels = labels_resp.json().get("labels", [])
-        wanted = {l.lower() for l in label_names}
-        label_ids = [l["id"] for l in labels if l["name"].lower() in wanted]
-
-        keywords = await mails_repo.fetch_keywords(org_id)
-
-        for label_id in label_ids:
-            # fetch messages for label
-            msg_list_resp = await client.get(f"{GMAIL_API}/messages?labelIds={label_id}&maxResults=100", headers=headers)
-            msg_list_resp.raise_for_status()
-            messages = msg_list_resp.json().get("messages", [])
-
-            for msg_meta in messages:
-                msg_id = msg_meta.get("id")
-                if not msg_id:
-                    continue
-                if await mails_repo.mail_exists(msg_id, user_id):
-                    continue
-
-                # fetch message details
-                msg_resp = await client.get(f"{GMAIL_API}/messages/{msg_id}?format=full", headers=headers)
-                msg_resp.raise_for_status()
-                msg = msg_resp.json()
-
-                payload = msg.get("payload", {})
-                headers_list = payload.get("headers", [])
-                headers_map = {h["name"].lower(): h["value"] for h in headers_list if "name" in h and "value" in h}
-
-                subject = headers_map.get("subject", "")
-                from_email = headers_map.get("from", "")
-                to_emails = headers_map.get("to", "")
-                cc_emails = headers_map.get("cc", "")
-                bcc_emails = headers_map.get("bcc", "")
-                mail_cc_merged = ",".join([p for p in [cc_emails, bcc_emails] if p]) or None
-
-                # decode body
-                body_data = ""
-                # if "parts" in payload:
-                #     for part in payload["parts"]:
-                #         if part.get("mimeType") == "text/html":
-                #             body_data = base64.urlsafe_b64decode(part["body"].get("data", "")).decode("utf-8", errors="ignore")
-                #             break
-                #         elif part.get("mimeType") == "text/plain":
-                #             body_data = base64.urlsafe_b64decode(part["body"].get("data", "")).decode("utf-8", errors="ignore")
-                # else:
-                #     body_data = base64.urlsafe_b64decode(payload.get("body", {}).get("data", "")).decode("utf-8", errors="ignore")
-
-                body_data = extract_body(payload)
-                body_plain = strip_html_to_text(body_data)
-                body_clean = clean_email_body(body_plain)
-
-                word_count_int = len(re.findall(r"\w+", body_clean))
-                word_count_str = str(word_count_int)
-
-                # keyword match
-                lower_subject = subject.lower()
-                lower_body = body_clean.lower()
-                matched_keywords_list = [k for k in keywords if (k in lower_subject or k in lower_body)]
-                if not matched_keywords_list:
-                    continue
-                matched_keywords_csv = ", ".join(matched_keywords_list)
-
-                # keyword count
-                keyword_counts: Dict[str, int] = {}
-                for k in keywords:
-                    pattern = r'\b' + re.escape(k.lower()) + r'\b'
-                    subject_matches = re.findall(pattern, lower_subject)
-                    body_matches = re.findall(pattern, lower_body)
-                    count = len(subject_matches) + len(body_matches)
-                    if count > 0:
-                        keyword_counts[k] = count
-                matched_keyword_counts_csv = ", ".join(f"{k}:{c}" for k, c in keyword_counts.items())
-                if int(word_count_str) == 0:
-                    continue
-                # save mail
-                
-                
-                # If you have Gmail API message object
-                internal_date_ms = msg['internalDate']  # e.g., 1696831740000
-                date_time = datetime.fromtimestamp(int(internal_date_ms)/1000)  # convert ms -> sec -> datetime
-                mail_dtl_id = await mails_repo.insert_mail_detail(
-                    subject=subject,
-                    body=body_clean,
-                    date_time=date_time,  # Gmail has internalDate if you want
-                    mail_from=from_email,
-                    mail_to=to_emails,
-                    mail_cc=mail_cc_merged,
-                    word_count=word_count_str,
-                    keyword=matched_keywords_csv,
-                    repeated_keyword=matched_keyword_counts_csv,
-                    graph_mail_id=msg_id,
-                    folder_name=label_id,
-                    user_id=user_id,
-                    created_by=user_id,
-                )
-
-                # attachments (similar to Outlook, Gmail parts include attachments)
-                saved_attachments: List[str] = []
-                parts = payload.get("parts", [])
-                for part in parts:
-                    if part.get("filename"):
-                        attach_id = part["body"].get("attachmentId")
-                        if not attach_id:
-                            continue
-                        att_resp = await client.get(f"{GMAIL_API}/messages/{msg_id}/attachments/{attach_id}", headers=headers)
-                        att_resp.raise_for_status()
-                        att = att_resp.json()
-                        content_bytes_b64 = att.get("data")
-                        if not content_bytes_b64:
-                            continue
-                        content = base64.urlsafe_b64decode(content_bytes_b64)
-                        filename = part["filename"]
-                        content_type = part.get("mimeType")
-
-                        safe_filename = re.sub(r'[\\/*?:"<>|&]', "_", filename)
-                        os.makedirs("attachments", exist_ok=True)
-                        file_path = os.path.join("attachments", safe_filename)
-                        try:
-                            with open(file_path, "wb") as f:
-                                f.write(content)
-                        except Exception:
-                            file_path = None
-                        # word count/type extraction intentionally left same as existing flow
-                        # (reuse simplified path to avoid altering current behavior)
-                        # Compute attachment word count where feasible
-                        attach_word_count_str: Optional[str] = None
-                        attachment_text: Optional[str] = None
-                        try:
-                            ct = (content_type or "").lower()
-                            fname = (filename or "").lower()
-                            if ct.startswith("text/") or fname.endswith((".txt", ".md", ".csv", ".log")):
-                                try:
-                                    attachment_text = content.decode("utf-8", errors="ignore")
-                                    attach_word_count_str = str(len(re.findall(r"\w+", attachment_text)))
-                                except Exception:
-                                    attach_word_count_str = None
-                            elif ct == "application/pdf" or fname.endswith(".pdf"):
-                                if PyPDF2 is not None:
-                                    try:
-                                        reader = PyPDF2.PdfReader(io.BytesIO(content))
-                                        pages_text = []
-                                        for page in getattr(reader, "pages", []):
-                                            try:
-                                                pages_text.append(page.extract_text() or "")
-                                            except Exception:
-                                                continue
-                                        attachment_text = " ".join(pages_text)
-                                        attach_word_count_str = str(len(re.findall(r"\w+", attachment_text)))
-                                    except Exception:
-                                        attach_word_count_str = None
-                            elif (
-                                ct in (
-                                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                                    "application/msword",
-                                )
-                                or fname.endswith(".docx")
-                            ):
-                                if docx is not None:
-                                    try:
-                                        document = docx.Document(io.BytesIO(content))
-                                        attachment_text = " ".join([p.text or "" for p in document.paragraphs])
-                                        attach_word_count_str = str(len(re.findall(r"\w+", attachment_text)))
-                                    except Exception:
-                                        attach_word_count_str = None
-
-                            # PowerPoint (PPTX)
-                            elif (
-                                ct in (
-                                    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-                                    "application/vnd.ms-powerpoint",
-                                )
-                                or fname.endswith((".pptx", ".ppt"))
-                            ):
-                                try:
-                                    prs = Presentation(io.BytesIO(content))
-                                    slides_text = []
-                                    for slide in prs.slides:
-                                        for shape in slide.shapes:
-                                            if hasattr(shape, "text"):
-                                                slides_text.append(shape.text)
-                                    attachment_text = " ".join(slides_text)
-                                    attach_word_count_str = str(len(re.findall(r"\w+", attachment_text)))
-                                except Exception:
-                                    attach_word_count_str = None
-
-                            elif (
-                                ct in (
-                                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                    "application/vnd.ms-excel",
-                                )
-                                or fname.endswith((".xlsx", ".xls"))
-                            ):
-                                try:
-                                    attachment_text = ""
-                                    attach_word_count_str = None
-
-                                    if fname.endswith(".xlsx"):
-                                        import openpyxl
-                                        wb = openpyxl.load_workbook(io.BytesIO(content), data_only=True)
-                                        cells_text = []
-                                        for sheet in wb.worksheets:
-                                            for row in sheet.iter_rows(values_only=True):
-                                                row_text = " ".join([str(cell) for cell in row if cell is not None])
-                                                cells_text.append(row_text)
-                                        attachment_text = " ".join(cells_text)
-                                    
-                                    elif fname.endswith(".xls"):
-                                        import xlrd
-                                        wb = xlrd.open_workbook(file_contents=content)
-                                        cells_text = []
-                                        for sheet in wb.sheets():
-                                            for row_idx in range(sheet.nrows):
-                                                row_values = sheet.row_values(row_idx)
-                                                row_text = " ".join([str(cell) for cell in row_values if cell])
-                                                cells_text.append(row_text)
-                                        attachment_text = " ".join(cells_text)
-
-                                    if attachment_text:
-                                        attach_word_count_str = str(len(re.findall(r"\w+", attachment_text)))
-
-                                except Exception:
-                                    attach_word_count_str = None
-
-                        except Exception:
-                            attach_word_count_str = None
-
-                        # Check for keywords in attachment text
-                        attachment_keywords = []
-                        attachment_keyword_counts = {}
-                        if attachment_text:
-                            lower_attachment_text = attachment_text.lower()
-                            for keyword in keywords:
-                                # count = lower_attachment_text.count(keyword.lower())
-                                # \b ensures whole word match, re.escape handles special characters in keyword
-                                pattern = r'\b' + re.escape(keyword.lower()) + r'\b'
-                                matches = re.findall(pattern, lower_attachment_text)
-                                count = len(matches)
-                                if count > 0:
-                                    attachment_keywords.append(keyword)
-                                    attachment_keyword_counts[keyword] = count
-                        
-                        # Save attachment only if keywords are found
-                        if attachment_keywords:
-                            attachment_keywords_csv = ", ".join(attachment_keywords)  # "r&d,search"
-                            attachment_keyword_counts_csv = ", ".join([f"{k}:{c}" for k, c in attachment_keyword_counts.items()])  # "r&d:3,search:2"                          
-
-                            await mails_repo.insert_attachment(
-                                mail_dtl_id=mail_dtl_id,
-                                attach_name=filename,
-                                attach_type=content_type,
-                                attach_path=file_path,
-                                word_count=attach_word_count_str,
-                                keyword=attachment_keywords_csv,
-                                repeated_keyword=attachment_keyword_counts_csv,
-                                user_id=user_id,
-                                created_by=user_id,
-                            )
-                            if filename:
-                                saved_attachments.append(filename)
-
-                results.append({
-                    "mail_dtl_id": mail_dtl_id,
-                    "subject": subject,
-                    "from": from_email,
-                    "to": to_emails,
-                    "cc": mail_cc_merged,
-                    "word_count": word_count_int,
-                    "has_attachments": len(saved_attachments) > 0,
-                    "attachments": saved_attachments,
-                    "folder": label_id,
-                })
-
-        # fetch past events and save into cal_master
-        events = await fetch_and_save_past_events_google(
-            access_token=access_token,
-            user_id=user_id,
-            orgid=org_id,
-            keywords= keywords,
-            mails_repo=mails_repo
-        )
-
-    return results
-
-## this api is used to fetch events from google
-async def fetch_and_save_past_events_google(access_token: str, user_id: int, orgid: int, keywords: list[str], mails_repo):
-    now = datetime.utcnow().isoformat() + "Z"
-    past_limit = (datetime.utcnow() - timedelta(days=365)).isoformat() + "Z"  # last 1 year (adjust as needed)
-
-    url = "https://www.googleapis.com/calendar/v3/calendars/primary/events"
-    #"https://www.googleapis.com/calendar/v3/users/me/calendarList"
-    params = {
-        "timeMin": past_limit,   # âœ… lower bound
-        "timeMax": now,   # âœ… Only past events
-        "orderBy": "startTime",
-        "singleEvents": "true",
-        "maxResults": 100,
-    }
-
-    headers = {
-        "Authorization": f"Bearer {access_token}",
-        "Accept": "application/json",
-    }
-
-    results = []
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, headers=headers, params=params) as resp:
-                if resp.status != 200:
-                    error_msg = f"Failed to fetch Google events: {resp.status} {await resp.text()}"
-                    raise Exception(error_msg)
-
-                data = await resp.json()
-                events = data.get("items", [])
-
-                for event in events:
-                    event_id = event.get("id")
-                    if not event_id:
-                        continue
-
-                    # âœ… Skip if already in DB
-                    exists = await mails_repo.check_event_exists(event_id)
-                    if exists:
-                        continue
-
-                    subject = event.get("summary", "") or ""
-                    body_content = event.get("description", "") or ""
-
-                    # âœ… Word count (body only, same as Outlook)
-                    clean_text = re.sub(r"[_]+", " ", body_content)
-                    clean_text = re.sub(r"<[^>]+>", " ", clean_text)  # remove HTML tags
-                    words = re.findall(r"\b\w+\b", clean_text)
-                    word_count = len(words)
-
-                    # âœ… Keyword frequency
-                    keyword_counts = {
-                        k: subject.lower().count(k) + body_content.lower().count(k)
-                        for k in keywords
-                    }
-                    matched_keywords = {k: c for k, c in keyword_counts.items() if c > 0}
-
-                    if matched_keywords:
-                        organiser = event.get("organizer", {}).get("email", "")
-                        attendees = ",".join(
-                            [a.get("email", "") for a in event.get("attendees", [])]
-                        )
-                        description = event.get("description", "")
-                        title = subject
-
-                        # âœ… Start & End time
-                        start_str = event.get("start", {}).get("dateTime")
-                        end_str = event.get("end", {}).get("dateTime")
-
-                        start_dt = datetime.fromisoformat(start_str.replace("Z", "+00:00")) if start_str else None
-                        end_dt = datetime.fromisoformat(end_str.replace("Z", "+00:00")) if end_str else None
-
-                        duration_minutes = None
-                        if start_dt and end_dt:
-                            duration_minutes = int((end_dt - start_dt).total_seconds() / 60)
-
-                        # âœ… Save into DB (same as Outlook)
-                        await mails_repo.insert_calendar_event(
-                            event_id=event_id,
-                            user_id=user_id,
-                            organiser=organiser,
-                            attendees=attendees,
-                            title=title,
-                            description=description,
-                            word_count=word_count,
-                            keyword=",".join(matched_keywords.keys()),
-                            repeated_keyword=json.dumps(matched_keywords),
-                            event_start_datetime=start_str,
-                            event_end_datetime=end_str,
-                            duration_minutes=duration_minutes,
-                            created_by=user_id,
-                        )
-
-                        results.append(
-                            {
-                                "title": title,
-                                "event_start_datetime": start_str,
-                                "event_end_datetime": end_str,
-                                "duration_minutes": duration_minutes,
-                                "word_count": word_count,
-                                "keywords": matched_keywords,
-                            }
-                        )
-    except Exception as e:
-        error_msg = f"Error fetching past Google events: {str(e)}"
-        print(error_msg)
-        return {"error": error_msg}
-
-    return results
 
 
 # ============================================================
@@ -2201,14 +1657,26 @@ async def reconcile_all_pos(user_id, mails_repo, system_pos, batch_size=500):
             if key:
                 system_po_map[key].append(po)
 
-        # Run both flows
-        mismatch_stats = await reconcile_mismatches(user_id, mails_repo, system_po_map, batch_size)
-        missing_stats = await reconcile_missing(user_id, mails_repo, system_po_map, batch_size)
 
-        stats.update(mismatch_stats)
-        stats.update(missing_stats)
+        # Run mismatch reconcile — isolated individually 
+        try:
+            mismatch_stats = await reconcile_mismatches(user_id, mails_repo, system_po_map, batch_size)
+            stats.update(mismatch_stats)
+        except Exception as e:
+            logger.error(f"[RECONCILE] reconcile_mismatches failed: {e}", exc_info=True)
+            stats["errors"].append(f"mismatch: {str(e)}")
+
+        # Run missing reconcile — isolated individually 
+        try:
+            missing_stats = await reconcile_missing(user_id, mails_repo, system_po_map, batch_size)
+            stats.update(missing_stats)
+        except Exception as e:
+            logger.error(f"[RECONCILE] reconcile_missing failed: {e}", exc_info=True)
+            stats["errors"].append(f"missing: {str(e)}")
+
 
     except Exception as e:
+        logger.error(f"[RECONCILE] reconcile_all_pos outer exception: {e}", exc_info=True)
         stats["errors"].append(str(e))
 
     return stats
@@ -2446,6 +1914,23 @@ async def reconcile_missing(user_id, mails_repo, system_po_map, batch_size):
 # PO Recomparison end
 # ============================================================
 
+async def fetch_system_pos_with_oldest_date(mails_repo, app):
+    oldest_date = await mails_repo.get_oldest_report_date()
+
+    if oldest_date:
+        system_pos = await MSSQLRepo.get_po_list(app, oldest_date)
+    else:
+        system_pos = await MSSQLRepo.get_po_list_without_oldest_date(app)
+
+    for po in system_pos:
+        po["system_po_id"] = make_stable_system_po_id(po)
+
+    system_pos = [
+        {k: make_json_safe(v) for k, v in po.items()}
+        for po in system_pos
+    ]
+
+    return system_pos
 
 # ============================================================
 # compare data between scanned and system POs Start
@@ -2455,7 +1940,8 @@ async def compare_scanned_and_system_pos(
     app=None,
     user_id: int = None,
     po_det_ids: list[int] = None,
-    mails_repo=None
+    mails_repo=None,
+    system_pos=None
 ):
     try:
         # ---------------- Resolve app context ---------------- #
@@ -2489,28 +1975,28 @@ async def compare_scanned_and_system_pos(
         })
 
         # -------------------- Fetch system POs -------------------- #
-        oldest_date = await mails_repo.get_oldest_report_date()
+        # oldest_date = await mails_repo.get_oldest_report_date()
 
-        if oldest_date:
-            system_pos = await MSSQLRepo.get_po_list(resolved_app, oldest_date)
-        else:
-            system_pos = await MSSQLRepo.get_po_list_without_oldest_date(resolved_app)
+        # if oldest_date:
+        #     system_pos = await MSSQLRepo.get_po_list(resolved_app, oldest_date)
+        # else:
+        #     system_pos = await MSSQLRepo.get_po_list_without_oldest_date(resolved_app)
 
-        # ---- imaginary PK for system_pos ---- #
-        for po in system_pos:
-            po["system_po_id"] = make_stable_system_po_id(po)
+        # # ---- imaginary PK for system_pos ---- #
+        # for po in system_pos:
+        #     po["system_po_id"] = make_stable_system_po_id(po)
 
-        system_pos = [
-            {k: make_json_safe(v) for k, v in po.items()}
-            for po in system_pos
-        ]
+        # system_pos = [
+        #     {k: make_json_safe(v) for k, v in po.items()}
+        #     for po in system_pos
+        # ]
 
-        #-----------reconcile OLD mismatches/missing BEFORE processing new POs----------
-        await reconcile_all_pos(
-            user_id=user_id,
-            mails_repo=mails_repo,
-            system_pos=system_pos
-        )
+        # #-----------reconcile OLD mismatches/missing BEFORE processing new POs----------
+        # await reconcile_all_pos(
+        #     user_id=user_id,
+        #     mails_repo=mails_repo,
+        #     system_pos=system_pos
+        # )
         
         # ------------------ Create system PO lookup ------------------ #
         system_po_map = defaultdict(list)

@@ -24,7 +24,7 @@ async def fetch_emails_processed_by_user_id(user_id: int,  request: Request) -> 
 
 async def get_total_emails_fetch_by_user_id(user_id: int,  request: Request) -> int:
     query = """
-       SELECT COUNT(DISTINCT p.mail_dtl_id)
+       SELECT COUNT(DISTINCT p.po_det_id)
         FROM po_details p
         WHERE p.active = 1
         AND p.user_id = %s;
@@ -56,7 +56,7 @@ WHERE
 async def get_all_documents_fetch_by_user_id(user_id: int, request: Request) -> int:
     query = """
        SELECT
-            COUNT(DISTINCT e.mail_dtl_id)
+            COUNT(DISTINCT e.attach_id)
         FROM
             email_attachments e
         INNER JOIN po_details pd
@@ -811,25 +811,25 @@ async def fetch_missing_po_data(request: Request, frontendRequest):
     base_query = """
         SELECT
             pd.mail_dtl_id,
-            MAX(pm.po_missing_id) AS po_missing_id,
-            MAX(pm.po_det_id) AS po_det_id,
-            MAX(pm.system_po_id) AS system_po_id,
-            MAX(COALESCE(pd.po_number, sp.po_number)) AS po_number,
-            MAX(COALESCE(pd.po_date, sp.po_date)) AS po_date,
-            MAX(COALESCE(pd.vendor_number, sp.vendor_number)) AS vendor_code,
-            MAX(COALESCE(pd.customer_name, sp.customer_name)) AS customer_name,
-            MAX(COALESCE(pd.created_on, sp.created_on)) AS created_on,
-            MAX(um.user_name) AS username,
-            MAX(md.date_time) AS emailDate,
-            MAX(md.mail_from) AS emailFrom,
-            MAX(md.subject) AS subject,
+            pm.po_missing_id,
+            pm.po_det_id,
+            pm.system_po_id,
+            COALESCE(pd.po_number, sp.po_number) AS po_number,
+            COALESCE(pd.po_date, sp.po_date) AS po_date,
+            COALESCE(pd.vendor_number, sp.vendor_number) AS vendor_code,
+            COALESCE(pd.customer_name, sp.customer_name) AS customer_name,
+            COALESCE(pd.created_on, sp.created_on) AS created_on,
+            um.user_name AS username,
+            md.date_time AS emailDate,
+            md.mail_from AS emailFrom,
+            md.subject,
             'MISSING' AS po_status,
             'email' AS source
         FROM po_missing_report pm
-        LEFT JOIN po_details pd ON pm.po_det_id = pd.po_det_id
-        LEFT JOIN system_po_details sp ON pm.system_po_id = sp.system_po_id
-        LEFT JOIN users_master um ON pm.user_id = um.user_id
-        LEFT JOIN mail_details md ON md.mail_dtl_id = pd.mail_dtl_id
+        LEFT JOIN po_details pd ON pm.po_det_id = pd.po_det_id and pd.active = 1
+        LEFT JOIN system_po_details sp ON pm.system_po_id = sp.system_po_id and sp.active = 1
+        LEFT JOIN users_master um ON pm.user_id = um.user_id and um.is_active = 1
+        LEFT JOIN mail_details md ON md.mail_dtl_id = pd.mail_dtl_id and md.is_active = 1
         WHERE pm.active = 1
     """
 
@@ -839,7 +839,7 @@ async def fetch_missing_po_data(request: Request, frontendRequest):
         base_query += " AND pm.user_id = %s"
         params.append(frontendRequest.user_id)
 
-    base_query += " GROUP BY pd.mail_dtl_id ORDER BY po_missing_id DESC"
+    base_query += " ORDER BY pm.po_missing_id DESC"
 
     async with request.app.state.pool.acquire() as conn:
         async with conn.cursor() as cursor:
@@ -856,8 +856,8 @@ async def fetch_mismatch_po_data(request: Request, frontendRequest):
     base_query = """
         SELECT
             pd.mail_dtl_id,
+            mm.po_det_id,
             MAX(mm.po_mismatch_id) AS po_mismatch_id,
-            MAX(mm.po_det_id) AS po_det_id,
             MAX(pd.po_number) AS po_number,
             MAX(pd.po_date) AS po_date,
             MAX(pd.vendor_number) AS vendor_code,
@@ -874,9 +874,9 @@ async def fetch_mismatch_po_data(request: Request, frontendRequest):
             'MISMATCH' AS po_status,
             'email' AS source
         FROM po_mismatch_report mm
-        LEFT JOIN po_details pd ON mm.po_det_id = pd.po_det_id
-        LEFT JOIN users_master um ON mm.user_id = um.user_id
-        LEFT JOIN mail_details md ON md.mail_dtl_id = pd.mail_dtl_id
+        LEFT JOIN po_details pd ON mm.po_det_id = pd.po_det_id AND pd.active = 1
+        LEFT JOIN users_master um ON mm.user_id = um.user_id AND um.is_active = 1
+        LEFT JOIN mail_details md ON md.mail_dtl_id = pd.mail_dtl_id AND md.is_active = 1
         WHERE mm.active = 1
     """
 
@@ -886,7 +886,7 @@ async def fetch_mismatch_po_data(request: Request, frontendRequest):
         base_query += " AND mm.user_id = %s"
         params.append(frontendRequest.user_id)
 
-    base_query += " GROUP BY pd.mail_dtl_id ORDER BY po_mismatch_id DESC"
+    base_query += " GROUP BY mm.po_det_id ORDER BY po_mismatch_id DESC"  # <-- key change
 
     async with request.app.state.pool.acquire() as conn:
         async with conn.cursor() as cursor:
@@ -894,7 +894,7 @@ async def fetch_mismatch_po_data(request: Request, frontendRequest):
             cols = [c[0] for c in cursor.description]
             rows = await cursor.fetchall()
 
-        result = []
+    result = []
 
     for row in rows:
         record = dict(zip(cols, row))
@@ -913,11 +913,9 @@ async def fetch_mismatch_po_data(request: Request, frontendRequest):
             })
 
         record["mismatch_details"] = mismatches
-
         result.append(record)
 
     return result
-
 
 # ---------------fetch all matched pos-----------------------
 async def fetch_matched_po_data(request: Request, frontendRequest):
@@ -940,12 +938,12 @@ async def fetch_matched_po_data(request: Request, frontendRequest):
             'email' AS source
         FROM po_matched_report mp
         JOIN po_details pd 
-            ON pd.po_det_id = mp.po_det_id
+            ON pd.po_det_id = mp.po_det_id and pd.active = 1
         LEFT JOIN users_master um 
-            ON um.user_id = mp.user_id
+            ON um.user_id = mp.user_id and um.is_active = 1
         LEFT JOIN mail_details md 
-            ON md.mail_dtl_id = mp.mail_dtl_id
-        WHERE pd.active = 1
+            ON md.mail_dtl_id = mp.mail_dtl_id and md.is_active = 1
+        WHERE mp.is_active = 1
     """
 
     params = []
@@ -1652,6 +1650,7 @@ RELATED_TABLES = {
     "sharepoint_po_missing_report": "active",
     "po_mismatch_report": "active",
     "sharepoint_po_mismatch_report": "active",
+    "sharepoint_po_matched_report": "active",
     "outlook_tokens": "is_active",
     "category_master": "is_active",
     "keyword_master": "is_active",
@@ -1708,6 +1707,7 @@ HARD_DELETE_TABLES = [
     "sharepoint_po_details",
     "sharepoint_po_mismatch_report",
     "sharepoint_po_missing_report",
+    "sharepoint_po_matched_report",
     "mail_details",
     "email_attachments",
     "po_details",
@@ -1762,6 +1762,7 @@ TABLE_PK_MAP = {
 
     "sharepoint_po_missing_report": "sharepoint_po_missing_id",
     "sharepoint_po_mismatch_report": "sharepoint_po_mismatch_id",
+    "sharepoint_po_matched_report": "sharepoint_po_matched_id",
     "sharepoint_po_details": "sharepoint_po_det_id",
 }
 

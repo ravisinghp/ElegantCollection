@@ -19,10 +19,10 @@ class MSSQLRepo(BaseRepository):
         try:
             async with app.state.mssql_pool.acquire() as conn:
                 async with conn.cursor() as cur:
-
+                    # Client DB = Support.dbo.vPODetail
                     query = """
                     SELECT *
-                    FROM ClientDB.dbo.PO_details_data
+                    FROM Support.dbo.vPODetail
                     WHERE order_date BETWEEN ? AND GETDATE()
                     ORDER BY order_date ASC
                     """
@@ -55,10 +55,10 @@ class MSSQLRepo(BaseRepository):
 
             async with app.state.mssql_pool.acquire() as conn:
                 async with conn.cursor() as cur:
-
+                    # Client DB = Support.dbo.vPODetail
                     query = f"""
                     SELECT TOP ({MSSQL_PO_FETCH_LIMIT}) *
-                    FROM ClientDB.dbo.PO_details_data
+                    FROM Support.dbo.vPODetail   
                     """
 
                     await cur.execute(query)

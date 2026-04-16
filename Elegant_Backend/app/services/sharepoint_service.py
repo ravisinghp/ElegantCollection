@@ -341,6 +341,33 @@ class SharepointService:
         return d
 
     # ---------------- TEXT EXTRACTION ---------------- #
+    def xlrd_cell_to_str(cell, workbook) -> str:
+        import xlrd
+        from datetime import datetime
+
+        try:
+            # Proper date handling
+            if cell.ctype == xlrd.XL_CELL_DATE:
+                dt = xlrd.xldate_as_datetime(cell.value, workbook.datemode)
+                return dt.strftime("%Y-%m-%d")
+
+            # Handle numbers that might actually be dates
+            if cell.ctype == xlrd.XL_CELL_NUMBER:
+                # Try converting to date if possible
+                try:
+                    dt = xlrd.xldate_as_datetime(cell.value, workbook.datemode)
+                    return dt.strftime("%Y-%m-%d")
+                except Exception:
+                    return str(cell.value)
+
+            if cell.ctype == xlrd.XL_CELL_EMPTY:
+                return ""
+
+            return str(cell.value)
+
+        except Exception:
+            return str(cell.value)
+
     @staticmethod
     async def extract_text_from_bytes(content_bytes: bytes, filename: str, content_type: str) -> str | None:
         """
@@ -401,6 +428,49 @@ class SharepointService:
                         if hasattr(shape, "text")
                     )
 
+                elif ct in (
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    "application/vnd.ms-excel"
+                ) or ext.endswith((".xlsx", ".xls")):
+                    all_text = []
+                    if ext.endswith(".xlsx"):
+                        from openpyxl import load_workbook
+                        from datetime import datetime
+
+                        wb = load_workbook(io.BytesIO(content_bytes), data_only=True)
+
+                        for sheet in wb.worksheets:   # FIX
+                            all_text.append(f"Sheet: {sheet.title}")
+
+                            for row in sheet.iter_rows():
+                                values = []
+                                for cell in row:
+                                    val = cell.value
+
+                                    # Proper date handling
+                                    if isinstance(val, datetime):
+                                        val = val.strftime("%Y-%m-%d")
+
+                                    values.append(str(val) if val is not None else "")
+
+                                row_text = " | ".join(v for v in values if v.strip())
+                                if row_text:
+                                    all_text.append(row_text)
+                    elif ext.endswith(".xls"):
+                        import xlrd
+                        wb = xlrd.open_workbook(file_contents=content_bytes)
+                        for sheet in wb.sheets():
+                            all_text.append(f"Sheet: {sheet.name}")
+                            for row_idx in range(sheet.nrows):
+                                row_vals = [
+                                    SharepointService.xlrd_cell_to_str(sheet.cell(row_idx, col_idx), wb)
+                                    for col_idx in range(sheet.ncols)
+                                ]
+                                row_text = " | ".join(v for v in row_vals if v.strip())
+                                if row_text.strip():
+                                    all_text.append(row_text)
+                    return "\n".join(all_text)
+                
                 # Other formats (images/ocr) - optional
                 elif filename.endswith(SharepointService.IMAGE_EXTENSIONS):
                 # IMAGE → OCR
@@ -424,38 +494,116 @@ class SharepointService:
     
     
     # ---------------- KEYWORD DETECTION ---------------- #
+    KEYWORD_REGEX_MAP = {
+        "po_number": [
+            r"\bpo\s*(no|number|#|id)\b",
+            r"\bp\.o\.\s*(no|number|#)?\b",
+            r"\bpurchase\s*order\s*(no|number)?\b",
+            r"\b(po)\s*(?:no|number|#|id)?\s*\d+\b",
+            r"\b(po)\d+\b",
+            r"\b(p\.o\.)\s*(?:no|number|#)?\s*\d*\b",
+            r"\b(purchase\s*order)\s*(?:no|number)?\s*\d*\b",
+            r"\b(order)\s*(?:no|number|#|id)?\s*\d+\b",
+            r"\b(order|orders|ordered|reorder|re-?order|ordering|purchase|purchases|po|attached|attachment|attachments|enclosed)\b"
+        ],
+
+        "customer_name": [
+            r"\bcustomer\s*name\b",
+            r"\bbuyer\b",
+            r"\bclient\b",
+            r"\bparty\s*name\b"
+        ],
+
+        "vendor_number": [
+            r"\bvendor\s*(no|number|code)\b",
+            r"\bsupplier\s*(no|number|code)\b"
+        ],
+
+        "po_date": [
+            r"\bpo\s*date\b",
+            r"\border\s*date\b",
+            r"\bdate\s*of\s*order\b"
+        ],
+
+        "delivery_date": [
+            r"\bdelivery\s*date\b",
+            r"\bexpected\s*delivery\b",
+            r"\bdispatch\s*date\b"
+        ],
+
+        "cancel_date": [
+            r"\bcancel\s*date\b",
+            r"\bexpiry\s*date\b"
+        ],
+
+        "gold_karat": [
+            r"\b\d{2}\s*K\b",
+            r"\b\d{2}\s*KT\b",
+            r"\bAG\s*\d{3}\b",
+            r"\bgold\s*karat\b",
+            r"\bpurity\b"
+        ],
+
+        "ec_style_number": [
+            r"\bec\s*style\s*(no|number)\b",
+            r"\bec\s*style\b"
+        ],
+
+        "customer_style_number": [
+            r"\bcustomer\s*style\s*(no|number)\b",
+            r"\bdesign\s*(no|number)\b"
+        ],
+
+        "color": [
+            r"\b(yellow|white|rose)\s*gold\b",
+            r"\bcolor\b"
+        ],
+
+        "quantity": [
+            r"\bqty\b",
+            r"\bquantity\b",
+            r"\bpcs\b",
+            r"\bnos\b",
+            r"\bpieces\b"
+        ],
+
+        "description": [
+            r"\bdescription\b",
+            r"\bitem\s*details\b",
+            r"\bproduct\s*details\b"
+        ],
+
+        "gold_lock": [
+            r"\bgold\s*lock\b",
+            r"\blocked\s*gold\b",
+            r"\block\s*status\b"
+        ],
+    }
+
     async def detect_keywords(self, text: str, db_keywords: list[str]):
-        if not text:
+        if not text or not text.strip():
             return [], None
 
         text_l = text.lower()
-        keywords = [self.normalize_keyword(k) for k in db_keywords]
+        detected = set()
 
-        hits = []
+        # ---------------- 1. DB keywords (exact-ish) ----------------
+        for kw in db_keywords:
+            if self.normalize_keyword(kw) in text_l:
+                detected.add(kw)
 
-        for k in keywords:
-            if k in text_l:
-                hits.append(k)
+        # ---------------- 2. Jewellery-aware regex detection ----------------
+        for field, patterns in self.KEYWORD_REGEX_MAP.items():
+            for pat in patterns:
+                if re.search(pat, text_l, re.IGNORECASE):
+                    detected.add(field)
+                    break
 
-        if hits:
-            return hits, "EXACT"
-
-        for k in keywords:
-            pat = r"\b" + re.escape(k).replace(r"\ ", r"\s*") + r"\b"
-            if re.search(pat, text_l, re.IGNORECASE):
-                hits.append(k)
-
-        if hits:
-            return hits, "REGEX"
-
-        for k in keywords:
-            if fuzz.partial_ratio(k, text_l) >= 85:
-                hits.append(k)
-
-        if hits:
-            return hits, "FUZZY"
+        if detected:
+            return sorted(detected), "REGEX_MATCH"
 
         return [], None
+    
 
     # ---------------- PO EXTRACTION ---------------- #
     PO_FIELD_NAMES = [
@@ -481,57 +629,39 @@ class SharepointService:
 
         # ---------------- PO NUMBER ----------------
         "po_number": [
-            # ----- OLD WORKING -----
             r"(?:po_number|po_no)\s*:\s*(PO[\w\-_/]+)",
             r"(?:po\s*number|po\s*no|po#|po\s*#|p\.o\.|purchase\s*order|po)\s*[:\-]?\s*(PO[\w\-_/]+)",
             r"\b(PO[\s\-_:]*[0-9]{1,}[A-Z0-9\/_.\-]*)",
             r"(?:po\s*number|po\s*no|po#|p\.o\.|purchase\s*order)\s*[:\-]?\s*(PO[\- ]?[A-Z0-9\/_.\-]+)",
-            # ----- NEW FORMATS -----
             r"(?:po\s*number|po\s*no|po#|p\.o\.|purchase\s*order)\s*[:\-]?\s*([A-Z]{1,5}-\d{4,}-\d+)",
             r"(?:po_number|po_no|po\s*number|po#|p\.o\.)\s*[:#]?\s*\n?\s*([A-Z0-9\-_/]+)",
         ],
 
         # ---------------- CUSTOMER NAME ----------------
         "customer_name": [
-            # ----- NEW PATTERNS -----
-            r"(?i)ship\s+([A-Za-z0-9&.,\-]+)",
-            r"Ship\s+To:\s*\n\s*([A-Za-z0-9 &.,\-]+(?:\n\s*[A-Za-z0-9 &.,\-]+){1,4})",
-            r"ship\s*to\s*:\s*\n\s*([A-Za-z0-9 &.,\-]+)",
-            r"(?:ship\s*to|deliver\s*to|ship\s|bill\s*to|delivery\s*address)\s*[:\-]?\s*([A-Za-z0-9&.,\-\s]+)",
-            r"(?:customer\s*name|buyer)\s*[:\-]?\s*([A-Za-z0-9&.,\-\s]+)",
-            # ----- OLD WORKING -----
-            r"(?:customer\s*name|customer|buyer|client)\s*[:\-]?\s*([A-Za-z][A-Za-z\s&\.]+?)",
-            r"(?i)customer_name\s*:\s*(.+?)(?=\s+[a-z_]+?\s*:|$)",
-            r"(?i)^customer(?:\s*name)?\s*[:\-]?\s*(.+?)(?=\s+(?:supplier|vendor|po|delivery|cancel|date|quantity|gold|color|description)\s*:|$)",
-            r"(?=\s+(?:vendor|vendor_no|vendor_number|supplier|po|delivery|cancel|date|quantity|gold|color|description)\b|$)",
+            r"(?i)\bcustomer\s*(?:name)?\b\s*\|\s*([A-Za-z0-9&.,\-/ ]{2,})",
+            r"(?i)\bcustomer\s*(?:name)?\s*[:\-]\s*\n\s*([A-Za-z0-9&.,\-/ ]{2,})",
+            r"(?i)\bcustomer\s*(?:name)?\s*[:\-]\s*([A-Za-z0-9&.,\-/ ]{2,})",
+            r"(?i)\bship\s*to\s*:\s*\n\s*([A-Za-z0-9&.,\-/ ]{2,})",
+            r"(?i)(?:ship\s*to|bill\s*to|deliver\s*to)\s*[:\-]\s*([A-Za-z0-9&.,\-/ ]{2,})",
+            r"(?i)(?:customer|buyer|client)\s*[:\-]?\s*([A-Za-z0-9&.,\-/ ]+?)(?=\s+(?:vendor|po|date|delivery|qty|quantity|gold|color|description)\b|$)",
         ],
 
         # ---------------- VENDOR NUMBER ----------------
         "vendor_number": [
             r"Vendor\s*ID[\s\S]{0,80}\b(V\d{4,})\b",
-            # Vendor Number / ID on SAME LINE
             r"(?:vendor[_\s]*(?:number|no|id)|supplier[_\s]*(?:number|no|code))\s*[:\-#]?\s*([A-Za-z0-9\-_./]+)",
-
-            # Vendor ID on NEXT LINE (VERY IMPORTANT FOR YOUR FILE)
             r"(?:vendor\s*id|vendor\s*number)\s*[:\-]?\s*\n\s*([A-Za-z0-9\-_./]+)",
-
-            # Simple "Vendor: XYZ"
             r"\bvendor\b\s*[:\-]?\s*([A-Za-z0-9\-_./]+)",
-
-            # V-ID / VNo formats
             r"\b(?:Vendor\s*ID|VNo|V-ID)\s*[:#\-\s]?\s*([A-Za-z0-9\-_./]+)",
-
-            # Fallback supplier code
             r"(?:supplier\s*(?:no|number|code))\s*[:\-]?\s*([A-Za-z0-9\-_./]+)",
         ],                                                              
 
         # ---------------- PO DATE ----------------
         "po_date": [
-            # ----- OLD WORKING -----
             r"(?:po\s*date|order\s*date|date)\s*[:\-]?\s*(\d{4}-\d{1,2}-\d{1,2})",
             r"po_date\s*:\s*(\d{4}-\d{2}-\d{2})",
             r"date\s*[:\-]?\s*(\d{4}-\d{2}-\d{2})",
-            # ----- NEW FORMATS -----
             r"(?:Purchase\s+Order\s+Date|P\.O\.\s*Date)\s*[:\-]?\s*(\d{1,2}/\d{1,2}/\d{2})",
             r"P\.?\s*O\.?\s*Date\s*[:\-]?\s*(\d{1,2}-[A-Za-z]{3}-\d{4})",
             r"(?:purchase\s*order\s*date)\s*\n\s*(\d{1,2}/\d{1,2}/\d{2})",
@@ -545,10 +675,7 @@ class SharepointService:
 
         #---------------- DELIVERY DATE ----------------
         "delivery_date": [
-            # PDF table FIRST
             r"\b(?:DELIVERY\s*DATE|DUE\s*DATE|delivery_date)\b[\s\S]{0,100}?[:\s]*([\dA-Za-z/.-]{4,20})",
-
-            # Inline / email
             r"(?:delivery\s*date|expected\s*delivery|delivery_date|due\s*date)\s*[:\-]?\s*(\d{4}-\d{2}-\d{2})",
             r"(?:delivery\s*date|expected\s*delivery|delivery_date|due\s*date)\s*[:\-]?\s*(\d{2}-[A-Za-z]{3}-\d{4})",
         ], 
@@ -573,19 +700,10 @@ class SharepointService:
     
         # ---------------- QUANTITY ----------------
         "quantity": [
-            # Table style (PDF / same line)
             r"\bQUANTITY\b[\s\S]{0,100}\n\s*([A-Za-z0-9 ,\-–\.]{10,})",
-
-            # Vertical layout (Quantity\n1)
             r"(?i)\bquantity\b\s*[\r\n]+\s*(\d+)\b",
-
-            # EA / PCS rows
             r"\n\s*(\d+)\s+(?:EA|PCS|PC)\b",
-
-            # Inline
             r"(?i)(?:qty|quantity|pcs|pieces)\s*[:\-]?\s*(\d+)",
-
-            # Fallback (keep last!)
             r"(?i)\b(\d+)\s*(?:pcs|pieces|nos)\b",
         ],
     
@@ -605,13 +723,8 @@ class SharepointService:
 
         #---------------- DESCRIPTION ----------------
         "description": [
-            # PDF table
             r"\bDESCRIPTION\b[\s\S]{0,100}\n\s*([A-Za-z0-9 ,\-–\.]{10,})",
-
-            # Structured lines
             r"(?:item\s*description|description)\s*[:\-]?\s*([A-Za-z][A-Za-z\s\-–]+)",
-
-            # Item row patterns
             r"[A-Z0-9\-]+\s+\d+KW\s+([A-Za-z ].*?SIZE:\s*[0-9.]+)",
         ],
 
@@ -622,6 +735,7 @@ class SharepointService:
             r"(?:gold\s*lock|gold_lock|gold\s*locking|lock\s*value|lock\s*percentage|metal\s*lock|lock)\s{2,}([0-9]+(?:\.[0-9]+)?)",
             r"(?:goldlock|gold_lock|lock)\s*([0-9]+(?:\.[0-9]+)?)"
         ],
+
     }
     
     EMPTY_PO = {
@@ -736,149 +850,172 @@ class SharepointService:
     async def extract_po_fields(self, text: str) -> dict:
         regex_data_response = self.extract_po_fields_regex(text)
         regex_data = self.trim_to_db_limits(regex_data_response)
-        logger.info(f"regex data:{regex_data}")
+        logger.info(f"regex data: {regex_data}")
 
-        # Check if mandatory fields are present
-        if all(regex_data.get(f) for f in self.MANDATORY_FIELDS) and len(text.strip()) >= 100:
+        if all(regex_data.get(f) for f in self.MANDATORY_FIELDS) and len(text.strip()) >= 50:
             return regex_data
-        
-        # Skip LLM if text too short or mandatory field names not present literally
-        if len(self.normalize_attachment_text(text).strip()) < 100:
+
+        if len(text.strip()) < 50:
+            logger.info("Skipping LLM — text too short")
             return self.EMPTY_PO
 
-        # Skip LLM if text too short or mandatory field names not present literally
-        if len(text.strip()) <100: 
-            return self.EMPTY_PO
-
-        # Otherwise call LLM
         llm_data = await self.extract_po_fields_from_llm(text)
-        logger.info(f"LLM data:{llm_data}")
+        logger.info(f"LLM data: {llm_data}")
 
-        # Merge: LLM always wins
-        final = regex_data.copy()
-        for k, v in llm_data.items():
-            if v not in [None, "", "null", "N/A"]:
-                final[k] = v  # LLM overrides regex
+        # Merge: LLM fills only the fields regex missed — never blanks a regex value
+        final = llm_data
+        # final = regex_data.copy()
+        # for k, v in llm_data.items():
+        #     if v not in (None, "", "null", "N/A"):
+        #         if not final.get(k):          # only fill empty slots
+        #             final[k] = v
 
         return final if any(final.values()) else self.EMPTY_PO
-
     
     
     async def extract_po_fields_from_llm(self, text: str) -> dict:
+        field_list = json.dumps(self.PO_FIELD_NAMES, indent=2)
         prompt = f"""
-    You are a document extraction engine for Jewelry Purchase Orders.
+    You are a precision extraction engine for Jewelry Purchase Orders.
 
-    RULES (STRICT):
-    - Extract ONLY values explicitly present in the text
-    - NEVER merge two fields
-    - NEVER include field names inside values
-    - NEVER guess or infer
-    - If a value contains another field label, SPLIT and keep only the correct value
-    - Return null if missing
-    - Preserve original text formatting
+    Your job is to extract structured data from raw text parsed from files
+    (PDFs, Excel sheets, Word docs, images via OCR, or email bodies).
 
-    --------------------
-    FIELD-SPECIFIC RULES
-    --------------------
+    ===========================
+    GLOBAL RULES (NON-NEGOTIABLE)
+    ===========================
+    - Extract ONLY values that are EXPLICITLY present with a clear label.
+    - NEVER infer, guess, or derive values from context.
+    - NEVER merge two fields into one value.
+    - NEVER include field label names inside field values.
+    - If a value is absent, ambiguous, or only implied return null.
+    - Preserve original formatting (casing, spacing, units) in extracted values.
+    - Do not normalize, rewrite, or clean values.
+
+    ===========================
+    SOURCE-SPECIFIC PARSING RULES
+    ===========================
+
+    [EXCEL / CSV TEXT]
+    - Text arrives as row-by-row dumps separated by pipe characters.
+    - First row is typically the header row — match column names to fields.
+    - If multiple data rows exist extract the FIRST valid row only (unless items list).
+    - Ignore "Sheet: name" prefix lines.
+
+    [PDF / OCR TEXT]
+    - Labels and values may be on separate lines.
+    - For key:value pairs the value is text immediately AFTER the colon on the same line,
+    or the first non-empty line below the label.
+
+    [IMAGE / OCR TEXT]
+    - Apply light OCR error tolerance: "P0 Number" likely means "PO Number".
+    - Only extract if you are more than 90 percent certain of the value.
+
+    ===========================
+    FIELD-BY-FIELD RULES
+    ===========================
+
     PO NUMBER:
-    - Extract only if clearly labeled as PO Number, P.O., Purchase Order Number, or similar.
-    - Value must look like an actual PO identifier.
-    - Also accept labels: PO #, PO#, P.O. #
+    - Labels: "PO Number", "P.O.", "PO#", "PO #", "Purchase Order Number", "Order No"
+    - Value must look like an alphanumeric PO identifier e.g. "PO-2024-001", "12345A".
+    - If multiple PO numbers appear return the FIRST one.
 
     CUSTOMER NAME:
-    - Extract only if explicitly labeled as:
-    customer, customer name, buyer, sold to
-    - Do NOT treat vendor, supplier, ship-from, or company logo name as customer.
-    - If label is missing or unclear, return null.
+    - Labels: "Customer", "Customer Name", "Bill To", "Sold To", "Buyer"
+    - Customer Name can also be an alphanumeric code (e.g., DM5-GER, ABC-123, XYZ LTD).
+    - If a field labeled "Customer" exists, ALWAYS extract its full value exactly as written.
+    - Do NOT extract address lines as the customer name.
 
-    VENDOR NAME:
-    - Extract only if explicitly labeled as:
-    vendor, supplier, sold by
-    - Do NOT infer from logos or addresses.
+    VENDOR NUMBER:
+    - Labels: "Vendor", "Vendor No", "Vendor Number", "Supplier Code", "Vendor ID"
+    - Value is typically numeric or alphanumeric e.g. "V-1042", "5583".
 
     PO DATE:
-    - Extract only if clearly labeled as PO Date, Order Date, or Purchase Order Date.
-    - Also accept label: Date (only if located near PO Number or in PO header section)
+    - Labels: "PO Date", "Order Date", "Purchase Order Date", "Date"
+    - Accept bare "Date" only if near PO Number or document title.
+    - Return date exactly as written.
 
     DELIVERY DATE:
-    - Extract only if clearly labeled as Delivery Date, Due Date, or Expected Delivery.
+    - Labels: "Delivery Date", "Due Date", "Ship By", "Required By", "Expected Delivery"
+    - Return null if only per-item delivery dates exist.
 
-    GOLD KARAT / METAL:
-    - Extract ONLY if the label appears as a standalone field header.
-    - Valid labels (case-insensitive):
-    gold karat, karat, metal, gold purity
-    - The label MUST be immediately followed by:
-    • a colon (:)
-    • OR a dash (-)
-    • OR a newline (value on the next line)
-    - Extract ONLY the value directly associated with that label.
-    - Return the value EXACTLY as written (examples: "14KW", "18K Rose", "22K Yellow", "A W", "18 KT").
-    - DO NOT extract if:
-    • the label appears inside a sentence
-    • the label is followed by words like "field", "example", "e.g.", "supports", etc.
-    • the value appears in descriptions, item rows, product lines, or explanatory text
-    - If no properly formatted standalone labeled field exists, return null.
-    - If multiple valid labeled fields exist, return the first one.
+    CANCEL DATE:
+    - Labels: "Cancel Date", "Cancellation Date", "Cancel By", "Void After"
 
+    GOLD KARAT:
+    - Labels: "Gold Karat", "Karat", "Metal", "Gold Purity", "KT", "K"
+    - Valid examples: "14KW", "18K", "22K Yellow", "18 KT", "14K Rose Gold"
+    - Label MUST be a standalone field header not embedded in a description.
+
+    EC STYLE NUMBER:
+    - Labels: "EC Style", "EC Style No", "EC Style Number", "Style#", "IDD Style #"
+    - Alphanumeric style code. Do NOT extract customer-side style numbers.
+
+    CUSTOMER STYLE NUMBER:
+    - Labels: "Customer Style", "Cust Style", "Your Style", "Vendor Style #"
+    - This is the buyer's own reference number distinct from EC Style.
 
     COLOR:
-    - Extract only if explicitly labeled as:
-    color or colour
-    - Do NOT extract color from description or product names.
+    - Labels: "Color", "Colour", "Metal Color"
+    - Do NOT extract color embedded in description sentences.
 
     DESCRIPTION:
-    - Extract ONLY if explicitly labeled as:
-    description, item description, desc, particulars, product description, item details
-    - The value must be the FULL description exactly as written after the label.
-    - Preserve original wording and order.
-    - Do NOT truncate, summarize, or rewrite.
-    - Do NOT extract description from tables, item rows, or free text without a label.
-    - If no explicit description label exists, return null.
+    - Labels: "Description", "Item Description", "Particulars", "Goods Description"
+    - Extract the FULL value exactly as written.
 
     QUANTITY:
-    - Extract only if explicitly labeled as quantity, qty, or pieces.
+    - Labels: "Quantity", "Qty", "Pieces", "Pcs", "Ord#"
+    - Value must be numeric.
+    - Do NOT sum multiple item quantities — return null if only per-item quantities exist.
 
     GOLD LOCK:
-    - Extract only if explicitly labeled as gold lock, lock value, or lock percentage.
+    - Labels: "Gold Lock", "Lock Value", "Lock %", "Metal Lock"
+    - Value may be a percentage or numeric.
 
-    --------------------
+    ===========================
+    MULTI-ROW ITEM DETECTION
+    ===========================
+    If the text contains a TABLE with multiple product/item rows return:
+    "has_line_items": true
+    Still extract all header-level fields. Return null for per-item fields
+    (Delivery Date, Gold Karat, Description, Quantity, Color) in the main record.
+
+    ===========================
     OUTPUT FORMAT
-    --------------------
-    Return a valid JSON object with EXACTLY these keys:
-    {self.PO_FIELD_NAMES}
+    ===========================
+    Return a single valid JSON object with EXACTLY these keys:
+    {field_list}
+    Plus one optional key: "has_line_items" (boolean, default false).
 
-    TEXT:
+    Rules:
+    - All string values: preserve original casing and formatting.
+    - Missing or ambiguous values: null (not empty string, not "N/A").
+    - No explanation, preamble, or markdown — JSON only.
+
+    ===========================
+    TEXT TO EXTRACT FROM:
+    ===========================
     {text}
     """
-
         try:
             resp = openai_client.chat.completions.create(
                 model="gpt-4o-mini",
                 temperature=0,
                 messages=[{"role": "user", "content": prompt}]
             )
-            logger.info(f"response:{resp}")
-
             raw = resp.choices[0].message.content.strip()
-
-            # Remove markdown
-            raw = re.sub(r"^```(?:json)?|```$", "", raw, flags=re.I).strip()
-
-            match = re.search(r"\{.*\}", raw, re.S)
+            raw = re.sub(r"^```(?:json)?|```$", "", raw, flags=re.MULTILINE | re.IGNORECASE).strip()
+            match = re.search(r"\{.*\}", raw, re.DOTALL)
             if not match:
                 return self.EMPTY_PO
-
             data = json.loads(match.group())
-
             result = {}
             for k in self.PO_FIELD_NAMES:
                 v = data.get(k)
                 result[k] = v if v not in ("", None, "null", "N/A") else None
-
             return result
-
         except Exception as e:
-            logger.error(f"Exception is:{e}")
+            logger.error(f"LLM extraction failed: {e}")
             return self.EMPTY_PO
 
         
@@ -917,39 +1054,23 @@ class SharepointService:
         return None
 
 
-    def normalize_attachment_text(self,text: str) -> str:
-            if not text:
-                return ""
-
-            # normalize OCR dashes
-            text = text.replace("\u2013", "-").replace("\u2014", "-")
-
-            # fix spaced hyphens in PO numbers and dates
-            text = re.sub(r"\s*-\s*", "-", text)
-
-            # fix broken multiline item descriptions
-            text = re.sub(r"(\w+)\s*-\s*\n\s*(\w+)", r"\1 - \2", text)
-
-            # fix broken multiline item descriptions
-            text = re.sub(r"([A-Za-z])\s*-\s*\n\s*([A-Za-z])", r"\1 - \2", text)
-
-            # preserve KV structure
-            text = re.sub(r"\n{2,}", "\n", text)
-
-            # normalize dates like 2025-07-06
-            text = re.sub(
-                r"(\d{4})-(\d{1,2})-(\d{1,2})",
-                lambda m: f"{m.group(1)}-{int(m.group(2)):02d}-{int(m.group(3)):02d}",
-                text,
-            )
-
-            # collapse extra spaces
-            text = re.sub(r"[ \t]+", " ", text)
-
-            # clean blank lines
-            text = re.sub(r"\n\s*\n", "\n", text)
-
-            return text.strip()
+    def normalize_attachment_text(self, text: str) -> str:
+        if not text:
+            return ""
+        text = text.replace("\u2013", "-").replace("\u2014", "-")
+        text = re.sub(r"\s*-\s*", "-", text)
+        # DO NOT flatten newlines — they preserve table row/column structure
+        # Fix broken word-wrap across lines (word- \n word → word - word)
+        text = re.sub(r"([A-Za-z])-\n\s*([A-Za-z])", r"\1-\2", text)
+        # Normalize dates like 2025-07-06
+        text = re.sub(
+            r"(\d{4})-(\d{1,2})-(\d{1,2})",
+            lambda m: f"{m.group(1)}-{int(m.group(2)):02d}-{int(m.group(3)):02d}",
+            text,
+        )
+        text = re.sub(r"[ \t]+", " ", text)       # collapse horizontal whitespace only
+        text = re.sub(r"\n{3,}", "\n\n", text)    # max 2 consecutive blank lines
+        return text.strip()
 
     
     ITEM_ROW_REGEX = re.compile(
@@ -1126,166 +1247,13 @@ class SharepointService:
         """,
         re.IGNORECASE | re.VERBOSE
     )
-        
-    def extract_common_header(self, text: str):
-        m = self.PO_BLOCK_REGEX.search(text)
-        if not m:
-            return {
-                "po_number": None,
-                "po_date": None,
-                "vendor_number": None
-            }
-
-        return {
-            "po_number": m.group("po_number").strip(),
-            "po_date": m.group("po_date").strip(),
-            "vendor_number": None  # name present, number not present
-        }
+    
         
     @staticmethod  
     def clean_item_description(desc: str) -> str:
         desc = re.sub(r"^[A-Z0-9.\-/]+\s+", "", desc)
         desc = re.sub(r"\b\d{2}K[W]?\b", "", desc)
         return re.sub(r"\s+", " ", desc).strip()
-            
-
-    def extract_po_items(self, text: str):
-        items = []
-        if not text:
-            return items
-
-        cleaned = self.normalize_attachment_text(text)
-        
-        for m in self.ITEM_INLINE_REGEX.finditer(cleaned):
-
-        # Quantity
-            qty = int(float(m.group("quantity")))
-            if qty > 100:   # filter address / garbage numbers
-                continue
-
-            # Delivery date
-            date_match = re.search(r"\b\d{1,2}/\d{1,2}/\d{2}\b", m.group(0))
-            delivery_date = date_match.group() if date_match else None
-
-            # Description
-            description = self.clean_item_description(m.group("description"))
-
-            # Append item
-            items.append({
-                "description": description,
-                "quantity": qty,
-                "gold_karat": self.extract_karat(description),
-                "delivery_date": delivery_date,
-            })
-        if items:
-            return items
-        
-        
-        for m in self.PO_REPEAT_BLOCK_REGEX.finditer(text):
-            items.append({
-                "description": m.group("description").strip(),
-                "quantity": int(m.group("quantity")),
-                "gold_karat": self.extract_karat(m.group("description")),
-                "delivery_date": None
-            })
-
-        if items:
-            return items
-        
-        for m in self.ITEM_ROW_REGEX.finditer(cleaned):
-            karat = re.search(r"\b(\d{2})K\b", m.group("description"), re.IGNORECASE)
-
-            items.append({
-                "description": m.group("description").strip(),
-                "quantity": int(m.group("quantity")),
-                "gold_karat": karat.group(1) if karat else None,
-                "delivery_date": None,   # not present in this layout
-            })
-
-        if items:
-            return items
-
-        # ===============================
-        # 0️⃣ REPEATED PO BLOCKS (NEW FIX)
-        # ===============================
-        for m in self.PO_BLOCK_REGEX.finditer(text):
-            items.append({
-                "description": m.group("description").strip(),
-                "quantity": int(m.group("quantity")),
-                "gold_karat": self.extract_karat(m.group("description")),
-                "delivery_date": None
-            })
-            if items:
-                return items
-
-        # ===============================
-        # 1️⃣ REPEATED DESCRIPTION / QTY BLOCKS
-        # ===============================
-        for m in self.ITEM_REPEAT_KV_REGEX.finditer(cleaned):
-            items.append({
-                "description": m.group("description").strip(),
-                "quantity": int(m.group("quantity")),
-                "gold_karat": None,
-                "delivery_date": None,
-            })
-
-        if items:
-            return items
-
-        # ===============================
-        # 2️⃣ PIPE TABLE (DOCX)
-        # ===============================
-        cleaned = self.normalize_pdf_tables(cleaned)
-
-        for m in self.ITEM_PIPE_TABLE_REGEX.finditer(cleaned):
-            karat = re.search(r"\d{2}", m.group("material"))
-            items.append({
-                "description": m.group("description").strip(),
-                "gold_karat": karat.group() if karat else None,
-                "quantity": int(m.group("quantity")),
-                "delivery_date": m.group("delivery_date"),
-            })
-
-        if items:
-            return items
-
-        # ===============================
-        # 3️⃣ COLUMN STYLE (PDF TABLE)
-        # ===============================
-        lines = [l.strip() for l in cleaned.split("\n") if l.strip()]
-        buffer = []
-
-        for line in lines:
-            buffer.append(line)
-            if re.search(r"\d{4}-\d{2}-\d{2}", line):
-                block = " ".join(buffer)
-                buffer = []
-
-                m = self.ITEM_COLUMN_REGEX.search(block)
-                if m:
-                    karat = re.search(r"\d{2}", m.group("material"))
-                    items.append({
-                        "description": m.group("description").strip(),
-                        "gold_karat": karat.group() if karat else None,
-                        "quantity": int(m.group("quantity")),
-                        "delivery_date": m.group("delivery_date"),
-                    })
-
-        if items:
-            return items
-
-        # ===============================
-        # 4️⃣ SIMPLE INLINE SKU TABLE
-        # ===============================
-        for m in self.ITEM_TABLE_REGEX.finditer(cleaned):
-            items.append({
-                "description": m.group("description").strip(),
-                "gold_karat": m.group("gold_karat"),
-                "quantity": int(m.group("quantity")),
-                "delivery_date": None,
-            })
-
-        return items
 
 
 
@@ -1293,37 +1261,6 @@ class SharepointService:
         return await self.extract_po_fields(text)
     
     IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".bmp", ".tiff", ".webp")
-    
-    def remove_footer_noise(self, text: str) -> str:
-        FOOTER_PATTERNS = [
-            r"^total\s+estimated\s+cost.*$",
-            r"^qty\s+unit\s+price\s+total.*$",
-            r"^duty\s+price.*$",
-        ]
-
-        for pat in FOOTER_PATTERNS:
-            text = re.sub(pat, "", text, flags=re.IGNORECASE | re.MULTILINE)
-
-        return text
-    
-    def normalize_pdf_tables(self, text: str) -> str:
-        lines = [l.strip() for l in text.split("\n") if l.strip()]
-        out = []
-        buffer = []
-
-        for line in lines:
-            # row starts with number + part no
-            if re.match(r"^\d+\s+[A-Z0-9\-]+$", line) and buffer:
-                out.append(" ".join(buffer))
-                buffer = [line]
-            else:
-                buffer.append(line)
-
-        if buffer:
-            out.append(" ".join(buffer))
-
-        return "\n".join(out)
-
     
     def extract_relative_folder_path(self, graph_path: str) -> str:
         """
@@ -1416,32 +1353,10 @@ class SharepointService:
                             created_by=user_id,
                         )
 
-                        # ---------------- CLEAN TEXT ----------------
-                        clean_text = self.remove_footer_noise(normalized_text)
-
                         # ---------------- HEADER EXTRACTION ----------------
-                        header = await self.extract_po_fields(clean_text)
+                        header = await self.extract_po_fields(normalized_text)
 
-                        # ---------------- TABLE EXTRACTION ----------------
-                        table_items = self.extract_purchase_order_table(clean_text)
-
-                        # ---------------- ITEM EXTRACTION ----------------
-                        if table_items:
-                            items = []
-                            for table_item in table_items:
-                                items.append({
-                                    "description": table_item.get("description"),
-                                    "quantity": table_item.get("quantity"),
-                                    "gold_karat": self.extract_karat(
-                                        table_item.get("description")
-                                    ),
-                                    "delivery_date": None,
-                                    "po_number": table_item.get("po_number"),
-                                    "po_date": table_item.get("po_date"),
-                                    "vendor": table_item.get("vendor"),
-                                })
-                        else:
-                            items = self.extract_po_items(clean_text)
+                        items = None #for now we are showing only header level data, item level data extraction will be added in next phase
 
                         # ---------------- HEADER ONLY ----------------
                         if not items:
@@ -1515,6 +1430,7 @@ class SharepointService:
             "extracted_sharepoint_po_ids": extracted_sharepoint_po_ids,
         }
     #--------------------------data comparison logic start--------------------------#
+
     # -------------------------- FIELDS TO COMPARE -------------------------- #
     FIELDS_TO_COMPARE = [
         "customer_name",
@@ -1633,153 +1549,6 @@ class SharepointService:
         for i in range(0, len(data), size):
             yield data[i:i + size]
 
-
-
-    # -------------------------- MAIN SERVICE -------------------------- #
-    # async def generate_sharepoint_missing_po_report_service(
-    #     self,
-    #     user_id: int,
-    #     sharepoint_po_det_ids: list[int],
-    #     sp_repo : "SharepointRepo"
-    # ):
-    #     """
-    #     Logic:
-    #     1. Fetch scanned POs only for given sharepoint_po_det_ids (multiple emails supported)
-    #     2. Fetch relevant system POs only (NOT full table)
-    #     3. LLM match scanned ↔ system
-    #     4. If matched with high confidence → compare fields → insert mismatches
-    #     5. If scanned PO not confidently matched → insert missing (scanned side)
-    #     6. DO NOT mark unrelated system POs as missing
-    #     """
-
-    #     # -------------------- Fetch scanned POs -------------------- #
-    #     scanned_pos = await sp_repo.get_sharepoint_po_details_by_ids(sharepoint_po_det_ids)
-
-    #     if not scanned_pos:
-    #         return {
-    #             "status": "success",
-    #             "message": "No scanned POs found for comparison"
-    #         }
-
-    #     # -------------------- Fetch relevant system POs -------------------- #
-    #     scanned_po_numbers = list({
-    #         po["po_number"]
-    #         for po in scanned_pos
-    #         if po.get("po_number")
-    #     })
-
-    #     system_pos = await sp_repo.get_system_pos_by_po_numbers(scanned_po_numbers)
-
-    #     # -------------------- JSON safe conversion -------------------- #
-    #     scanned_pos = [
-    #         {k: self.make_json_safe(v) for k, v in po.items()}
-    #         for po in scanned_pos
-    #     ]
-    #     system_pos = [
-    #         {k: self.make_json_safe(v) for k, v in po.items()}
-    #         for po in system_pos
-    #     ]
-
-    #     # -------------------- Tracking -------------------- #
-    #     matched_scanned_ids: set[int] = set()
-    #     matched_system_ids: set[int] = set()
-
-    #     # -------------------- Matching & comparison -------------------- #
-    #     for scanned_batch in self.chunk(scanned_pos, 25):
-
-    #         matches = await self.llm_batch_match(scanned_batch, system_pos)
-    #         matched_pairs = []
-
-    #         for m in matches:
-    #             scanned = next(
-    #                 (p for p in scanned_batch if p["sharepoint_po_det_id"] == m["scanned_po_det_id"]),
-    #                 None
-    #             )
-    #             if not scanned:
-    #                 continue
-
-    #             # Ignore low confidence
-    #             if not m.get("system_po_id") or m.get("confidence", 0) < 0.85:
-    #                 continue
-
-    #             # Prevent duplicate system PO matching
-    #             if m["system_po_id"] in matched_system_ids:
-    #                 continue
-
-    #             system = next(
-    #                 (p for p in system_pos if p["system_po_id"] == m["system_po_id"]),
-    #                 None
-    #             )
-    #             if not system:
-    #                 continue
-
-    #             matched_scanned_ids.add(scanned["sharepoint_po_det_id"])
-    #             matched_system_ids.add(system["system_po_id"])
-
-    #             matched_pairs.append({
-    #                 "sharepoint_po_det_id": scanned["sharepoint_po_det_id"],
-    #                 "system_po_id": system["system_po_id"],
-    #                 "scanned": {f: scanned.get(f) for f in self.FIELDS_TO_COMPARE},
-    #                 "system": {f: system.get(f) for f in self.FIELDS_TO_COMPARE},
-    #             })
-
-    #         # -------------------- Field mismatch check -------------------- #
-    #         if matched_pairs:
-    #             mismatches = await self.llm_batch_compare(matched_pairs)
-
-    #             for mm in mismatches:
-    #                 exists = await sp_repo.mismatch_exists(
-    #                     user_id=user_id,
-    #                     sharepoint_po_det_id=mm["sharepoint_po_det_id"],
-    #                     system_po_id=mm["system_po_id"],
-    #                     mismatch_attribute=mm["field"],
-    #                     scanned_value=str(mm["scanned_value"]),
-    #                     system_value=str(mm["system_value"]),
-    #                 )
-
-    #                 if not exists:
-    #                     await sp_repo.insert_mismatch(
-    #                         sharepoint_po_det_id=mm["sharepoint_po_det_id"],
-    #                         user_id=user_id,
-    #                         system_po_id=mm["system_po_id"],
-    #                         field=mm["field"],
-    #                         system_value=str(mm["system_value"]),
-    #                         scanned_value=str(mm["scanned_value"]),
-    #                         comment=f"{mm['field']} mismatch",
-    #                     )
-
-    #     # -------------------- Missing scanned POs -------------------- #
-    #     for po in scanned_pos:
-    #         if po["sharepoint_po_det_id"] not in matched_scanned_ids:
-
-    #             exists = await sp_repo.po_missing_exists(
-    #                 user_id=user_id,
-    #                 sharepoint_po_det_id=po["sharepoint_po_det_id"],
-    #                 system_po_id=None,
-    #                 mismatch_attribute="po_missing",
-    #                 scanned_value=po.get("po_number"),
-    #                 system_value="",
-    #             )
-
-    #             if not exists:
-    #                 await sp_repo.insert_po_missing(
-    #                     sharepoint_po_det_id=po["sharepoint_po_det_id"],
-    #                     user_id=user_id,
-    #                     system_po_id=None,
-    #                     attribute="po_missing",
-    #                     system_value="",
-    #                     scanned_value=po.get("po_number"),
-    #                     comment="PO not found in system (or low confidence match)",
-    #                 )
-
-    #     return {
-    #         "status": "success",
-    #         "message": "PO comparison completed: missing & mismatches processed successfully",
-    #     }
-
-
-    
-    
     
     #---------------------------Table Data ----------------------------
     async def missing_po_data_fetch(request: Request, frontendRequest):
@@ -2041,7 +1810,7 @@ class SharepointService:
         return json.loads(raw)
 
 
-    async def llm_batch_compare(pairs_for_llm):
+    async def llm_batch_compare(self, pairs_for_llm):
 
         prompt = f"""
     You are an expert PO field comparison engine.
@@ -2221,7 +1990,10 @@ class SharepointService:
         )
 
 
-    async def reconcile_all_pos(self,user_id, system_pos, sp_repo=SharepointRepo, batch_size=500):
+    async def reconcile_all_sharepoint_pos(self,user_id, system_pos, sp_repo=SharepointRepo, batch_size=500):
+        if sp_repo is None:
+            logger.error("[RECONCILE] sp_repo not provided to reconcile_all_sharepoint_pos")
+            return {"errors": ["sp_repo missing"]}
 
         stats = {
             "mismatch_checked": 0,
@@ -2239,14 +2011,24 @@ class SharepointService:
                 if key:
                     system_po_map[key].append(po)
 
-            # Run both flows
-            mismatch_stats = await self.reconcile_mismatches(user_id, system_po_map, batch_size, sp_repo)
-            missing_stats = await self.reconcile_missing(user_id, system_po_map, batch_size, sp_repo)
+            # Run mismatch reconcile — isolated individually 
+            try:
+                mismatch_stats = await self.reconcile_mismatches(user_id, system_po_map, batch_size, sp_repo)
+                stats.update(mismatch_stats)
+            except Exception as e:
+                logger.error(f"[RECONCILE] reconcile_mismatches failed: {e}", exc_info=True)
+                stats["errors"].append(f"mismatch: {str(e)}")
 
-            stats.update(mismatch_stats)
-            stats.update(missing_stats)
+            # Run missing reconcile — isolated individually 
+            try:
+                missing_stats = await self.reconcile_missing(user_id, system_po_map, batch_size, sp_repo)
+                stats.update(missing_stats)
+            except Exception as e:
+                logger.error(f"[RECONCILE] reconcile_missing failed: {e}", exc_info=True)
+                stats["errors"].append(f"missing: {str(e)}")
 
         except Exception as e:
+            logger.error(f"[RECONCILE] reconcile_all_pos outer exception: {e}", exc_info=True)
             stats["errors"].append(str(e))
 
         return stats
@@ -2516,6 +2298,24 @@ class SharepointService:
     # PO Recomparison end
     # ============================================================
 
+    async def fetch_Sp_system_pos_with_oldest_date(self, sp_repo, app):
+        oldest_date = await sp_repo.get_sharepoint_oldest_report_date()
+
+        if oldest_date:
+            system_pos = await MSSQLRepo.get_po_list(app, oldest_date)
+        else:
+            system_pos = await MSSQLRepo.get_po_list_without_oldest_date(app)
+
+        # ---- imaginary PK for system_pos ---- #
+        for po in system_pos:
+            po["system_po_id"] = self.make_stable_system_po_id(po)
+
+        system_pos = [
+            {k: self.make_json_safe(v) for k, v in po.items()}
+            for po in system_pos
+        ]
+
+        return system_pos
 
     # ============================================================
     # compare data between scanned and system POs Start
@@ -2527,6 +2327,7 @@ class SharepointService:
         user_id: int = None,
         sharepoint_po_det_ids: list[int] = None,
         sp_repo=SharepointRepo,
+        system_pos=None
     ):
         try:
             # ---------------- Resolve app context ---------------- #
@@ -2560,28 +2361,28 @@ class SharepointService:
             })
 
             # -------------------- Fetch system POs -------------------- #
-            oldest_date = await sp_repo.get_sharepoint_oldest_report_date()
+            # oldest_date = await sp_repo.get_sharepoint_oldest_report_date()
 
-            if oldest_date:
-                system_pos = await MSSQLRepo.get_po_list(resolved_app, oldest_date)
-            else:
-                system_pos = await MSSQLRepo.get_po_list_without_oldest_date(resolved_app)
+            # if oldest_date:
+            #     system_pos = await MSSQLRepo.get_po_list(resolved_app, oldest_date)
+            # else:
+            #     system_pos = await MSSQLRepo.get_po_list_without_oldest_date(resolved_app)
 
-            # ---- imaginary PK for system_pos ---- #
-            for po in system_pos:
-                po["system_po_id"] = self.make_stable_system_po_id(po)
+            # # ---- imaginary PK for system_pos ---- #
+            # for po in system_pos:
+            #     po["system_po_id"] = self.make_stable_system_po_id(po)
 
-            system_pos = [
-                {k: self.make_json_safe(v) for k, v in po.items()}
-                for po in system_pos
-            ]
+            # system_pos = [
+            #     {k: self.make_json_safe(v) for k, v in po.items()}
+            #     for po in system_pos
+            # ]
 
             #-----------reconcile OLD mismatches/missing BEFORE processing new POs----------
-            await self.reconcile_all_pos(
-                user_id=user_id,
-                system_pos=system_pos,
-                sp_repo=sp_repo
-            )
+            # await self.reconcile_all_pos(
+            #     user_id=user_id,
+            #     system_pos=system_pos,
+            #     sp_repo=sp_repo
+            # )
             
             # ---------------- Create system PO lookup ---------------- #
             system_po_map = defaultdict(list)

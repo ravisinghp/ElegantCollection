@@ -148,11 +148,32 @@ class SchedulerService:
                                 mails_repo=repo
                             )
                             logger.info(f"User {user_id} - Emails fetched and saved: {response}")
- 
+
+                            # ---------------- FETCH SYSTEM POS ----------------
+                            system_pos = []
+                            try:
+                                system_pos = await usersmailservice.fetch_system_pos_with_oldest_date(repo, request.app)
+                            except Exception as e:
+                                logger.warning(f"[RECONCILE] fetch_system_pos failed — skipping reconcile+compare: {e}")
+
+                            # ---------------- RECONCILE (INDEPENDENT) ----------------
+                            reconcile_stats = {}
+                            if system_pos:
+                                try:
+                                    reconcile_stats = await usersmailservice.reconcile_all_pos(
+                                        user_id=user_id,
+                                        mails_repo=repo,
+                                        system_pos=system_pos
+                                    )
+                                    logger.info(f"reconcile stats: {reconcile_stats}")
+                                except Exception as e:
+                                    logger.error(f"[RECONCILE] reconcile_all_pos failed (non-fatal): {e}", exc_info=True)
+
+                            # ---------------- COMPARE recent id with system pos ----------------
                             po_det_ids = response.get("extracted_po_ids", [])
                             if po_det_ids:
                                 await usersmailservice.compare_scanned_and_system_pos(
-                                    request=request, user_id=user_id, po_det_ids=po_det_ids, mails_repo=repo
+                                    request=request, user_id=user_id, po_det_ids=po_det_ids, mails_repo=repo, system_pos=system_pos 
                                 )
                             logger.info(f"User {user_id} - PO comparison completed for PO IDs: {po_det_ids}")              
  
@@ -165,8 +186,11 @@ class SchedulerService:
             "type": "SCHEDULER_UPDATED",
             "task_id": task_id
         })  
-            return {"status": "success"}
-       
+            return {
+                "status": "success",
+                "message": "Mail sync + reconciliation completed",
+                "reconcile_stats": reconcile_stats
+            }
         except Exception as e:
             logger.exception(f"Scheduler crashed: {e}")
  

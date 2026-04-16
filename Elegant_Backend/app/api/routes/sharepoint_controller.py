@@ -177,14 +177,46 @@ async def sync_sharepoint_files(
             to_date=to_date,
             site_id=site_id,
         )
+
+        # ---------------- FETCH SYSTEM POS ----------------
+        system_pos = []
+        try:
+            system_pos = await service.fetch_Sp_system_pos_with_oldest_date(sp_repo, request.app)
+        except Exception as e:
+            logger.warning(f"[RECONCILE] fetch_Sp_system_pos_with_oldest_date failed — skipping reconcile+compare: {e}")
+
+        # ---------------- RECONCILE (INDEPENDENT) ----------------
+        reconcile_stats = {}
+        if system_pos:
+            try:
+                reconcile_stats = await service.reconcile_all_sharepoint_pos(
+                    user_id=user_id,
+                    sp_repo=sp_repo,
+                    system_pos=system_pos
+                )
+                logger.info(f"reconcile stats: {reconcile_stats}")
+            except Exception as e:
+                logger.error(f"[RECONCILE] reconcile_all_sharepoint_pos failed (non-fatal): {e}", exc_info=True)
+
+        # ---------------- COMPARE recent id with system pos ----------------
         sharepoint_po_det_ids = response.get("extracted_sharepoint_po_ids", [])
         if sharepoint_po_det_ids:
-                await service.compare_sharepoint_scanned_and_system_pos(
-                    request=request,
-                    user_id=user_id,
-                    sharepoint_po_det_ids=sharepoint_po_det_ids,
-                    sp_repo=sp_repo
-                )
+            await service.compare_sharepoint_scanned_and_system_pos(
+                request=request,
+                user_id=user_id,
+                sharepoint_po_det_ids=sharepoint_po_det_ids,
+                sp_repo=sp_repo,
+                system_pos=system_pos 
+            )
+            
+        return {
+            "status": "success",
+            "message": "SharePoint sync completed",
+            "saved_count": response.get("saved_count", 0),
+            "failed_count": response.get("failed_count", 0),
+            "reconcile_stats": reconcile_stats
+        }
+    
     except HTTPException as e:
         raise e
 

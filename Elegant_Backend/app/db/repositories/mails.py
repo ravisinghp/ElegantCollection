@@ -63,8 +63,10 @@ INSERT INTO po_details (
     description,
     mail_folder,
     created_by,
-    gold_lock
-) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+    gold_lock,
+    domain_name,
+    source
+) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
 """
 
 
@@ -384,6 +386,8 @@ class MailsRepository(BaseRepository):
         mail_folder: Optional[str],
         created_by: Optional[int],
         gold_lock: Optional[str] ,
+        domain_name: Optional[str],
+        source: Optional[str]
     ) -> int:
         
         await self._log_and_execute(
@@ -406,6 +410,8 @@ class MailsRepository(BaseRepository):
                 mail_folder,
                 created_by,
                 gold_lock,
+                domain_name,
+                source
             ),
         )
 
@@ -440,13 +446,13 @@ class MailsRepository(BaseRepository):
         if not po_det_ids:
             return []
 
-        # MySQL uses %s placeholders
         placeholders = ", ".join(["%s"] * len(po_det_ids))
 
         query = f"""
-            SELECT *
-            FROM po_details
-            WHERE po_det_id IN ({placeholders})
+            SELECT pd.*, md.date_time
+            FROM po_details pd
+            LEFT JOIN mail_details md ON pd.mail_dtl_id = md.mail_dtl_id
+            WHERE pd.po_det_id IN ({placeholders})
         """
 
         await self._log_and_execute(query, po_det_ids)
@@ -859,3 +865,23 @@ class MailsRepository(BaseRepository):
         rows = await self._cur.fetchall()
 
         return rows or []
+    
+    
+    async def update_po_customer_name(
+        self,
+        po_det_id: int,
+        customer_name: str
+    ) -> None:
+
+        query = """
+            UPDATE po_details
+            SET customer_name = %s
+            WHERE po_det_id = %s
+        """
+
+        await self._log_and_execute(
+            query,
+            [customer_name, po_det_id]
+        )
+
+        await self._cur.connection.commit()

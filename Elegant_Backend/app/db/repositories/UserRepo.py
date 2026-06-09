@@ -2157,3 +2157,245 @@ async def hard_delete_po_by_business_admin_or_user(
         logger.error(f"Hard delete failed: {e}")
         return False
 # -----------------------Soft Delete and Hard Delete PO by Business Admin or User it self end------------------------
+
+# -----------------Enrich po_details with domain_name before processing in scheduler---------------
+async def enrich_po_details_with_domain(request) -> None:
+    """
+    Enrich po_details.domain_name from customer_domain_master.
+    - Only runs for source = 'client'
+    - Only updates records where domain_name is NULL or empty
+    - Skips entirely if nothing needs enriching
+    - Once domain_name is set it is never overwritten
+    """
+    try:
+        async with request.app.state.pool.acquire() as conn:
+            async with conn.cursor() as cursor:
+
+                # ── Step 1: Check if anything needs enriching ──
+                await cursor.execute("""
+                    SELECT COUNT(*) FROM po_details
+                    WHERE source = 'client'
+                    AND active = 1
+                    AND is_compared IN (0, 1)
+                    AND (domain_name IS NULL OR domain_name = '')
+                """)
+                row = await cursor.fetchone()
+                pending_count = row[0] if row else 0
+
+                if pending_count == 0:
+                    logger.info("All client records already have domain_name — skipping enrichment.")
+                    return
+
+                logger.info(f"{pending_count} client records need domain enrichment.")
+
+                # ── Step 2: Enrich ──
+                await cursor.execute("""
+                    UPDATE po_details pd
+                    JOIN users_master um
+                        ON LOWER(TRIM(um.user_name)) = LOWER(TRIM(pd.customer_name))
+                    JOIN customer_domain_master cdm
+                        ON LOWER(TRIM(cdm.customer_name)) = LOWER(TRIM(pd.customer_name))
+                        AND cdm.user_id = um.user_id
+                    SET pd.domain_name = cdm.domain_name
+                    WHERE pd.source = 'client'
+                    AND pd.active = 1
+                    AND pd.is_compared IN (0, 1)
+                    AND (pd.domain_name IS NULL OR pd.domain_name = '')
+                """)
+                await conn.commit()
+                logger.info(f"[CLIENT_PO] Enriched {cursor.rowcount} client PO records with domain_name.")
+
+    except Exception as exc:
+        logger.exception("[CLIENT_PO] Failed to enrich po_details with domain_name. Error: %s", str(exc))
+        raise
+
+# ---------------------Fetch active client PO records that still need processing---------------------
+async def get_existing_client_po_det_ids(request) -> List[dict]:
+    """
+    Fetch active client PO records that still need processing.
+    is_compared = 0 → fresh → compare
+    is_compared = 1 → mismatch/missing → reconcile
+    is_compared = 2 → fully matched → skipped (not fetched)
+    """
+    query = """
+        SELECT pd.po_det_id, um.user_id, pd.is_compared
+        FROM po_details pd
+        LEFT JOIN users_master um 
+            ON LOWER(TRIM(um.user_name)) = LOWER(TRIM(pd.customer_name))
+        WHERE pd.source = 'client'
+        AND pd.active = 1
+        AND pd.is_compared IN (0, 1)
+    """
+    try:
+        async with request.app.state.pool.acquire() as conn:
+            async with conn.cursor(DictCursor) as cursor:
+                await cursor.execute(query)
+                rows = await cursor.fetchall()
+
+                if not rows:
+                    logger.info("[CLIENT_PO] No pending client PO records found.")
+                    return []
+
+                result = [
+                    {
+                        "po_det_id": row["po_det_id"],
+                        "user_id": row["user_id"],
+                        "is_compared": int(row["is_compared"]) if row["is_compared"] is not None else 0
+                    }
+                    for row in rows
+                ]
+
+                fresh = sum(1 for r in result if r["is_compared"] == 0)
+                pending_reconcile = sum(1 for r in result if r["is_compared"] == 1)
+                unmatched = sum(1 for r in result if not r["user_id"])
+
+                logger.info(
+                    f"[CLIENT_PO] Fetched {len(result)} pending records | "
+                    f"Fresh (compare): {fresh} | "
+                    f"Pending reconcile: {pending_reconcile} | "
+                    f"No user match: {unmatched}"
+                )
+
+                return result
+
+    except Exception as exc:
+        logger.exception("[CLIENT_PO] Failed to fetch client po_det_ids. Error: %s", str(exc))
+        raise
+
+# ---------------------Mark records as fully compared (2) or still pending (1) for next reconcile step----------------
+async def mark_po_as_compared(request, po_det_ids: List[int]):
+    """
+    After compare:
+    - If in po_matched_report  → is_compared = 2 (fully done, skip forever)
+    - If in mismatch/missing   → is_compared = 1 (keep reconciling)
+    - If not in any report     → stays 0 (compare may have failed)
+    """
+    if not po_det_ids:
+        logger.warning("[CLIENT_PO] mark_po_as_compared called with empty list, skipping.")
+        return
+
+    try:
+        async with request.app.state.pool.acquire() as conn:
+            async with conn.cursor(DictCursor) as cursor:
+                placeholders = ", ".join(["%s"] * len(po_det_ids))
+
+                # ── Find matched IDs → mark as 2 ──
+                await cursor.execute(
+                    f"""
+                    SELECT DISTINCT po_det_id FROM po_matched_report
+                    WHERE po_det_id IN ({placeholders}) AND is_active = 1
+                    """,
+                    tuple(po_det_ids)
+                )
+                matched_ids = [row["po_det_id"] for row in await cursor.fetchall()]
+
+                # ── Find mismatch/missing IDs → mark as 1 ──
+                await cursor.execute(
+                    f"""
+                    SELECT DISTINCT po_det_id FROM po_mismatch_report
+                    WHERE po_det_id IN ({placeholders}) AND active = 1
+                    UNION
+                    SELECT DISTINCT po_det_id FROM po_missing_report
+                    WHERE po_det_id IN ({placeholders}) AND active = 1
+                    """,
+                    tuple(po_det_ids) + tuple(po_det_ids)
+                )
+                pending_ids = [row["po_det_id"] for row in await cursor.fetchall()]
+
+                # ── Update matched → 2 ──
+                if matched_ids:
+                    match_placeholders = ", ".join(["%s"] * len(matched_ids))
+                    await cursor.execute(
+                        f"""
+                        UPDATE po_details
+                        SET is_compared = 2
+                        WHERE po_det_id IN ({match_placeholders})
+                        """,
+                        tuple(matched_ids)
+                    )
+                    logger.info(f"[CLIENT_PO] Marked {len(matched_ids)} as fully reconciled (is_compared=2)")
+
+                # ── Update mismatch/missing → 1 ──
+                if pending_ids:
+                    pending_placeholders = ", ".join(["%s"] * len(pending_ids))
+                    await cursor.execute(
+                        f"""
+                        UPDATE po_details
+                        SET is_compared = 1
+                        WHERE po_det_id IN ({pending_placeholders})
+                        AND is_compared = 0
+                        """,
+                        tuple(pending_ids)
+                    )
+                    logger.info(f"[CLIENT_PO] Marked {len(pending_ids)} as pending reconcile (is_compared=1)")
+
+                # ── Only commit if something was actually updated ──
+                if matched_ids or pending_ids:
+                    await conn.commit()
+
+                # ── Log skipped ──
+                processed = set(matched_ids) | set(pending_ids)
+                skipped = set(po_det_ids) - processed
+                if skipped:
+                    logger.warning(
+                        f"[CLIENT_PO] {len(skipped)} PO records not found in any report "
+                        f"(compare may have failed): {sorted(skipped)}"
+                    )
+
+    except Exception as exc:
+        logger.exception("[CLIENT_PO] Failed to mark PO records. Error: %s", str(exc))
+        raise
+
+# ------------------Mark records as fully reconciled (2) or still pending (1)------------------
+async def mark_po_as_reconciled(request, po_det_ids: List[int]):
+    """
+    After reconcile:
+    - If moved to po_matched_report → is_compared = 2 (fully done)
+    - Still in mismatch/missing     → stays 1 (retry tomorrow)
+    """
+    if not po_det_ids:
+        logger.warning("[CLIENT_PO] mark_po_as_reconciled called with empty list, skipping.")
+        return
+
+    try:
+        async with request.app.state.pool.acquire() as conn:
+            async with conn.cursor(DictCursor) as cursor:
+                placeholders = ", ".join(["%s"] * len(po_det_ids))
+
+                # ── Check which ones moved to matched ──
+                await cursor.execute(
+                    f"""
+                    SELECT DISTINCT po_det_id FROM po_matched_report
+                    WHERE po_det_id IN ({placeholders}) AND is_active = 1
+                    """,
+                    tuple(po_det_ids)
+                )
+                now_matched = [row["po_det_id"] for row in await cursor.fetchall()]
+
+                if now_matched:
+                    match_placeholders = ", ".join(["%s"] * len(now_matched))
+                    await cursor.execute(
+                        f"""
+                        UPDATE po_details
+                        SET is_compared = 2
+                        WHERE po_det_id IN ({match_placeholders})
+                        AND is_compared = 1
+                        """,
+                        tuple(now_matched)
+                    )
+                    await conn.commit()
+                    logger.info(
+                        f"[CLIENT_PO] {len(now_matched)} records moved to matched "
+                        f"— marked as fully reconciled (is_compared=2)"
+                    )
+
+                still_pending = set(po_det_ids) - set(now_matched)
+                if still_pending:
+                    logger.info(
+                        f"[CLIENT_PO] {len(still_pending)} records still in "
+                        f"mismatch/missing — will retry tomorrow"
+                    )
+
+    except Exception as exc:
+        logger.exception("[CLIENT_PO] Failed to mark reconciled records. Error: %s", str(exc))
+        raise

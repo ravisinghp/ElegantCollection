@@ -84,6 +84,11 @@ async def register_user(request: Request, user: UserCreate) -> int:
                         user_id,
                         user.sources
                     )
+                    
+                # Link user to customer domain if name matches
+                matched_customer = await admin_repo.get_customer_by_name(request, user.user_name)
+                if matched_customer:
+                    await admin_repo.update_customer_user_id(request, user_id, user.user_name)
 
                 # Commit once
                 await conn.commit()
@@ -98,6 +103,7 @@ async def register_user(request: Request, user: UserCreate) -> int:
             except Exception as e:
                 await conn.rollback()
                 raise HTTPException(status_code=500, detail=str(e))
+            
     #   send mail to the created user
     # message = MessageSchema(
     #     subject="Welcome to Our Platform",

@@ -377,7 +377,7 @@ def trim_to_db_limits(data: dict) -> dict:
     return trimmed
   
 
-MANDATORY_FIELDS = ["po_number", "customer_name", "vendor_number", "po_date", "delivery_date", "quantity"]
+MANDATORY_FIELDS = ["po_number", "customer_name", "vendor_number", "po_date", "delivery_date", "quantity", "cancel_date", "gold_karat", "ec_style_number", "customer_style_number", "color", "description", "gold_lock"]
 
 async def extract_po_fields(text: str) -> dict:
     regex_data_response = extract_po_fields_regex(text)
@@ -436,7 +436,7 @@ PO_REGEX_PATTERNS = {
         # Vendor Number / ID on SAME LINE
         r"(?:vendor[_\s]*(?:number|no|id)|supplier[_\s]*(?:number|no|code))\s*[:\-#]?\s*([A-Za-z0-9\-_./]+)",
 
-        # Vendor ID on NEXT LINE (VERY IMPORTANT FOR YOUR FILE)
+        # Vendor ID on NEXT LINE 
         r"(?:vendor\s*id|vendor\s*number)\s*[:\-]?\s*\n\s*([A-Za-z0-9\-_./]+)",
 
         # Simple "Vendor: XYZ"
@@ -748,15 +748,76 @@ FIELD-BY-FIELD RULES
 ===========================
 
 PO NUMBER:
-- Labels: "PO Number", "P.O.", "PO#", "PO #", "Purchase Order Number", "Order No"
-- Value must look like an alphanumeric PO identifier e.g. "PO-2024-001", "12345A".
+- Labels: "PO Number", "PO No", "P.O.", "PO#", "PO #", "Purchase Order Number", "Order No"
+- Value must look like an alphanumeric PO identifier e.g. "PO-2024-001", "12345A", "EC\SO\20\SV1\3\7".
 - If multiple PO numbers appear return the FIRST one.
 
 CUSTOMER NAME:
-- Labels: "Customer", "Customer Name", "Bill To", "Sold To", "Buyer"
-- Customer Name can also be an alphanumeric code (e.g., DM5-GER, ABC-123, XYZ LTD).
-- If a field labeled "Customer" exists, ALWAYS extract its full value exactly as written.
-- Do NOT extract address lines as the customer name.
+════════════════════════════════════════════════
+CORE LOGIC (works for ANY document format):
+════════════════════════════════════════════════
+
+This PO was sent BY a customer TO Elegant Collection (the vendor).
+Your job: find WHO SENT this PO.
+
+ELEGANT COLLECTION is ALWAYS the vendor — NEVER return it as customer name.
+Any variation of "Elegant Collection" must be rejected as customer name.
+
+════════════════════════════════════════════════
+SIGNALS THAT IDENTIFY THE CUSTOMER (issuer):
+════════════════════════════════════════════════
+
+STRONG signals — high confidence:
+- Company name/logo text in the FIRST 3 lines of the document
+- Text near labels: "From:", "Issued By:", "Purchaser:", "Buyer:", "Prepared By:"
+- Company name in the document FOOTER (repeated at bottom of every page)
+- Company name in legal/terms text:
+  e.g. "XYZ Corp reserves the right to cancel..."
+  e.g. "transactions with XYZ Corp and/or its subsidiaries"
+  e.g. "governed by XYZ Corp"
+- Email domain in contact info:
+  e.g. "buyer@davidyurman.com" → David Yurman
+  e.g. "BackOffice@Lsdco.com" → Leo Schachter
+
+MEDIUM signals — use if strong signals absent:
+- Company name on the BILL TO address block
+  (the company billing = usually the customer)
+- Letterhead address that does NOT match Elegant Collection's address
+  (Plot 56A, SEEPZ, Mumbai = Elegant Collection — reject this)
+- Company name repeated multiple times in the document
+
+WEAK signals — last resort only:
+- Company name in "Ship To:" block
+- Company name embedded in item descriptions
+
+════════════════════════════════════════════════
+SIGNALS TO ALWAYS REJECT AS CUSTOMER NAME:
+════════════════════════════════════════════════
+- "ELEGANT COLLECTION" or any variation → this is the vendor
+- "Order To:" field value → this is the vendor 
+- "Ship To:" field value → this is a shipping destination
+- "Vendor:" field value → this is the vendor
+- Any street address, city, state, ZIP, country
+- Phone numbers, fax numbers, email addresses
+- Generic words: "purchaser", "buyer", "vendor", "supplier" alone
+
+════════════════════════════════════════════════
+FORMAT-SPECIFIC HINTS:
+════════════════════════════════════════════════
+- If document starts with a company name on line 1 or 2 → very likely the customer
+- If "PURCHASE ORDER" header exists → issuing company is above or below it
+- If "Jewelry Vendor P.O." or similar title → the company in the header/footer issued it
+- If only one non-Elegant-Collection company name exists in the whole document → that is the customer
+- Vend.PO# / Vendor PO # → the number after this label is the PO number, company above it is customer
+
+════════════════════════════════════════════════
+RETURN RULES:
+════════════════════════════════════════════════
+- Return the SHORTEST clean company name found
+  e.g. "LEO SCHACHTER NEW YORK" not "LEO SCHACHTER (NEW YORK) INC. 50 West 47th..."
+  e.g. "DAVID YURMAN" not "David Yurman Enterprises LLC"
+- Strip legal suffixes if the short name is clear: LLC, INC, LTD, CORP
+- Return null if genuinely cannot determine — do NOT guess
 
 VENDOR NUMBER:
 - Labels: "Vendor", "Vendor No", "Vendor Number", "Supplier Code", "Vendor ID"
@@ -849,7 +910,6 @@ TEXT TO EXTRACT FROM:
     except Exception as e:
         logger.error(f"LLM extraction failed: {e}")
         return EMPTY_PO
-    
 
 from datetime import datetime
 from typing import Optional
@@ -863,28 +923,114 @@ def normalize_po_date_ddmmyyyy(date_str: Optional[str]) -> Optional[str]:
         return None
 
     date_str = date_str.strip()
+    
+    # ── pre-clean
+    date_str = re.sub(r'(\d+)(st|nd|rd|th)\b', r'\1', date_str, flags=re.IGNORECASE)
+    date_str = re.sub(r'[ \t]+', ' ', date_str).strip()
 
     date_formats = [
-        "%Y-%m-%d",    # 2025-07-11
-        "%d-%m-%Y",    # 11-07-2025
-        "%m-%d-%Y",    # 07-11-2025
-        "%m/%d/%Y",    # 07/11/2025
-        "%d/%m/%Y",    # 11/07/2025
-        "%y-%m-%d",    # 25-07-11
-        "%m/%d/%y",    # 07/11/25
-        "%d/%m/%y",    # 11/07/25
-        "%b/%d/%Y",    # Jul/11/2025
-        "%B/%d/%Y",    # July/11/2025
-        "%d-%b-%Y",    # 11-Jul-2025
-        "%d-%B-%Y",    # 11-July-2025
+        "%Y-%m-%d",          # 2025-07-11
+        "%Y/%m/%d",          # 2025/07/11
+        "%Y.%m.%d",          # 2025.07.11
+        "%Y %m %d",          # 2025 07 11
+
+        "%d-%m-%Y",          # 11-07-2025
+        "%d/%m/%Y",          # 11/07/2025
+        "%d.%m.%Y",          # 11.07.2025
+        "%d %m %Y",          # 11 07 2025
+
+        "%m-%d-%Y",          # 07-11-2025
+        "%m/%d/%Y",          # 07/11/2025
+        "%m.%d.%Y",          # 07.11.2025
+        "%m %d %Y",          # 07 11 2025
+
+        "%y-%m-%d",          # 25-07-11
+        "%y/%m/%d",          # 25/07/11
+        "%y.%m.%d",          # 25.07.11
+
+        "%d-%m-%y",          # 11-07-25
+        "%d/%m/%y",          # 11/07/25
+        "%d.%m.%y",          # 11.07.25
+        "%d %m %y",          # 11 07 25
+
+        "%m-%d-%y",          # 07-11-25
+        "%m/%d/%y",          # 07/11/25
+        "%m.%d.%y",          # 07.11.25
+        "%m %d %y",          # 07 11 25
+
+        "%d-%b-%Y",          # 11-Jul-2025  
+        "%d/%b/%Y",          # 11/Jul/2025
+        "%d.%b.%Y",          # 11.Jul.2025
+        "%d %b %Y",          # 11 Jul 2025
+
+        "%b-%d-%Y",          # Jul-11-2025
+        "%b/%d/%Y",          # Jul/11/2025
+        "%b %d %Y",          # Jul 11 2025
+        "%b %d, %Y",         # Jul 11, 2025
+        "%b-%d-%Y",          # APR-19-2026
+
+        "%Y-%b-%d",          # 2025-Jul-11
+        "%Y/%b/%d",          # 2025/Jul/11
+
+        "%d-%b-%y",          # 19-APR-26  
+        "%d/%b/%y",          # 19/APR/26
+        "%d.%b.%y",          # 19.APR.26
+        "%d %b %y",          # 19 APR 26
+
+        "%b-%d-%y",          # APR-19-26
+        "%b/%d/%y",          # APR/19/26
+        "%b %d %y",          # APR 19 26
+        "%b %d, %y",         # APR 19, 26
+
+        "%d-%B-%Y",          # 11-July-2025
+        "%d/%B/%Y",          # 11/July/2025
+        "%d.%B.%Y",          # 11.July.2025
+        "%d %B %Y",          # 11 July 2025
+
+        "%B-%d-%Y",          # July-11-2025
+        "%B/%d/%Y",          # July/11/2025
+        "%B %d %Y",          # July 11 2025
+        "%B %d, %Y",         # July 11, 2025
+
+        "%Y-%B-%d",          # 2025-July-11
+        "%Y/%B/%d",          # 2025/July/11
+
+        "%d-%B-%y",          # 19-APRIL-26
+        "%d/%B/%y",          # 19/APRIL/26
+        "%d.%B.%y",          # 19.APRIL.26
+        "%d %B %y",          # 19 APRIL 26
+
+        "%B-%d-%y",          # APRIL-19-26
+        "%B/%d-%y",          # APRIL/19-26
+        "%B %d %y",          # APRIL 19 26
+        "%B %d, %y",         # APRIL 19, 26
+
+        "%Y%m%d",            # 20250711
+        "%d%b%Y",            # 11Jul2025
+        "%d%b%y",            # 11Jul25
+        "%d%B%Y",            # 11July2025
+        "%d%B%y",            # 11July25
     ]
 
     for fmt in date_formats:
         try:
             dt = datetime.strptime(date_str, fmt)
+            if dt.year <= 99:
+                dt = dt.replace(year=dt.year + 2000)
             return dt.strftime("%Y-%m-%d")
-        except ValueError as ve:
+        except ValueError:
             continue
+
+    # ── Excel serial number fallback (e.g. "45678") ───────────────────────
+    try:
+        serial = int(date_str)
+        if 30000 <= serial <= 60000:          # sanity range: ~1982 – ~2064
+            from datetime import timedelta
+            excel_epoch = datetime(1899, 12, 30)
+            dt = excel_epoch + timedelta(days=serial)
+            return dt.strftime("%Y-%m-%d")
+    except (ValueError, TypeError):
+        pass
 
     return None
 
@@ -907,19 +1053,6 @@ def normalize_attachment_text(text: str) -> str:
     text = re.sub(r"\n{3,}", "\n\n", text)    # max 2 consecutive blank lines
     return text.strip()
 
-
-# ITEM_REGEX = re.compile(
-#     r"""
-#     (?P<description>.+?)         # Capture everything (non-greedy) until material
-#     \s*[-–—]?\s*                 # Optional dash or special dash separator
-#     (?P<material>\d{2}K\s+Gold(?:\s*\+\s*Diamond)?)  # 22K Gold or 18K Gold + Diamond
-#     \s+
-#     (?P<quantity>\d+)             # Quantity
-#     \s+
-#     (?P<delivery_date>\d{4}-\d{2}-\d{2})  # Date in YYYY-MM-DD
-#     """,
-#     re.IGNORECASE | re.VERBOSE | re.DOTALL
-# )
 
 def extract(pattern: str, text: str) -> Optional[str]:
     match = re.search(pattern, text, re.IGNORECASE)
@@ -1051,7 +1184,7 @@ async def extract_text_from_attachment(content_bytes, filename, content_type):
 
                     wb = load_workbook(io.BytesIO(content_bytes), data_only=True)
 
-                    for sheet in wb.worksheets:   # FIX
+                    for sheet in wb.worksheets:   
                         all_text.append(f"Sheet: {sheet.title}")
 
                         for row in sheet.iter_rows():
@@ -1210,8 +1343,10 @@ async def fetch_and_save_mails_by_folders(
                 # ------------- CHECK DOMAIN FIRST -------------
                 from_email = (msg.get('from') or {}).get('emailAddress', {}).get('address')
 
+                sender_domain = None
+
                 if from_email and "@" in from_email:
-                    sender_domain = from_email.split("@")[-1].lower()
+                    sender_domain = from_email.split("@")[-1].lower().strip()
 
                     if sender_domain in BLOCKED_DOMAINS:
                         logger.info(f"Skipping mail from blocked domain: {from_email}")
@@ -1306,16 +1441,17 @@ async def fetch_and_save_mails_by_folders(
                             f.write(content_bytes)
 
                         attachment_text = await extract_text_from_attachment(content_bytes, filename, content_type)
-                        if attachment_text:
-                            attachment_texts.append(attachment_text)
-                            attach_keywords, match_type = await detect_keywords(attachment_text, keywords)
+                        if not attachment_text:
+                            continue
 
-                        else:
-                            attach_keywords = []
+                        attach_keywords, match_type = await detect_keywords(attachment_text, keywords)
 
                         if not attach_keywords:
                             logger.info(f"Skipping attachment '{filename}' — no keyword match.")
                             continue
+
+                        # Only add to attachment_texts AFTER keyword check passes
+                        attachment_texts.append(attachment_text)
 
                         try:
                             response = await mails_repo.insert_attachment(
@@ -1338,7 +1474,7 @@ async def fetch_and_save_mails_by_folders(
                 # ---------------- Insert PO data from email body ----------------
                 po_data_body = await extract_po_fields(body_clean)
                 logger.info(f"PO Body Data:{po_data_body}")
-                if po_data_body.get("po_number") and po_data_body.get("customer_name"):
+                if po_data_body.get("po_number") or po_data_body.get("customer_name"):
                     po_det_id = await mails_repo.insert_po_details(
                         mail_dtl_id=mail_id,
                         user_id=user_id,
@@ -1356,7 +1492,9 @@ async def fetch_and_save_mails_by_folders(
                         description=po_data_body.get("description"),
                         mail_folder=folder_name,
                         created_by=user_id,
-                        gold_lock=po_data_body.get("gold_lock")
+                        gold_lock=po_data_body.get("gold_lock"),
+                        domain_name=sender_domain,
+                        source="email"
                     )
                     extracted_po_ids.append(po_det_id)
                     logger.info(f"Inserted Mail PO Extracted IDs:{extracted_po_ids}")
@@ -1393,7 +1531,9 @@ async def fetch_and_save_mails_by_folders(
                             description=header.get("description"),
                             mail_folder=folder_name,
                             created_by=user_id,
-                            gold_lock=header.get("gold_lock")
+                            gold_lock=header.get("gold_lock"),
+                            domain_name=sender_domain,
+                            source="email"
                         )
                         extracted_po_ids.append(po_det_id)
                         logger.info(f"Inserted Attchment PO Extracted IDs:{extracted_po_ids}")
@@ -1417,7 +1557,9 @@ async def fetch_and_save_mails_by_folders(
                                 description=item.get("description"),
                                 mail_folder=folder_name,
                                 created_by=user_id,
-                                gold_lock=header.get("gold_lock")
+                                gold_lock=header.get("gold_lock"),
+                                domain_name=sender_domain,
+                                source="email"
                             )
                             extracted_po_ids.append(po_det_id)
                             logger.info(f"Inserted Attachment PO Extracted IDs:{extracted_po_ids}")
@@ -1472,47 +1614,9 @@ def make_json_safe(obj):
             return base64.b64encode(obj).decode("utf-8")
     return obj
 
-
-async def llm_batch_match(scanned_pos, system_pos):
-    prompt = f"""
-You are a PO matching engine.
-
-Match scanned POs to system POs using ONLY:
-- customer_name
-- po_number
-
-Rules:
-- Handle spelling mistakes, abbreviations, extra/missing letters.
-- One scanned PO matches at most one system PO.
-- If no confident match exists, return null.
-
-Return ONLY JSON:
-[
-  {{
-    "scanned_po_det_id": number,
-    "system_po_id": number | null,
-    "confidence": 0.0-1.0
-  }}
-]
-
-Scanned POs:
-{json.dumps(scanned_pos)}
-
-System POs:
-{json.dumps(system_pos)}
-"""
-
-    resp = openai_client.chat.completions.create(
-        model="gpt-4.1-mini",
-        temperature=0,
-        messages=[{"role": "user", "content": prompt}]
-    )
-
-    raw = resp.choices[0].message.content.strip()
-    raw = re.sub(r"^```json|```$", "", raw, flags=re.IGNORECASE).strip()
-    return json.loads(raw)
-
-
+# ============================================================
+# LLM comparison function with robust JSON parsing and error handling
+# ===========================================================
 async def llm_batch_compare(pairs_for_llm):
 
     prompt = f"""
@@ -1581,64 +1685,38 @@ def normalize_value(v):
         return ""
 
     v = str(v).lower().strip()
-
     # remove punctuation
     v = re.sub(r'[^a-z0-9\s]', '', v)
-
     # collapse spaces
     v = re.sub(r'\s+', ' ', v)
 
     return v
-
-
-def find_best_system_match(scanned, candidates):
-
-    best_candidate = None
-    best_score = -1
-
-    for system in candidates:
-        score = 0
-
-        for field in FIELDS_TO_COMPARE:
-
-            scanned_val = normalize_value(scanned.get(field))
-            system_val = normalize_value(system.get(field))
-
-            if not scanned_val or not system_val:
-                continue
-
-            if scanned_val == system_val:
-                score += 1
-
-        if score > best_score:
-            best_score = score
-            best_candidate = system
-
-    return best_candidate
 
 # ============================================================
 # PO Recomparison start
 # ============================================================
 import hashlib
 
-# ----------------STABLE SYSTEM PO ID-----------------------
+# hash on po_number + domain to stay consistent with unique key
 def make_stable_system_po_id(po: dict) -> int:
     raw = "|".join([
         normalize_po(str(po.get("po_number") or "")),
-        normalize_value(str(po.get("customer_number") or "")),
+        normalize_domain(str(po.get("domain_name") or "")), 
+        str(po.get("order_date") or ""),
     ])
     full_hash = hashlib.sha256(raw.encode()).digest()
     return int.from_bytes(full_hash[:4], byteorder="big")
 
 
-# ------------PO Recomparison ENTRY POINT-------------------------
-def is_strong_match(scanned, system):
-    return (
-        normalize_po(scanned.get("po_number")) == normalize_po(system.get("po_number"))
-        and normalize_value(scanned.get("customer_number")) == normalize_value(system.get("customer_number"))
-    )
+def normalize_domain(domain):
+    if not domain:
+        return ""
+    return domain.lower().strip()
 
 
+# ============================================================
+# both po_number+domain must be present and match for any reconciliation to occur
+# ============================================================
 async def reconcile_all_pos(user_id, mails_repo, system_pos, batch_size=500):
 
     stats = {
@@ -1650,15 +1728,15 @@ async def reconcile_all_pos(user_id, mails_repo, system_pos, batch_size=500):
     }
 
     try:
-        # Build system lookup
+        # ── Build system lookup with SAME key as compare function: (po_number, domain)
         system_po_map = defaultdict(list)
         for po in system_pos:
-            key = normalize_po(po.get("po_number"))
-            if key:
+            po_number   = normalize_po(po.get("po_number"))
+            domain_name = normalize_domain(po.get("domain_name"))
+            if po_number and domain_name:                      # both must exist
+                key = (po_number, domain_name)
                 system_po_map[key].append(po)
 
-
-        # Run mismatch reconcile — isolated individually 
         try:
             mismatch_stats = await reconcile_mismatches(user_id, mails_repo, system_po_map, batch_size)
             stats.update(mismatch_stats)
@@ -1666,14 +1744,12 @@ async def reconcile_all_pos(user_id, mails_repo, system_pos, batch_size=500):
             logger.error(f"[RECONCILE] reconcile_mismatches failed: {e}", exc_info=True)
             stats["errors"].append(f"mismatch: {str(e)}")
 
-        # Run missing reconcile — isolated individually 
         try:
             missing_stats = await reconcile_missing(user_id, mails_repo, system_po_map, batch_size)
             stats.update(missing_stats)
         except Exception as e:
             logger.error(f"[RECONCILE] reconcile_missing failed: {e}", exc_info=True)
             stats["errors"].append(f"missing: {str(e)}")
-
 
     except Exception as e:
         logger.error(f"[RECONCILE] reconcile_all_pos outer exception: {e}", exc_info=True)
@@ -1682,10 +1758,64 @@ async def reconcile_all_pos(user_id, mails_repo, system_pos, batch_size=500):
     return stats
 
 # ============================================================
-# MISMATCH RECONCILIATION
+# SHARED HELPER 
 # ============================================================
-async def reconcile_mismatches(user_id, mails_repo, system_po_map, batch_size):
+async def resolve_all_differences(scanned: dict, system: dict) -> list:
+    """
+    Compares all 13 fields between scanned and system PO.
+    Uses LLM for value-vs-value differences (same as compare function).
+    Returns list of real mismatches. Empty list = all fields match.
+    """
+    pairs_for_llm   = []
+    direct_mismatch = []
 
+    for field in FIELDS_TO_COMPARE:
+        scanned_val = scanned.get(field)
+        system_val  = system.get(field)
+
+        scanned_empty = scanned_val in (None, "")
+        system_empty  = system_val  in (None, "")
+
+        # Both empty → no issue
+        if scanned_empty and system_empty:
+            continue
+
+        # System has value, scanned empty → direct mismatch, no LLM needed
+        if not system_empty and scanned_empty:
+            direct_mismatch.append({
+                "po_det_id":     scanned["po_det_id"],
+                "system_po_id":  system["system_po_id"],
+                "field":         field,
+                "scanned_value": "",
+                "system_value":  str(system_val)
+            })
+            continue
+
+        # Both have values but differ → send to LLM
+        if normalize_value(scanned_val) != normalize_value(system_val):
+            pairs_for_llm.append({
+                "po_det_id":     scanned["po_det_id"],
+                "system_po_id":  system["system_po_id"],
+                "field":         field,
+                "scanned_value": str(scanned_val),
+                "system_value":  str(system_val)
+            })
+
+    # LLM decides on value-vs-value differences
+    llm_mismatches = []
+    if pairs_for_llm:
+        try:
+            llm_mismatches = await llm_batch_compare(pairs_for_llm)
+        except Exception as e:
+            logger.error(f"LLM compare failed: {e} — treating all as mismatches")
+            llm_mismatches = pairs_for_llm  # safe fallback
+
+    return llm_mismatches + direct_mismatch
+
+# ===========================================================
+# reconcile_mismatches — for active mismatches, check if they can be resolved based on current system data
+# =========================================================
+async def reconcile_mismatches(user_id, mails_repo, system_po_map, batch_size):
     stats = {"mismatch_checked": 0, "mismatch_resolved": 0}
 
     active = await mails_repo.get_all_active_mismatches(user_id)
@@ -1698,56 +1828,49 @@ async def reconcile_mismatches(user_id, mails_repo, system_po_map, batch_size):
     for row in active:
         grouped[row["po_det_id"]].append(row)
 
-    po_det_ids = list(grouped.keys())
+    po_det_ids   = list(grouped.keys())
     scanned_list = await mails_repo.get_po_details_by_ids(po_det_ids)
-    scanned_map = {p["po_det_id"]: p for p in scanned_list}
+    scanned_map  = {p["po_det_id"]: p for p in scanned_list}
 
     for batch_keys in chunk(po_det_ids, batch_size):
-
         for po_det_id in batch_keys:
 
             scanned = scanned_map.get(po_det_id)
-            if not scanned:
+            if not scanned or not is_valid_for_matching(scanned):
                 continue
 
-            candidates = system_po_map.get(normalize_po(scanned.get("po_number")))
+            key = (normalize_po(scanned.get("po_number")), normalize_domain(scanned.get("domain_name")))
+            candidates = system_po_map.get(key)
             if not candidates:
                 continue
 
-            system = find_best_system_match(scanned, candidates)
+            system = find_exact_system_match(scanned, candidates)
             if not system:
                 continue
 
-            rows = grouped[po_det_id]
-
-            all_resolved = True
-
-            for row in rows:
-                field = row["mismatch_attribute"]
-
-                s_val = scanned.get(field)
-                t_val = system.get(field)
-
-                if not s_val or not t_val:
-                    continue
-
-                if normalize_value(s_val) != normalize_value(t_val):
-                    all_resolved = False
-                    break
-
-            # FINAL SAFETY CHECK
-            if not all_resolved or not is_strong_match(scanned, system):
-                continue
+            # Update customer_name from system if different
+            system_customer_name = system.get("customer_name")
+            if system_customer_name and normalize_value(scanned.get("customer_name")) != normalize_value(system_customer_name):
+                try:
+                    await mails_repo.update_po_customer_name(po_det_id=scanned["po_det_id"], customer_name=system_customer_name)
+                    scanned["customer_name"] = system_customer_name
+                except Exception as e:
+                    logger.error(f"Failed to update customer_name for po_det_id={scanned.get('po_det_id')}: {e}")
 
             try:
-                mismatch_ids = [r["po_mismatch_id"] for r in rows]
+                # Same logic as compare — check all 13 fields with LLM
+                all_mismatches = await resolve_all_differences(scanned, system)
 
+                if all_mismatches:
+                    # still has differences → stay in mismatch, do nothing
+                    logger.info(f"po_det_id={po_det_id} → still mismatched ({len(all_mismatches)} field(s))")
+                    continue
+
+                # all fields now match → deactivate mismatch + insert matched
+                mismatch_ids = [r["po_mismatch_id"] for r in grouped[po_det_id]]
                 await mails_repo.deactivate_mismatches(user_id, mismatch_ids)
 
-                exists = await mails_repo.matched_po_exists(
-                    user_id, po_det_id, system["system_po_id"]
-                )
-
+                exists = await mails_repo.matched_po_exists(user_id, po_det_id, system["system_po_id"])
                 if not exists:
                     await mails_repo.insert_matched_po(
                         po_det_id=po_det_id,
@@ -1762,22 +1885,19 @@ async def reconcile_mismatches(user_id, mails_repo, system_po_map, batch_size):
                     )
 
                 stats["mismatch_resolved"] += 1
+                logger.info(f"po_det_id={po_det_id} → mismatch resolved → matched")
 
             except Exception as e:
-                print(f"Mismatch resolve error: {e}")
+                logger.error(f"Mismatch resolve error: {e}")
 
     return stats
 
 
 # ============================================================
-# MISSING RECONCILIATION
+# reconcile_missing 
 # ============================================================
 async def reconcile_missing(user_id, mails_repo, system_po_map, batch_size):
-    stats = {
-        "missing_checked": 0,
-        "missing_resolved": 0,
-        "mismatch_created": 0
-    }
+    stats = {"missing_checked": 0, "missing_resolved": 0, "mismatch_created": 0}
 
     active = await mails_repo.get_all_active_missing(user_id)
     if not active:
@@ -1785,76 +1905,49 @@ async def reconcile_missing(user_id, mails_repo, system_po_map, batch_size):
 
     stats["missing_checked"] = len(active)
 
-    po_det_ids = list({r["po_det_id"] for r in active if r.get("po_det_id")})
+    po_det_ids   = list({r["po_det_id"] for r in active if r.get("po_det_id")})
     scanned_list = await mails_repo.get_po_details_by_ids(po_det_ids)
-    scanned_map = {p["po_det_id"]: p for p in scanned_list}
+    scanned_map  = {p["po_det_id"]: p for p in scanned_list}
 
     for batch in chunk(active, batch_size):
-
         for row in batch:
 
-            po_det_id = row["po_det_id"]
+            po_det_id  = row["po_det_id"]
             missing_id = row["po_missing_id"]
 
             scanned = scanned_map.get(po_det_id)
-            if not scanned:
+            if not scanned or not is_valid_for_matching(scanned):
                 continue
 
-            po_number = scanned.get("po_number") or row.get("scanned_value")
-            if not po_number:
-                continue
+            key = (normalize_po(scanned.get("po_number")), normalize_domain(scanned.get("domain_name")))
+            candidates = system_po_map.get(key)
 
-            candidates = system_po_map.get(normalize_po(po_number))
+            # still not found in system → stay missing
             if not candidates:
                 continue
 
-            system = find_best_system_match(scanned, candidates)
+            system = find_exact_system_match(scanned, candidates)
             if not system:
                 continue
 
-            # ============================================================
-            # BASE MATCH (PO + Customer)
-            # ============================================================
-            base_match = (
-                normalize_po(scanned.get("po_number")) == normalize_po(system.get("po_number")) and
-                normalize_value(scanned.get("customer_name")) == normalize_value(system.get("customer_name"))
-            )
-
-            if not base_match:
-                continue  
+            # Update customer_name from system if different
+            system_customer_name = system.get("customer_name")
+            if system_customer_name and normalize_value(scanned.get("customer_name")) != normalize_value(system_customer_name):
+                try:
+                    await mails_repo.update_po_customer_name(po_det_id=scanned["po_det_id"], customer_name=system_customer_name)
+                    scanned["customer_name"] = system_customer_name
+                except Exception as e:
+                    logger.error(f"Failed to update customer_name for po_det_id={scanned.get('po_det_id')}: {e}")
 
             try:
-                # ============================================================
-                # CHECK ALL FIELDS
-                # ============================================================
-                mismatches = []
+                # Same logic as compare — check all 13 fields with LLM
+                all_mismatches = await resolve_all_differences(scanned, system)
 
-                for field in FIELDS_TO_COMPARE:  # all 13 fields
-
-                    scanned_val = scanned.get(field)
-                    system_val = system.get(field)
-
-                    scanned_norm = normalize_value(str(scanned_val or ""))
-                    system_norm = normalize_value(str(system_val or ""))
-
-                    if scanned_norm != system_norm:
-                        mismatches.append({
-                            "field": field,
-                            "scanned": scanned_norm,
-                            "system": system_norm
-                        })
-
-                # ============================================================
-                # FULL MATCH
-                # ============================================================
-                if not mismatches:
-
+                if not all_mismatches:
+                    # all fields match → deactivate missing + insert matched
                     await mails_repo.deactivate_missing_pos(user_id, missing_id)
 
-                    exists = await mails_repo.matched_po_exists(
-                        user_id, po_det_id, system["system_po_id"]
-                    )
-
+                    exists = await mails_repo.matched_po_exists(user_id, po_det_id, system["system_po_id"])
                     if not exists:
                         await mails_repo.insert_matched_po(
                             po_det_id=po_det_id,
@@ -1869,51 +1962,47 @@ async def reconcile_missing(user_id, mails_repo, system_po_map, batch_size):
                         )
 
                     stats["missing_resolved"] += 1
+                    logger.info(f"po_det_id={po_det_id} → missing resolved → matched")
 
-                # ============================================================
-                # PARTIAL MATCH → INSERT MISMATCH
-                # ============================================================
                 else:
-
-                    mismatch_inserted = False
-
-                    for mm in mismatches:
+                    # PO found but fields differ → deactivate missing + insert mismatches
+                    # Always deactivate missing — PO was found in system, it is no longer missing
+                    for mm in all_mismatches:
+                        scanned_value = str(mm["scanned_value"]) if mm["scanned_value"] else ""
+                        system_value  = str(mm["system_value"])  if mm["system_value"]  else ""
 
                         exists = await mails_repo.mismatch_exists(
                             user_id=user_id,
                             po_det_id=po_det_id,
                             system_po_id=system["system_po_id"],
                             mismatch_attribute=mm["field"],
-                            scanned_value=mm["scanned"],
-                            system_value=mm["system"]
+                            scanned_value=scanned_value,
+                            system_value=system_value
                         )
-
                         if not exists:
                             await mails_repo.insert_mismatch(
                                 po_det_id=po_det_id,
                                 user_id=user_id,
                                 system_po_id=system["system_po_id"],
                                 field=mm["field"],
-                                scanned_value=mm["scanned"],
-                                system_value=mm["system"],
+                                scanned_value=scanned_value,
+                                system_value=system_value,
                                 comment=f"{mm['field']} mismatch"
                             )
 
-                            mismatch_inserted = True
-
-                    # deactivate missing only if mismatch inserted
-                    if mismatch_inserted:
-                        await mails_repo.deactivate_missing_pos(user_id, missing_id)
-                        stats["mismatch_created"] += 1
+                    # Always deactivate missing regardless of whether mismatches were new or existing
+                    await mails_repo.deactivate_missing_pos(user_id, missing_id)
+                    stats["mismatch_created"] += 1
+                    logger.info(f"po_det_id={po_det_id} → missing → mismatch ({len(all_mismatches)} field(s))")
 
             except Exception as e:
-                print(f"Reconcile error: {e}")
+                logger.error(f"Reconcile missing error: {e}")
 
     return stats
-# ============================================================
-# PO Recomparison end
-# ============================================================
 
+# ============================================================
+# fetch oldest date to optimize the system PO fetch for comparison/recomparison
+# ============================================================
 async def fetch_system_pos_with_oldest_date(mails_repo, app):
     oldest_date = await mails_repo.get_oldest_report_date()
 
@@ -1932,8 +2021,73 @@ async def fetch_system_pos_with_oldest_date(mails_repo, app):
 
     return system_pos
 
+
 # ============================================================
-# compare data between scanned and system POs Start
+# CORE: Strong match = po_number + domain_name (unique key)
+# If either is missing → go to missing directly
+# ============================================================
+def is_valid_for_matching(scanned: dict) -> bool:
+    """Both po_number AND domain_name must exist to attempt matching."""
+    return bool(normalize_po(scanned.get("po_number"))) and \
+           bool(normalize_domain(scanned.get("domain_name")))
+
+
+def find_exact_system_match(scanned: dict, candidates: list) -> dict | None:
+    """
+    Strong exact match on po_number + domain_name (unique key).
+    Returns the matched system PO or None.
+    No fuzzy scoring — this is a hard gate.
+    """
+    scanned_po     = normalize_po(scanned.get("po_number"))
+    scanned_domain = normalize_domain(scanned.get("domain_name"))
+    mail_date      = scanned.get("date_time")
+
+    # Parse mail date once
+    parsed_mail_date = None
+    if mail_date:
+        if isinstance(mail_date, (date, datetime)):
+            parsed_mail_date = mail_date.date() if isinstance(mail_date, datetime) else mail_date
+        else:
+            try:
+                parsed_mail_date = datetime.strptime(str(mail_date)[:10], "%Y-%m-%d").date()
+            except Exception:
+                parsed_mail_date = None
+
+    for system in candidates:
+        system_po     = normalize_po(system.get("po_number"))
+        system_domain = normalize_domain(system.get("domain_name"))
+
+        # ── po_number + domain must match
+        if scanned_po != system_po or scanned_domain != system_domain:
+            continue
+        
+        # ── EMR order_date must be >= mail received date ──
+        if parsed_mail_date:
+            order_date_raw = system.get("order_date")
+            parsed_order_date = None
+
+            if order_date_raw:
+                if isinstance(order_date_raw, (date, datetime)):
+                    parsed_order_date = order_date_raw.date() if isinstance(order_date_raw, datetime) else order_date_raw
+                else:
+                    try:
+                        parsed_order_date = datetime.strptime(str(order_date_raw)[:10], "%Y-%m-%d").date()
+                    except Exception:
+                        parsed_order_date = None
+
+            if parsed_order_date and parsed_order_date < parsed_mail_date:
+                logger.info(
+                    f"Skipping system PO (order_date={parsed_order_date} < mail_date={parsed_mail_date}) "
+                    f"for po_number={scanned.get('po_number')}"
+                )
+                continue # reject — EMR order is older than the mail
+        
+        return system  # passed all checks
+
+    return None  # no exact match and EMR order_date >= mail received date  → treat as missing
+
+# ============================================================
+# compare_scanned_and_system_pos 
 # ============================================================
 async def compare_scanned_and_system_pos(
     request=None,
@@ -1944,7 +2098,6 @@ async def compare_scanned_and_system_pos(
     system_pos=None
 ):
     try:
-        # ---------------- Resolve app context ---------------- #
         resolved_app = app or (request.app if request is not None else None)
 
         if resolved_app is None:
@@ -1954,130 +2107,110 @@ async def compare_scanned_and_system_pos(
                 "message": "Failed to generate PO report",
                 "error": "No app context available"
             }
-        
-        # ---------------- Fetch scanned POs ---------------- #
+
         scanned_pos = await mails_repo.get_po_details_by_ids(po_det_ids)
 
         if not scanned_pos:
-            return {
-                "status": "success",
-                "message": "No scanned POs found for comparison"
-            }
+            return {"status": "success", "message": "No scanned POs found for comparison"}
 
         scanned_pos = [
             {k: make_json_safe(v) for k, v in po.items()}
             for po in scanned_pos
         ]
 
-        # ---------------- Fetch system POs ---------------- #
-        scanned_po_numbers = list({
-            po["po_number"] for po in scanned_pos if po.get("po_number")
-        })
-
-        # -------------------- Fetch system POs -------------------- #
-        # oldest_date = await mails_repo.get_oldest_report_date()
-
-        # if oldest_date:
-        #     system_pos = await MSSQLRepo.get_po_list(resolved_app, oldest_date)
-        # else:
-        #     system_pos = await MSSQLRepo.get_po_list_without_oldest_date(resolved_app)
-
-        # # ---- imaginary PK for system_pos ---- #
-        # for po in system_pos:
-        #     po["system_po_id"] = make_stable_system_po_id(po)
-
-        # system_pos = [
-        #     {k: make_json_safe(v) for k, v in po.items()}
-        #     for po in system_pos
-        # ]
-
-        # #-----------reconcile OLD mismatches/missing BEFORE processing new POs----------
-        # await reconcile_all_pos(
-        #     user_id=user_id,
-        #     mails_repo=mails_repo,
-        #     system_pos=system_pos
-        # )
-        
-        # ------------------ Create system PO lookup ------------------ #
+        # Build system PO lookup: key = (po_number, domain_name) — unique key
         system_po_map = defaultdict(list)
-
         for po in system_pos:
-            po_number = po.get("po_number")
-            if not po_number:
-                continue
-            key = normalize_po(po_number)
-            system_po_map[key].append(po)
+            po_number   = normalize_po(po.get("po_number"))
+            domain_name = normalize_domain(po.get("domain_name"))
+            if po_number and domain_name:
+                key = (po_number, domain_name)
+                system_po_map[key].append(po)
 
         matched_pairs = []
-        missing_pos = []
+        missing_pos   = []
 
-        # ---------------- Match scanned with system ---------------- #
         for scanned in scanned_pos:
 
-            scanned_po = scanned.get("po_number")
-            normalized_po = normalize_po(scanned_po)
-
-            candidates = system_po_map.get(normalized_po)
-
-            if not candidates:
+            # if po_number OR domain missing → missing directly, no matching attempt
+            if not is_valid_for_matching(scanned):
+                logger.info(
+                    f"po_det_id={scanned.get('po_det_id')} → missing "
+                    f"(po_number={scanned.get('po_number')}, domain={scanned.get('domain_name')})"
+                )
                 missing_pos.append(scanned)
                 continue
 
-            # choose best candidate
-            system = find_best_system_match(scanned, candidates)
+            key = (normalize_po(scanned.get("po_number")), normalize_domain(scanned.get("domain_name")))
+            candidates = system_po_map.get(key)
+
+            # No candidates found for this unique key → missing
+            if not candidates:
+                logger.info(f"po_det_id={scanned.get('po_det_id')} → missing (no system PO for key={key})")
+                missing_pos.append(scanned)
+                continue
+
+            # Exact match on unique key (po_number + domain)
+            system = find_exact_system_match(scanned, candidates)
 
             if not system:
+                logger.info(f"po_det_id={scanned.get('po_det_id')} → missing (exact match failed for key={key})")
                 missing_pos.append(scanned)
                 continue
 
+            # Update customer_name if system has a cleaner version
+            system_customer_name = system.get("customer_name")
+            if (
+                system_customer_name
+                and normalize_value(scanned.get("customer_name")) != normalize_value(system_customer_name)
+            ):
+                try:
+                    await mails_repo.update_po_customer_name(
+                        po_det_id=scanned["po_det_id"],
+                        customer_name=system_customer_name
+                    )
+                    scanned["customer_name"] = system_customer_name
+                except Exception as e:
+                    logger.error(f"Failed to update customer_name for po_det_id={scanned['po_det_id']}: {e}")
+
             matched_pairs.append({
-                "po_det_id": scanned["po_det_id"],
+                "po_det_id":   scanned["po_det_id"],
                 "system_po_id": system["system_po_id"],
-                "scanned": {f: scanned.get(f) for f in FIELDS_TO_COMPARE},
-                "system": {f: system.get(f) for f in FIELDS_TO_COMPARE},
+                "scanned":     {f: scanned.get(f) for f in FIELDS_TO_COMPARE},
+                "system":      {f: system.get(f)  for f in FIELDS_TO_COMPARE},
                 "raw_scanned": scanned
             })
 
-        # ---------------- Prepare pairs for OpenAI ---------------- #
         pairs_for_llm = []
 
         for pair in matched_pairs:
-
             for field in FIELDS_TO_COMPARE:
-
                 scanned_val = pair["scanned"].get(field)
-                system_val = pair["system"].get(field)
+                system_val  = pair["system"].get(field)
 
                 if scanned_val in (None, "") or system_val in (None, ""):
                     continue
 
-                scanned_norm = normalize_value(scanned_val)
-                system_norm = normalize_value(system_val)
-
-                if scanned_norm == system_norm:
+                if normalize_value(scanned_val) == normalize_value(system_val):
                     continue
 
                 pairs_for_llm.append({
-                    "po_det_id": pair["po_det_id"],
-                    "system_po_id": pair["system_po_id"],
-                    "field": field,
+                    "po_det_id":     pair["po_det_id"],
+                    "system_po_id":  pair["system_po_id"],
+                    "field":         field,
                     "scanned_value": str(scanned_val),
-                    "system_value": str(system_val)
+                    "system_value":  str(system_val)
                 })
 
-        # ---------------- Call OpenAI ---------------- #
         mismatches = []
-
         if pairs_for_llm:
             mismatches = await llm_batch_compare(pairs_for_llm)
 
         mismatch_pairs = set()
 
-        # ---------------- Insert mismatches ---------------- #
         for mm in mismatches:
-
             scanned_value = "" if mm["scanned_value"] is None else str(mm["scanned_value"])
-            system_value = "" if mm["system_value"] is None else str(mm["system_value"])
+            system_value  = "" if mm["system_value"]  is None else str(mm["system_value"])
 
             exists = await mails_repo.mismatch_exists(
                 user_id=user_id,
@@ -2089,7 +2222,6 @@ async def compare_scanned_and_system_pos(
             )
 
             if not exists:
-
                 await mails_repo.insert_mismatch(
                     po_det_id=mm["po_det_id"],
                     user_id=user_id,
@@ -2102,16 +2234,12 @@ async def compare_scanned_and_system_pos(
 
             mismatch_pairs.add((mm["po_det_id"], mm["system_po_id"]))
 
-        # ---------------- Insert missing fields ---------------- #
         for pair in matched_pairs:
-
             for field in FIELDS_TO_COMPARE:
-
                 scanned_val = pair["scanned"].get(field)
-                system_val = pair["system"].get(field)
+                system_val  = pair["system"].get(field)
 
                 if system_val not in (None, "") and scanned_val in (None, ""):
-
                     exists = await mails_repo.mismatch_exists(
                         user_id=user_id,
                         po_det_id=pair["po_det_id"],
@@ -2122,7 +2250,6 @@ async def compare_scanned_and_system_pos(
                     )
 
                     if not exists:
-
                         await mails_repo.insert_mismatch(
                             po_det_id=pair["po_det_id"],
                             user_id=user_id,
@@ -2135,16 +2262,12 @@ async def compare_scanned_and_system_pos(
 
                     mismatch_pairs.add((pair["po_det_id"], pair["system_po_id"]))
 
-        # ---------------- Insert matched records ---------------- #
         for pair in matched_pairs:
-
             key = (pair["po_det_id"], pair["system_po_id"])
-
             if key in mismatch_pairs:
                 continue
 
             scanned = pair["raw_scanned"]
-
             await mails_repo.insert_matched_po(
                 po_det_id=pair["po_det_id"],
                 system_po_id=pair["system_po_id"],
@@ -2157,9 +2280,7 @@ async def compare_scanned_and_system_pos(
                 created_by="system"
             )
 
-        # ---------------- Insert PO missing ---------------- #
         for po in missing_pos:
-
             exists = await mails_repo.po_missing_exists(
                 user_id=user_id,
                 po_det_id=po["po_det_id"],
@@ -2170,7 +2291,6 @@ async def compare_scanned_and_system_pos(
             )
 
             if not exists:
-
                 await mails_repo.insert_po_missing(
                     po_det_id=po["po_det_id"],
                     user_id=user_id,
@@ -2181,21 +2301,8 @@ async def compare_scanned_and_system_pos(
                     comment="PO not found in system"
                 )
 
-        return {
-            "status": "success",
-            "message": "PO comparison completed successfully"
-        }
+        return {"status": "success", "message": "PO comparison completed successfully"}
 
     except Exception as e:
-        logger.exception(
-            f"Error in compare_scanned_and_system_pos | user_id={user_id}"
-        )
-
-        return {
-            "status": "error",
-            "message": "Failed to generate PO report",
-            "error": str(e)
-        }
-# ============================================================
-# compare data between scanned and system POs End
-# ============================================================
+        logger.exception(f"Error in compare_scanned_and_system_pos | user_id={user_id}")
+        return {"status": "error", "message": "Failed to generate PO report", "error": str(e)}

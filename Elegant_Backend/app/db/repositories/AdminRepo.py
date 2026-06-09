@@ -468,7 +468,6 @@ async def fetch_keywords_by_org(request, org_id: int, user_id: int,from_date:str
         return []  
     
     
-    
 # Get user by email & org_id
 async def get_user_by_email_id(email: str, request: Request) -> Dict[str, Any]:
     try:
@@ -488,26 +487,12 @@ async def get_user_by_email_id(email: str, request: Request) -> Dict[str, Any]:
         print(f"Error fetching user: {str(e)}")
         return None
 
-
-# Update user password
-# async def update_user_password(user_id: int, org_id: int, new_password: str, request: Request) -> bool:
-#     try:
-#         query = "UPDATE users_master SET password=%s WHERE user_id=%s AND org_id=%s"
-#         async with request.app.state.pool.acquire() as conn:
-#             async with conn.cursor() as cursor:
-#                 await cursor.execute(query, (new_password, user_id, org_id))
-#                 await conn.commit()
-#                 print(f"Rows updated: {cursor.rowcount}")
-#                 return cursor.rowcount > 0  # True if any row updated
-#     except Exception as e:
-#         raise Exception(f"Error updating password: {str(e)}")
-
 # Update user password and fetch updated user details
 async def update_user_password(user_id: int, new_password: str, request: Request) -> dict:
     try:
         async with request.app.state.pool.acquire() as conn:
             async with conn.cursor() as cursor:
-                # ✅ Update password
+                # Update password
                 update_query = """
                     UPDATE users_master 
                     SET password = %s 
@@ -519,7 +504,7 @@ async def update_user_password(user_id: int, new_password: str, request: Request
                 if cursor.rowcount == 0:
                     return {}  # No rows updated (user not found)
 
-                # ✅ Fetch updated user details
+                # Fetch updated user details
                 fetch_query = """
                     SELECT user_id, org_id, user_name, mail_id, password
                     FROM users_master 
@@ -583,8 +568,6 @@ async def search_user(request: Request, org_id: int, query: str, page: int, limi
     except Exception as e:
         print("Error in search_user repo:", e)
         raise
-
-
 
 
 # Search Filter On Keywords
@@ -665,3 +648,31 @@ async def search_category(request: Request, org_id: int, query: str, page: int, 
     except Exception as e:
         print("Error in search_category repo:", e)
         raise
+
+async def get_customer_by_name(request: Request, customer_name: str):
+    """Fetch customer domain record matching the given customer name."""
+    async with request.app.state.pool.acquire() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(
+                """
+                SELECT mapping_id, customer_name
+                FROM customer_domain_master
+                WHERE customer_name = %s AND is_active = 1
+                """,
+                (customer_name,)
+            )
+            return await cursor.fetchone()
+
+
+async def update_customer_user_id(request: Request, user_id: int, customer_name: str):
+    """Link a user_id to a matching customer_domain_master record."""
+    async with request.app.state.pool.acquire() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(
+                """
+                UPDATE customer_domain_master
+                SET user_id = %s
+                WHERE customer_name = %s AND is_active = 1
+                """,
+                (user_id, customer_name)
+            )

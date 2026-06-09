@@ -6,6 +6,7 @@ from app.api.routes.EscalationController import router as Escalation_router
 from app.services.SystemAdminSchedularService import SchedulerService
 import asyncio
 from app.core.websocket_manager import manager
+from app.scheduler.client_portal_scheduler import client_portal_scheduler  
  
 # --- IMPORTS ---
 from app.api.routes.authentication import router as auth_router
@@ -73,6 +74,13 @@ async def startup_event():
     SchedulerService.app = app
     SchedulerService.loop = asyncio.get_running_loop()
     await SchedulerService.configure()
+
+# ── Daily 12:05 AM Scheduler for Client Portal Data Comparison and Reconciliation ──
+@app.on_event("startup")
+async def startup_daily_scheduler():
+    client_portal_scheduler.app = app
+    client_portal_scheduler.loop = asyncio.get_running_loop()
+    client_portal_scheduler.configure(app, asyncio.get_running_loop())  # ← registers cron job
 
 
 # Ensure async functions run properly on startup/shutdown

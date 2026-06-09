@@ -37,6 +37,10 @@ MSSQL_USER: str = config("MSSQL_USER", cast=str, default="sa")
 MSSQL_PWD: str = config("MSSQL_PWD", cast=str, default="")
 MSSQL_DB: str = config("MSSQL_DB", cast=str, default="")
 
+# -------Scheduler Config (for Client Portal Data Comparison and Reconciliation)--------#
+CLIENT_SCHEDULER_HOUR: int = config("CLIENT_SCHEDULER_HOUR", cast=int, default=0)
+CLIENT_SCHEDULER_MINUTE: int = config("CLIENT_SCHEDULER_MINUTE", cast=int, default=5)
+
 SECRET_KEY: Secret = config("SECRET_KEY", cast=Secret)
 
 PROJECT_NAME: str = config("PROJECT_NAME", default="FastAPI example application")
